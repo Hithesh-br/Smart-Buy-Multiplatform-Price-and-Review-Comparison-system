@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Profile Details | SmartBuy Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+        }
+        .admin-navbar {
+            background: rgba(30, 41, 59, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .admin-card {
+            background: rgba(30, 41, 59, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        .user-header-avatar {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            color: #fff;
+            font-weight: 800;
+        }
+        .table-dark-custom {
+            --bs-table-bg: transparent;
+            --bs-table-color: #f8fafc;
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+        .pb-amazon  { color: #FF9900; font-weight:700; }
+        .pb-flipkart{ color: #2874f0; font-weight:700; }
+        .pb-meesho  { color: #F43397; font-weight:700; }
+    </style>
+</head>
+<body>
+
+<!-- Admin Navbar -->
+<nav class="navbar navbar-expand-lg admin-navbar sticky-top py-3">
+    <div class="container-fluid px-4">
+        <a class="navbar-brand d-flex align-items-center text-white me-4" href="/admin/dashboard">
+            <i class="fas fa-user-shield text-danger fs-3 me-2"></i>
+            <span class="fs-4 fw-bold">Smart<span class="text-primary">Buy</span> Admin</span>
+        </a>
+        <button class="navbar-toggler border-0 text-white" type="button" data-bs-toggle="collapse" data-bs-target="#adminNavbar">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="collapse navbar-collapse" id="adminNavbar">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0 gap-2">
+                <li class="nav-item">
+                    <a class="nav-link text-white fw-semibold" href="/admin/dashboard"><i class="fas fa-tachometer-alt me-1 text-primary"></i>Admin Dashboard</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link text-white fw-semibold" href="/admin/inbox"><i class="fas fa-inbox me-1 text-danger"></i>SmartBuy Inbox</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link text-white active fw-semibold" href="/admin/users"><i class="fas fa-users me-1 text-info"></i>Users</a>
+                </li>
+            </ul>
+            <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
+                <li class="nav-item">
+                    <a class="btn btn-outline-light btn-sm rounded-pill px-3" href="/admin/users"><i class="fas fa-arrow-left me-1"></i>Back to Users List</a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-4">
+
+    <!-- Header User Info Card -->
+    <div class="admin-card">
+        <div class="d-flex align-items-center gap-4 flex-wrap">
+            <div class="user-header-avatar">
+                {{ user_detail.name[0]|upper }}
+            </div>
+            <div class="flex-grow-1">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <h3 class="fw-bold mb-0 text-white">{{ user_detail.name }}</h3>
+                    {% if user_detail.is_admin %}
+                    <span class="badge bg-danger rounded-pill">Admin</span>
+                    {% else %}
+                    <span class="badge bg-success rounded-pill">Active User</span>
+                    {% endif %}
+                </div>
+                <div class="text-info mb-2"><i class="fas fa-envelope me-2"></i>{{ user_detail.email }}</div>
+                <div class="d-flex align-items-center gap-4 text-secondary small flex-wrap">
+                    <span><i class="far fa-calendar-alt me-1"></i><strong>Signup Date:</strong> {{ user_detail.created_at }}</span>
+                    <span><i class="far fa-clock me-1"></i><strong>Last Activity:</strong> {{ user_detail.last_login or 'N/A' }}</span>
+                    <span><i class="fas fa-search me-1 text-primary"></i><strong>Total Searches:</strong> {{ user_detail.total_searches }}</span>
+                    <span><i class="fas fa-shopping-bag me-1 text-warning"></i><strong>Products Selected:</strong> {{ user_detail.total_selected_products }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Row: Selected Products & Ratings -->
+    <div class="row g-4 mb-4">
+        <!-- Selected Products Section -->
+        <div class="col-lg-7">
+            <div class="admin-card h-100">
+                <h5 class="fw-bold mb-3"><i class="fas fa-shopping-cart text-warning me-2"></i>Selected Products History</h5>
+                <div class="table-responsive">
+                    <table class="table table-dark-custom align-middle">
+                        <thead>
+                            <tr class="text-secondary border-bottom border-secondary border-opacity-25">
+                                <th>Product</th>
+                                <th>Platform</th>
+                                <th>Price</th>
+                                <th>Rating</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in user_detail.selected_products %}
+                            <tr>
+                                <td class="fw-semibold text-white">{{ p.product_name }}</td>
+                                <td>
+                                    <span class="pb-{{ p.platform|lower }}">{{ p.platform }}</span>
+                                </td>
+                                <td class="text-success fw-bold">₹{{ p.price }}</td>
+                                <td><span class="text-warning">⭐ {{ p.rating or 'N/A' }}</span></td>
+                                <td class="small text-secondary">{{ p.selected_at }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center text-secondary py-3">No products selected yet.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- User Feedback & Ratings -->
+        <div class="col-lg-5">
+            <div class="admin-card h-100">
+                <h5 class="fw-bold mb-3"><i class="fas fa-star text-info me-2"></i>User Feedback & Ratings</h5>
+                {% for f in user_detail.feedbacks %}
+                <div class="border-bottom border-secondary border-opacity-25 pb-3 mb-3">
+                    <div class="d-flex align-items-center justify-content-between mb-1">
+                        <strong class="text-white">{{ f.title }}</strong>
+                        <span class="badge bg-warning text-dark font-monospace fw-bold">⭐ {{ f.rating }} / 5</span>
+                    </div>
+                    <p class="text-secondary small mb-1">{{ f.message }}</p>
+                    <span class="text-secondary" style="font-size:0.75rem;">Submitted on {{ f.created_at }}</span>
+                </div>
+                {% else %}
+                <div class="text-center text-secondary py-4">No feedback submitted by this user yet.</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Search History Section -->
+    <div class="admin-card">
+        <h5 class="fw-bold mb-3"><i class="fas fa-history text-primary me-2"></i>Search History</h5>
+        <div class="table-responsive">
+            <table class="table table-dark-custom align-middle">
+                <thead>
+                    <tr class="text-secondary border-bottom border-secondary border-opacity-25">
+                        <th>#</th>
+                        <th>Searched Query</th>
+                        <th>Category</th>
+                        <th>Results Found</th>
+                        <th>Platforms Available</th>
+                        <th>Searched At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in user_detail.searches %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td class="fw-bold text-white">{{ s.product_name }}</td>
+                        <td class="text-secondary">{{ s.category or 'General' }}</td>
+                        <td><span class="badge bg-secondary rounded-pill">{{ s.num_results }}</span></td>
+                        <td class="small text-info">{{ s.platforms_found or 'Amazon, Flipkart, Meesho' }}</td>
+                        <td class="small text-secondary">{{ s.searched_at }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-secondary py-3">No search history recorded.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

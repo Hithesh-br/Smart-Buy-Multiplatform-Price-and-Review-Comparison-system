@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My SmartBuy Profile — SmartBuy Multiplatform Price Comparison</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .profile-card {
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            border-radius: 24px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.06);
+        }
+        body.dark-mode .profile-card {
+            background: rgba(30, 41, 59, 0.95) !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+            color: #f8fafc !important;
+        }
+        .section-header {
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: -0.3px;
+            padding-bottom: 0.75rem;
+            margin-bottom: 1.25rem;
+            border-bottom: 2px solid rgba(37,99,235,0.12);
+        }
+        .info-pill {
+            background: rgba(37,99,235,0.04);
+            border: 1px solid rgba(37,99,235,0.1);
+            border-radius: 16px;
+            padding: 1rem 1.25rem;
+        }
+        .star-rating {
+            font-size: 1.5rem;
+            color: #fbbf24;
+        }
+        .rating-select label {
+            cursor: pointer;
+            font-size: 1.4rem;
+            color: #cbd5e1;
+            transition: color 0.2s;
+        }
+        .rating-select input[type="radio"]:checked ~ label,
+        .rating-select input[type="radio"]:checked + label {
+            color: #fbbf24;
+        }
+    </style>
+</head>
+<body class="premium-bg">
+
+<!-- NAVBAR -->
+<nav class="navbar navbar-expand-lg navbar-glass sticky-top shadow-sm py-3">
+    <div class="container-fluid px-4">
+        <a class="navbar-brand d-flex align-items-center text-dark me-4" href="/">
+            <span class="fs-4 fw-bold">Smart<span style="color:var(--secondary)">-Buy</span></span>
+            <i class="fas fa-bolt text-primary ms-1"></i>
+        </a>
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse"
+                data-bs-target="#navbarContent" aria-controls="navbarContent"
+                aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarContent">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0 align-items-lg-center gap-1">
+                {% if current_user and current_user.is_admin %}
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold text-danger" href="/admin/dashboard"><i class="fas fa-tachometer-alt me-1"></i>Admin Dashboard</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold text-danger" href="/admin/inbox"><i class="fas fa-inbox me-1"></i>SmartBuy Inbox {% if admin_unread_count > 0 %}<span class="badge bg-danger rounded-pill ms-1">{{ admin_unread_count }}</span>{% endif %}</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold text-info" href="/admin/users"><i class="fas fa-users me-1"></i>Users</a></li>
+                {% else %}
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/"><i class="fas fa-home me-1 text-primary"></i>Home</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/about"><i class="fas fa-info-circle me-1 text-secondary"></i>About</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/search?q=Mobiles"><i class="fas fa-search me-1 text-success"></i>Search Products</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold active text-primary" href="/profile"><i class="fas fa-user-circle me-1"></i>My Profile</a></li>
+                {% endif %}
+            </ul>
+            <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
+                {% if current_user %}
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle fw-bold btn btn-outline-primary rounded-pill px-3 py-1 text-dark" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fas fa-user-circle me-1 text-primary"></i>{{ current_user.name }}
+                        {% if current_user.is_admin %}<span class="badge bg-danger ms-1">Admin</span>{% endif %}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end rounded-4 border-0 shadow-lg p-2">
+                        <li><a class="dropdown-item rounded-3 py-2" href="/profile"><i class="fas fa-id-card me-2 text-primary"></i>My Profile</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-searches"><i class="fas fa-history me-2 text-info"></i>My Searches</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-feedback"><i class="fas fa-comment-alt me-2 text-warning"></i>My Feedback</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item rounded-3 py-2 text-danger fw-semibold" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                    </ul>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-5">
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show rounded-4 shadow-sm mb-4" role="alert">
+            <i class="fas fa-info-circle me-2"></i>{{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="profile-card p-4 p-md-5 mb-5">
+                <!-- Header -->
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 pb-4 mb-4 border-bottom">
+                    <div>
+                        <h1 class="fw-extrabold text-dark mb-1">My SmartBuy Profile</h1>
+                        <p class="text-muted mb-0">Manage your profile, search activity, ratings, and product feedback</p>
+                    </div>
+                    <a href="/logout" class="btn btn-outline-danger rounded-pill px-4 fw-bold shadow-sm">
+                        <i class="fas fa-sign-out-alt me-2"></i>Sign Out
+                    </a>
+                </div>
+
+                <!-- 👤 PROFILE INFORMATION -->
+                <div class="mb-5">
+                    <div class="section-header text-primary d-flex align-items-center gap-2">
+                        <i class="fas fa-user-circle"></i> Profile Information
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6 col-lg-3">
+                            <div class="info-pill">
+                                <small class="text-muted fw-bold d-block text-uppercase" style="font-size:0.7rem;">Full Name</small>
+                                <span class="fw-bold text-dark fs-6">{{ stats.name or current_user.name }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <div class="info-pill">
+                                <small class="text-muted fw-bold d-block text-uppercase" style="font-size:0.7rem;">Email</small>
+                                <span class="fw-bold text-dark fs-6 text-truncate d-block">{{ stats.email or current_user.email }}</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <div class="info-pill">
+                                <small class="text-muted fw-bold d-block text-uppercase" style="font-size:0.7rem;">Account Created</small>
+                                <span class="fw-bold text-dark fs-6">
+                                    {% if stats.created_at %}
+                                        {{ stats.created_at.strftime('%d %B %Y') if stats.created_at.strftime else stats.created_at[:10] }}
+                                    {% else %}
+                                        Active
+                                    {% endif %}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <div class="info-pill">
+                                <small class="text-muted fw-bold d-block text-uppercase" style="font-size:0.7rem;">Last Login</small>
+                                <span class="fw-bold text-dark fs-6">
+                                    {% if stats.last_login %}
+                                        {{ stats.last_login.strftime('%d %b %Y, %H:%M') if stats.last_login.strftime else stats.last_login }}
+                                    {% else %}
+                                        First Session
+                                    {% endif %}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 🔍 MY SEARCH ACTIVITY -->
+                <div class="mb-5">
+                    <div class="section-header text-info d-flex align-items-center justify-content-between">
+                        <span class="d-flex align-items-center gap-2"><i class="fas fa-search"></i> My Search Activity</span>
+                        <span class="badge bg-info-subtle text-info border border-info rounded-pill px-3 py-1">Total Searches: {{ stats.total_searches }}</span>
+                    </div>
+
+                    {% if stats.recent_searches %}
+                    <div class="table-responsive rounded-4 border bg-white">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr class="small text-uppercase text-muted">
+                                    <th>Product / Query</th>
+                                    <th>Category</th>
+                                    <th>Best Platform</th>
+                                    <th>Best Price</th>
+                                    <th>Searched At</th>
+                                    <th class="text-end">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for s in stats.recent_searches[:5] %}
+                                <tr>
+                                    <td>
+                                        <strong class="text-dark">{{ s.product_name or s.search_query }}</strong>
+                                    </td>
+                                    <td><span class="badge bg-light text-dark border">{{ s.category or 'General' }}</span></td>
+                                    <td><span class="badge bg-success-subtle text-success fw-bold">{{ s.best_platform or 'SmartBuy' }}</span></td>
+                                    <td class="fw-bold text-success">₹{{ s.best_price or 'Best' }}</td>
+                                    <td class="small text-muted">
+                                        {% if s.searched_at %}
+                                            {{ s.searched_at.strftime('%d %b %Y, %H:%M') if s.searched_at.strftime else s.searched_at[:16] }}
+                                        {% else %}
+                                            Recent
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-end">
+                                        <a href="/search?q={{ (s.search_query or s.product_name) | urlencode }}" class="btn btn-sm btn-outline-primary rounded-pill px-3 fw-bold">
+                                            Search Again
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="p-4 text-center bg-light rounded-4 text-muted">
+                        <i class="fas fa-search fa-2x mb-2 text-secondary"></i>
+                        <p class="mb-0">No search activity recorded yet. Start exploring products on SmartBuy!</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- 🛒 MY SELECTED PRODUCTS -->
+                <div class="mb-5">
+                    <div class="section-header text-success d-flex align-items-center gap-2">
+                        <i class="fas fa-shopping-cart"></i> My Selected Products
+                    </div>
+
+                    {% set prods = stats.selected_products or [selected_product] if selected_product else [] %}
+                    {% if prods and prods[0] %}
+                    <div class="row g-3">
+                        {% for p in prods[:3] %}
+                        {% if p %}
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card border shadow-sm rounded-4 h-100 p-3 bg-white">
+                                <div class="text-center mb-2">
+                                    {% if p.image_url %}
+                                    <img src="{{ p.image_url }}" alt="{{ p.product_name }}" class="img-fluid rounded-3 p-1" style="max-height: 100px; object-fit: contain;">
+                                    {% else %}
+                                    <div class="bg-light rounded-3 p-3 text-muted"><i class="fas fa-box fa-2x"></i></div>
+                                    {% endif %}
+                                </div>
+                                <h6 class="fw-bold text-dark text-truncate mb-1">{{ p.product_name }}</h6>
+                                <div class="small text-muted mb-2">
+                                    <div>Platform: <strong class="text-dark">{{ p.platform }}</strong></div>
+                                    <div>Price: <strong class="text-success fs-6">₹{{ p.price or 'Best Price' }}</strong></div>
+                                    {% if p.rating %}
+                                    <div>Rating: <span class="badge bg-warning text-dark">⭐ {{ p.rating }}</span> {% if p.reviews %}({{ p.reviews }}){% endif %}</div>
+                                    {% endif %}
+                                </div>
+                                <a href="/deal/continue" class="btn btn-sm btn-success rounded-pill w-100 fw-bold mt-auto">
+                                    Buy on {{ p.platform or 'Store' }}
+                                </a>
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="p-4 text-center bg-light rounded-4 text-muted">
+                        <i class="fas fa-shopping-bag fa-2x mb-2 text-secondary"></i>
+                        <p class="mb-0">No selected products saved yet. Compare products to select your best deal!</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- ⭐ MY SMARTBUY RATING -->
+                <div class="mb-5">
+                    <div class="section-header text-warning d-flex align-items-center gap-2">
+                        <i class="fas fa-star"></i> My SmartBuy Rating
+                    </div>
+                    {% if stats.user_rating %}
+                    <div class="card border-0 bg-warning-subtle text-dark p-4 rounded-4 shadow-sm text-center">
+                        <h5 class="fw-bold mb-1">Your Submitted Rating</h5>
+                        <div class="star-rating my-2">
+                            {% for i in range(stats.user_rating) %}★{% endfor %}
+                            {% for i in range(5 - stats.user_rating) %}<span class="text-muted">★</span>{% endfor %}
+                        </div>
+                        <div class="fs-4 fw-extrabold">{{ stats.user_rating }} / 5</div>
+                    </div>
+                    {% else %}
+                    <div class="p-4 text-center bg-light rounded-4 text-muted">
+                        <i class="far fa-star fa-2x mb-2 text-warning"></i>
+                        <p class="mb-0">You haven't submitted a rating yet. Use the feedback form below to rate your SmartBuy experience!</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- 💬 MY FEEDBACK & EDIT/DELETE -->
+                <div class="mb-5">
+                    <div class="section-header text-primary d-flex align-items-center justify-content-between">
+                        <span class="d-flex align-items-center gap-2"><i class="fas fa-comments"></i> My Feedback</span>
+                    </div>
+
+                    {% if stats.feedbacks %}
+                    <div class="row g-3">
+                        {% for fb in stats.feedbacks %}
+                        <div class="col-md-6">
+                            <div class="card border shadow-sm rounded-4 p-4 bg-white h-100">
+                                <div class="d-flex align-items-center justify-content-between mb-2">
+                                    <h5 class="fw-bold text-dark mb-0">{{ fb.title }}</h5>
+                                    <span class="badge bg-warning text-dark fw-bold">⭐ {{ fb.rating }} / 5</span>
+                                </div>
+                                <p class="text-secondary small mb-3">"{{ fb.message }}"</p>
+                                <div class="d-flex align-items-center justify-content-between pt-2 border-top mt-auto">
+                                    <small class="text-muted">
+                                        <i class="far fa-calendar-alt me-1"></i>
+                                        {% if fb.created_at %}
+                                            {{ fb.created_at.strftime('%d %B %Y') if fb.created_at.strftime else fb.created_at[:10] }}
+                                        {% else %}
+                                            Submitted
+                                        {% endif %}
+                                    </small>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-outline-primary rounded-pill px-3 fw-bold"
+                                                data-bs-toggle="modal" data-bs-target="#editFeedbackModal{{ fb.id }}">
+                                            <i class="fas fa-edit me-1"></i>Edit Feedback
+                                        </button>
+                                        <form action="/profile/feedback/delete/{{ fb.id }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this feedback?');">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger rounded-pill px-3 fw-bold">
+                                                <i class="fas fa-trash me-1"></i>Delete
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- EDIT FEEDBACK MODAL -->
+                        <div class="modal fade" id="editFeedbackModal{{ fb.id }}" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog modal-dialog-centered">
+                                <div class="modal-content rounded-4 border-0 shadow-lg">
+                                    <div class="modal-header border-0 pb-0">
+                                        <h5 class="modal-title fw-bold text-dark"><i class="fas fa-edit text-primary me-2"></i>Edit Feedback</h5>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <form action="/profile/feedback/{{ fb.id }}" method="POST">
+                                        <div class="modal-body">
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold small text-secondary">Feedback Title</label>
+                                                <input type="text" name="title" class="form-control rounded-pill px-3" value="{{ fb.title }}" required>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold small text-secondary">Feedback Message</label>
+                                                <textarea name="message" class="form-control rounded-4 p-3" rows="3" required>{{ fb.message }}</textarea>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold small text-secondary">Rating (1 to 5 Stars)</label>
+                                                <select name="rating" class="form-select rounded-pill px-3" required>
+                                                    <option value="5" {% if fb.rating == 5 %}selected{% endif %}>⭐⭐⭐⭐⭐ 5 Stars</option>
+                                                    <option value="4" {% if fb.rating == 4 %}selected{% endif %}>⭐⭐⭐⭐ 4 Stars</option>
+                                                    <option value="3" {% if fb.rating == 3 %}selected{% endif %}>⭐⭐⭐ 3 Stars</option>
+                                                    <option value="2" {% if fb.rating == 2 %}selected{% endif %}>⭐⭐ 2 Stars</option>
+                                                    <option value="1" {% if fb.rating == 1 %}selected{% endif %}>⭐ 1 Star</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer border-0 pt-0">
+                                            <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
+                                            <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">Save Changes</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="p-4 text-center bg-light rounded-4 text-muted">
+                        <i class="far fa-comment-dots fa-2x mb-2 text-secondary"></i>
+                        <p class="mb-0">No feedback submitted yet. Use the form below to share your experience!</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- 📝 SUBMIT RATING & FEEDBACK FORM -->
+                <div class="card border-0 shadow-sm rounded-4 p-4 bg-white" style="border: 2px solid rgba(37,99,235,0.15) !important;">
+                    <h5 class="fw-bold text-dark mb-3"><i class="fas fa-pen-nib text-primary me-2"></i>Submit SmartBuy Rating & Feedback</h5>
+                    <form action="/profile/feedback" method="POST">
+                        <div class="row g-3">
+                            <div class="col-md-8">
+                                <label class="form-label fw-bold small text-secondary">Feedback Title *</label>
+                                <input type="text" name="title" class="form-control rounded-pill px-3" placeholder="e.g. Excellent Product Comparison" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-bold small text-secondary">Rating (1–5 Stars) *</label>
+                                <select name="rating" class="form-select rounded-pill px-3" required>
+                                    <option value="5" selected>⭐⭐⭐⭐⭐ 5 / 5 (Excellent)</option>
+                                    <option value="4">⭐⭐⭐⭐ 4 / 5 (Good)</option>
+                                    <option value="3">⭐⭐⭐ 3 / 5 (Average)</option>
+                                    <option value="2">⭐⭐ 2 / 5 (Below Average)</option>
+                                    <option value="1">⭐ 1 / 5 (Poor)</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-bold small text-secondary">Feedback Message *</label>
+                                <textarea name="message" class="form-control rounded-4 p-3" rows="3" placeholder="Describe your experience with SmartBuy price comparison..." required></textarea>
+                            </div>
+                            <div class="col-12 text-end">
+                                <button type="submit" class="btn btn-primary btn-lg rounded-pill px-5 fw-bold shadow-sm">
+                                    <i class="fas fa-paper-plane me-2"></i>Submit Feedback
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

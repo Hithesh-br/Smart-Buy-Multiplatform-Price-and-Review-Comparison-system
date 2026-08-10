@@ -1,0 +1,1421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart-Buy: Multiplatform Price Review Comparison System — "{{ query }}"</title>
+    <meta name="description" content="Smart-Buy: Multiplatform Price Review Comparison System. Compare prices for {{ query }} across Amazon, Flipkart, and Meesho in real time.">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ── Sort Tabs ── */
+        .sort-tabs {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            border-bottom: 2px solid rgba(0,0,0,0.06);
+            padding-bottom: 0;
+            margin-bottom: 20px;
+        }
+        .sort-tab {
+            padding: 10px 20px;
+            font-weight: 600;
+            font-size: 0.88rem;
+            color: #475569;
+            cursor: pointer;
+            border: none;
+            background: none;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+        .sort-tab:hover { color: var(--primary); }
+        .sort-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+        /* ── Platform view tabs ── */
+        .view-tab-btn {
+            padding: 8px 18px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            border-radius: 20px;
+            border: 1.5px solid rgba(0,0,0,0.1);
+            background: rgba(255,255,255,0.7);
+            color: #334155;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .view-tab-btn.active {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #fff;
+            border-color: transparent;
+            box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+        }
+        /* ── Dynamic Filter Panel ── */
+        .filter-panel {
+            background: rgba(255,255,255,0.6);
+            border: 1px solid rgba(0,0,0,0.07);
+            border-radius: 16px;
+            padding: 20px;
+            position: sticky;
+            top: 80px;
+        }
+        .filter-section-title {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+        }
+        .filter-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 0;
+            font-size: 0.87rem;
+            color: #334155;
+            cursor: pointer;
+            transition: color 0.15s;
+        }
+        .filter-option:hover { color: var(--primary); }
+        .filter-option input[type=radio],
+        .filter-option input[type=checkbox] {
+            accent-color: var(--primary);
+        }
+        /* ── Result counts ── */
+        .result-count-badge {
+            background: rgba(37,99,235,0.1);
+            color: var(--primary);
+            border-radius: 12px;
+            padding: 2px 10px;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+        /* ── Product card (same as before, slightly refined) ── */
+        .product-card {
+            background: rgba(255,255,255,0.7);
+            border: 1px solid rgba(255,255,255,0.6);
+            border-radius: 16px;
+            padding: 16px;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .product-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(15,23,42,0.1);
+        }
+        .best-price-card {
+            background: rgba(16,185,129,0.06) !important;
+            border-color: rgba(16,185,129,0.25) !important;
+        }
+        /* ── No results state ── */
+        .no-results-state {
+            text-align: center;
+            padding: 60px 20px;
+        }
+        .no-results-icon {
+            font-size: 4rem;
+            opacity: 0.2;
+            margin-bottom: 20px;
+        }
+        /* ── Platform header colors ── */
+        .bg-amazon  { background: linear-gradient(135deg, #232f3e, #ff9900) !important; }
+        .bg-flipkart{ background: linear-gradient(135deg, #2874f0, #ffe500) !important; color: #111 !important; }
+        .bg-meesho  { background: linear-gradient(135deg, #f43397, #bb1c6f) !important; }
+        /* ── Specs box ── */
+        .specs-badge {
+            background: rgba(255,255,255,0.9);
+            border: 1px solid rgba(0,0,0,0.08);
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #334155;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        /* ── Price tag ── */
+        .price-current { color: #10b981; font-weight: 800; font-size: 1.15rem; }
+        .price-original { color: #94a3b8; font-size: 0.85rem; text-decoration: line-through; }
+        .price-discount {
+            background: rgba(239,68,68,0.1);
+            color: #dc2626;
+            border-radius: 8px;
+            padding: 1px 7px;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+        /* ── Loading overlay ── */
+        #loadingOverlay {
+            background: rgba(15,23,42,0.88);
+            backdrop-filter: blur(8px);
+            z-index: 9999;
+        }
+        /* ── View all tab result grid ── */
+        #viewAll .all-results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 16px;
+        }
+        @media (max-width: 767px) {
+            .filter-panel { position: static; margin-bottom: 20px; }
+            #viewAll .all-results-grid {
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            }
+        }
+        /* ── Comparison table ── */
+        .comparison-table-card {
+            background: #000 !important;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        .comparison-table-card table { color: #fff; }
+        .comparison-table-card thead th {
+            background: #111827 !important;
+            color: #fff;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .comparison-table-card td, .comparison-table-card th {
+            background: #000 !important;
+            color: #fff;
+            border-bottom: 1px solid rgba(255,255,255,0.07);
+        }
+        .comparison-table-card .table-success,
+        .comparison-table-card .table-success td { background: #052e16 !important; }
+        .search-navbar-black {
+            background: #000 !important;
+            border: 1px solid rgba(255,255,255,0.2) !important;
+        }
+        .search-navbar-black input { background: transparent !important; color: #fff !important; }
+        .search-navbar-black input::placeholder { color: #64748b !important; }
+
+        /* ── Dark Mode ── */
+        body.dark-mode {
+            background-color: #0f172a !important;
+            color: #f8fafc !important;
+        }
+        body.dark-mode .navbar-glass,
+        body.dark-mode .glass-card,
+        body.dark-mode .product-card,
+        body.dark-mode .filter-panel {
+            background: rgba(30, 41, 59, 0.95) !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+            color: #f8fafc !important;
+        }
+        body.dark-mode .text-dark,
+        body.dark-mode h1, body.dark-mode h2, body.dark-mode h3,
+        body.dark-mode h4, body.dark-mode h5, body.dark-mode h6,
+        body.dark-mode .navbar-brand {
+            color: #f8fafc !important;
+        }
+        body.dark-mode .text-muted {
+            color: #94a3b8 !important;
+        }
+        /* ── Top Best Prices & Best Overall Deal Styling ── */
+        .highlight-lowest-card {
+            box-shadow: 0 8px 24px rgba(16, 185, 129, 0.25) !important;
+        }
+        body.dark-mode #topBestPricesSection {
+            background: rgba(30, 41, 59, 0.95) !important;
+            color: #f8fafc !important;
+        }
+        body.dark-mode .top-price-card {
+            background: rgba(15, 23, 42, 0.8) !important;
+            border-color: rgba(255, 255, 255, 0.15) !important;
+        }
+    </style>
+</head>
+<body class="premium-bg">
+
+<!-- ════════════════════════════ NAVBAR ════════════════════════════ -->
+<nav class="navbar navbar-expand-lg navbar-glass sticky-top shadow-sm py-3">
+    <div class="container-fluid px-4">
+        <a class="navbar-brand d-flex align-items-center text-dark me-3" href="/" title="Smart-Buy: Multiplatform Price And Review Comparison System">
+            <span class="fs-5 fw-bold">Smart<span style="color:var(--secondary)">-Buy</span></span>
+            <i class="fas fa-bolt text-primary ms-1"></i>
+        </a>
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse"
+                data-bs-target="#navbarContent" aria-controls="navbarContent"
+                aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarContent">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0 align-items-lg-center gap-1">
+                {% if current_user and current_user.is_admin %}
+                <li class="nav-item"><a class="nav-link px-2 fw-semibold text-danger" href="/admin/dashboard"><i class="fas fa-tachometer-alt me-1"></i>Admin Dashboard</a></li>
+                <li class="nav-item"><a class="nav-link px-2 fw-semibold text-danger" href="/admin/inbox"><i class="fas fa-inbox me-1"></i>SmartBuy Inbox {% if admin_unread_count > 0 %}<span class="badge bg-danger rounded-pill ms-1">{{ admin_unread_count }}</span>{% endif %}</a></li>
+                <li class="nav-item"><a class="nav-link px-2 fw-semibold text-info" href="/admin/users"><i class="fas fa-users me-1"></i>Users</a></li>
+                {% else %}
+                <li class="nav-item"><a class="nav-link px-2 fw-semibold" href="/"><i class="fas fa-home me-1 text-primary"></i>Home</a></li>
+                <li class="nav-item"><a class="nav-link px-2 fw-semibold" href="/about"><i class="fas fa-info-circle me-1 text-secondary"></i>About</a></li>
+                <li class="nav-item"><a class="nav-link px-2 fw-semibold active" href="/search"><i class="fas fa-search me-1 text-success"></i>Search Products</a></li>
+                {% if current_user %}
+                <li class="nav-item"><a class="nav-link px-2 fw-semibold" href="/profile"><i class="fas fa-user-circle me-1 text-primary"></i>Profile</a></li>
+                {% endif %}
+                {% endif %}
+            </ul>
+
+            <!-- Navbar search bar -->
+            <form action="/search" method="GET" class="d-flex mx-lg-3 search-glow-container p-1 rounded-pill shadow-sm search-navbar-black position-relative" style="max-width:320px; flex:1;">
+                <input type="text" name="q" value="{{ query }}" class="form-control border-0 px-3 py-1 shadow-none bg-transparent autocomplete-input" placeholder="Search Product..." style="height:36px;" autocomplete="off" aria-label="Search Product">
+                <button type="submit" class="btn btn-primary rounded-pill d-flex align-items-center justify-content-center" style="height:36px; width:36px; padding:0;" onclick="showLoading()"><i class="fas fa-search"></i></button>
+                <div class="autocomplete-dropdown d-none"></div>
+            </form>
+
+            <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
+                <li class="nav-item">
+                    <button class="btn btn-outline-secondary btn-sm rounded-circle p-2" id="themeToggleBtn" onclick="toggleDarkMode()" title="Toggle Dark Mode" style="width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center;">
+                        <i class="fas fa-moon" id="themeIcon"></i>
+                    </button>
+                </li>
+                {% if current_user %}
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle fw-bold btn btn-outline-primary rounded-pill px-3 py-1 text-dark" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fas fa-user-circle me-1 text-primary"></i>Welcome, {{ current_user.name }} 👋
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end rounded-4 border-0 shadow-lg p-2">
+                        <li><a class="dropdown-item rounded-3 py-2" href="/profile"><i class="fas fa-id-card me-2 text-primary"></i>Profile</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-searches"><i class="fas fa-history me-2 text-info"></i>My Searches</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-feedback"><i class="fas fa-comment-alt me-2 text-warning"></i>My Feedback</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item rounded-3 py-2 text-danger fw-semibold" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                    </ul>
+                </li>
+                {% else %}
+                <li class="nav-item"><a class="btn btn-outline-secondary rounded-pill px-3 fw-semibold" href="/signup"><i class="fas fa-pen-fancy me-1"></i>Sign Up</a></li>
+                <li class="nav-item"><a class="btn btn-primary rounded-pill px-3 fw-semibold" href="/signin"><i class="fas fa-lock me-1"></i>Sign In</a></li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- Flash Messages Banner -->
+<div class="container-fluid px-3 px-md-4 pt-2">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show rounded-4 shadow-sm mb-2" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+</div>
+
+<!-- ════════════════════════════ MAIN CONTENT ════════════════════════════ -->
+<div class="container-fluid px-3 px-md-4 my-4" style="position:relative; z-index:1;">
+
+    <!-- Top bar -->
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+        <div>
+            <h1 class="mb-1 fw-bold" style="font-size:1.4rem;">
+                Results for: <span class="gradient-text">{{ query }}</span>
+            </h1>
+            <p class="text-muted small mb-0">
+                <i class="fas fa-layer-group me-1"></i>
+                {% set total = (platform_results.get('Amazon',[])|length) + (platform_results.get('Flipkart',[])|length) + (platform_results.get('Meesho',[])|length) %}
+                {{ total }} results found across
+                {% if platform_results.get('Amazon') %}<span style="color:#FF9900; font-weight:700;">Amazon</span>{% endif %}
+                {% if platform_results.get('Flipkart') %}, <span style="color:#2874f0; font-weight:700;">Flipkart</span>{% endif %}
+                {% if platform_results.get('Meesho') %}, <span style="color:#F43397; font-weight:700;">Meesho</span>{% endif %}
+            </p>
+        </div>
+        <a href="/" class="btn btn-outline-secondary rounded-pill px-3 py-2 small">
+            <i class="fas fa-arrow-left me-1"></i> New Search
+        </a>
+    </div>
+
+    {% if ai_summary %}
+    <!-- AI Summary Banner -->
+    <div class="best-deal-banner alert border-0 shadow-sm mb-3 py-3 rounded-4" style="background: rgba(16,185,129,0.1) !important; color: #065f46 !important;">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <i class="fas fa-trophy text-warning fs-5"></i>
+            <strong>Best Price Found:</strong>
+            <span class="fw-bold fs-5">{{ overall_best.price }}</span>
+            on <strong>{{ overall_best.platform }}</strong>
+            —
+            <a href="javascript:void(0)"
+               data-url="{{ overall_best.link }}"
+               data-platform="{{ overall_best.platform }}"
+               data-product-name="{{ query }}"
+               data-price="{{ overall_best.price }}"
+               onclick="triggerBuyRedirect(this)"
+               class="alert-link text-decoration-underline fw-bold">View Deal</a>
+            <span class="ms-auto text-muted small d-none d-md-inline">
+                <i class="fas fa-robot me-1"></i>{{ ai_summary[:120] }}{% if ai_summary|length > 120 %}...{% endif %}
+            </span>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="row g-3">
+        <!-- ════ FILTER SIDEBAR ════ -->
+        <div class="col-lg-2 col-md-3">
+            <div class="filter-panel">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <h6 class="fw-bold mb-0"><i class="fas fa-sliders-h me-2 text-primary"></i>Filters</h6>
+                    <a href="/search?q={{ query | urlencode }}" class="text-muted small" title="Clear all filters">Reset</a>
+                </div>
+
+                <form method="GET" action="/search" id="filterForm">
+                    <input type="hidden" name="q" value="{{ query }}">
+
+                    {% if dynamic_filters %}
+
+                    <!-- Price Range -->
+                    {% if dynamic_filters.price_ranges %}
+                    <div class="mb-3">
+                        <div class="filter-section-title"><i class="fas fa-tag me-1"></i>Price</div>
+                        <label class="filter-option">
+                            <input type="radio" name="price_range" value=""
+                                   {% if not filter_params.get('price_min') %}checked{% endif %}> Any Price
+                        </label>
+                        {% for pr in dynamic_filters.price_ranges %}
+                        <label class="filter-option">
+                            <input type="radio" name="price_range" value="{{ pr.min }}-{{ pr.max }}"
+                                   {% if filter_params.get('price_min') == pr.min and filter_params.get('price_max') == pr.max %}checked{% endif %}>
+                            {{ pr.label }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    <!-- Rating -->
+                    {% if dynamic_filters.ratings %}
+                    <div class="mb-3">
+                        <div class="filter-section-title"><i class="fas fa-star me-1"></i>Rating</div>
+                        <label class="filter-option">
+                            <input type="radio" name="min_rating" value=""
+                                   {% if not filter_params.get('min_rating') %}checked{% endif %}> Any Rating
+                        </label>
+                        {% for r in dynamic_filters.ratings %}
+                        <label class="filter-option">
+                            <input type="radio" name="min_rating" value="{{ r.rstrip('+') }}"
+                                   {% if filter_params.get('min_rating') | string == r.rstrip('+') %}checked{% endif %}>
+                            <i class="fas fa-star text-warning" style="font-size:0.75rem;"></i> {{ r }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    <!-- Brands -->
+                    {% if dynamic_filters.brands %}
+                    <div class="mb-3">
+                        <div class="filter-section-title"><i class="fas fa-copyright me-1"></i>Brand</div>
+                        <label class="filter-option">
+                            <input type="radio" name="brand" value=""
+                                   {% if not filter_params.get('brand') %}checked{% endif %}> All Brands
+                        </label>
+                        {% for brand in dynamic_filters.brands[:8] %}
+                        <label class="filter-option">
+                            <input type="radio" name="brand" value="{{ brand }}"
+                                   {% if filter_params.get('brand') == brand %}checked{% endif %}>
+                            {{ brand }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    <!-- Discounts -->
+                    {% if dynamic_filters.discounts %}
+                    <div class="mb-3">
+                        <div class="filter-section-title"><i class="fas fa-percent me-1"></i>Discount</div>
+                        <label class="filter-option">
+                            <input type="radio" name="min_discount" value=""
+                                   {% if not filter_params.get('min_discount') %}checked{% endif %}> Any Discount
+                        </label>
+                        {% for d in dynamic_filters.discounts %}
+                        <label class="filter-option">
+                            <input type="radio" name="min_discount" value="{{ d.rstrip('%+') }}"
+                                   {% if filter_params.get('min_discount') | string == d.rstrip('%+') %}checked{% endif %}>
+                            {{ d }} off
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    <!-- Platforms -->
+                    {% if dynamic_filters.platforms and dynamic_filters.platforms | length > 1 %}
+                    <div class="mb-3">
+                        <div class="filter-section-title"><i class="fas fa-store me-1"></i>Platform</div>
+                        <label class="filter-option">
+                            <input type="radio" name="platform" value=""
+                                   {% if not filter_params.get('platform') %}checked{% endif %}> All Platforms
+                        </label>
+                        {% for p in dynamic_filters.platforms %}
+                        <label class="filter-option">
+                            <input type="radio" name="platform" value="{{ p }}"
+                                   {% if filter_params.get('platform') == p %}checked{% endif %}>
+                            {{ p }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    {% endif %}{# end dynamic_filters #}
+
+                    <button type="submit" class="btn btn-primary btn-sm w-100 rounded-pill mt-1 fw-semibold" onclick="showLoading()">
+                        <i class="fas fa-filter me-1"></i> Apply Filters
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- ════ RESULTS AREA ════ -->
+        <div class="col-lg-10 col-md-9">
+
+            <!-- View Tabs (Side-by-Side Platforms | Specification Table | All Product Cards) -->
+            <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+                <button class="view-tab-btn active" id="tabPlatform" onclick="switchView('platform')">
+                    <i class="fas fa-columns me-1"></i> Side-by-Side Platforms (Amazon | Flipkart | Meesho)
+                </button>
+                <button class="view-tab-btn" id="tabSpecTable" onclick="switchView('specTable')">
+                    <i class="fas fa-table me-1"></i> Product Specification Table
+                    <span class="badge bg-primary text-white rounded-pill ms-1">{{ all_results | length }}</span>
+                </button>
+                <button class="view-tab-btn" id="tabAll" onclick="switchView('all')">
+                    <i class="fas fa-th me-1"></i> All Product Cards
+                    <span class="result-count-badge ms-1">{{ total }}</span>
+                </button>
+            </div>
+
+            <!-- ════ 1. SIDE-BY-SIDE PLATFORMS VIEW (DEFAULT PRIMARY VIEW) ════ -->
+            <div id="viewPlatform">
+                {% set has_results = (platform_results.get('Amazon',[])|length > 0) or (platform_results.get('Flipkart',[])|length > 0) or (platform_results.get('Meesho',[])|length > 0) %}
+
+                {% if has_results %}
+                <div class="row g-3 comparison-grid">
+                    {% for platform, items in platform_results.items() %}
+                    <div class="col-lg-4 col-md-6">
+                        <div class="card border-0 shadow-sm h-100 glass-card platform-column-card" style="border-radius:16px;">
+                            <!-- Platform Vertical Header -->
+                            <div class="card-header border-0 text-white text-center py-3 d-flex align-items-center justify-content-center
+                                {% if platform == 'Amazon' %}bg-amazon{% elif platform == 'Flipkart' %}bg-flipkart{% else %}bg-meesho{% endif %}"
+                                style="border-radius: 16px 16px 0 0;">
+                                {% if platform == 'Amazon' %}
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon" style="height:20px; filter:brightness(0) invert(1); margin-right:8px;">
+                                {% elif platform == 'Flipkart' %}
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/7/7a/Flipkart_logo.svg" alt="Flipkart" style="height:20px; margin-right:8px;">
+                                {% else %}
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/8/80/Meesho_Logo_Logo.svg" alt="Meesho" style="height:20px; filter:brightness(0) invert(1); margin-right:8px;">
+                                {% endif %}
+                                <span class="fw-bold fs-6">{{ platform }}</span>
+                                <span class="badge bg-white text-dark ms-2 small">{{ items|length }} Items</span>
+                            </div>
+
+                            <!-- Vertical Product Cards Column -->
+                            <div class="card-body p-3">
+                                {% if platform_status and platform_status.get(platform) and not platform_status[platform].available %}
+                                <div class="alert alert-warning border-0 shadow-sm rounded-4 text-center py-3 mb-3" style="background: rgba(245, 158, 11, 0.15); color: #d97706;">
+                                    <i class="fas fa-exclamation-triangle me-1"></i>
+                                    <strong>{{ platform }} temporarily unavailable</strong>
+                                    <div class="small text-muted mt-1">Unable to pull live data right now. Other platforms remain active.</div>
+                                </div>
+                                {% endif %}
+
+                                {% if items %}
+                                {% for item in items %}
+                                {% set is_best = item.get('is_lowest_price', False) or (best_per_platform.get(platform) and best_per_platform[platform].get('title') == item.title) %}
+                                <div class="product-card mb-3 {% if is_best %}best-price-card{% endif %}">
+                                    <!-- Badges -->
+                                    <div class="d-flex flex-wrap gap-1 mb-2">
+                                        {% if is_best %}<span class="badge bg-success"><i class="fas fa-tag me-1"></i>Lowest Price</span>{% endif %}
+                                        {% if item.get('is_best_rated') %}<span class="badge bg-warning text-dark"><i class="fas fa-star me-1"></i>Best Rated</span>{% endif %}
+                                        {% if item.get('is_best_discount') %}<span class="badge bg-danger"><i class="fas fa-percent me-1"></i>Best Discount</span>{% endif %}
+                                        {% if item.get('similarity_score') %}<span class="badge bg-primary" style="font-size:0.72rem;"><i class="fas fa-bullseye me-1"></i>{{ item.similarity_score|int }}% Match</span>{% endif %}
+                                        {% if item.get('in_stock') %}
+                                        <span class="badge" style="background:rgba(16,185,129,0.12); color:#059669; font-size:0.72rem;"><i class="fas fa-check-circle me-1"></i>In Stock</span>
+                                        {% endif %}
+                                    </div>
+                                    <!-- Image -->
+                                    <div class="product-image-container">
+                                        <img src="{{ item.image }}" alt="{{ item.title }}" class="product-img" referrerpolicy="no-referrer" loading="lazy" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=60';">
+                                    </div>
+                                    <!-- Title -->
+                                    <h6 class="fw-semibold text-dark mb-1" style="font-size:0.88rem; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; height:2.7em;">
+                                        {{ item.title }}
+                                    </h6>
+                                    <!-- Match Score Badge & Matched Specs -->
+                                    {% if item.match_badge %}
+                                    <div class="mb-1">
+                                        <span class="badge bg-primary text-white" style="font-size:0.72rem; padding: 3px 8px; border-radius:12px;">
+                                            <i class="fas fa-bullseye me-1"></i>{{ item.match_badge }}
+                                        </span>
+                                    </div>
+                                    {% endif %}
+                                    {% if item.matched_specs %}
+                                    <div class="d-flex flex-wrap gap-1 mb-2">
+                                        {% for mspec in item.matched_specs[:3] %}
+                                        <span class="badge bg-success-subtle text-success border border-success" style="font-size:0.68rem;">
+                                            <i class="fas fa-check me-1"></i>{{ mspec }}
+                                        </span>
+                                        {% endfor %}
+                                    </div>
+                                    {% elif item.specs %}
+                                    <div class="d-flex flex-wrap gap-1 mb-2">
+                                        {% for spec_key, spec_val in item.specs.items() %}
+                                        {% if spec_val and spec_val not in ('N/A', '', 0, 0.0) and spec_key not in ('price_num', 'rating_num', 'category_specs') %}
+                                        <span class="specs-badge">{{ spec_val }}</span>
+                                        {% endif %}
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                    <!-- Price Row -->
+                                    <div class="mt-2">
+                                        <div class="d-flex align-items-baseline gap-2 flex-wrap">
+                                            <span class="price-current">{{ item.price }}</span>
+                                            {% if item.original_price and item.original_price != 'N/A' %}
+                                            <span class="price-original">{{ item.original_price }}</span>
+                                            {% endif %}
+                                            {% if item.discount and item.discount != 'N/A' %}
+                                            <span class="price-discount">{{ item.discount }}</span>
+                                            {% endif %}
+                                        </div>
+                                        <div class="d-flex align-items-center gap-2 mt-1">
+                                            <span class="rating-tag small">
+                                                <i class="fas fa-star text-warning"></i>
+                                                {{ item.rating | default('N/A', true) }}
+                                                <small class="text-muted">({{ item.reviews | default('0', true) }})</small>
+                                            </span>
+                                            {% if item.seller and item.seller != 'N/A' %}
+                                            <small class="text-muted text-truncate" style="max-width:100px;" title="{{ item.seller }}">
+                                                <i class="fas fa-store me-1"></i>{{ item.seller[:20] }}
+                                            </small>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <!-- Buy Now -->
+                                    <a href="javascript:void(0)"
+                                       data-url="{{ item.link }}"
+                                       data-platform="{{ platform }}"
+                                       data-product-name="{{ item.title }}"
+                                       data-price="{{ item.price_formatted }}"
+                                       data-rating="{{ item.rating }}"
+                                       data-reviews="{{ item.reviews }}"
+                                       data-image="{{ item.image }}"
+                                       onclick="triggerBuyRedirect(this)"
+                                       class="btn btn-primary btn-sm w-100 mt-3 rounded-pill py-2 fw-bold d-flex align-items-center justify-content-center">
+                                        <i class="fas fa-shopping-cart me-2"></i>Buy on {{ platform }}
+                                    </a>
+                                </div>
+                                {% endfor %}
+                                {% else %}
+                                <div class="no-results-state">
+                                    <div class="no-results-icon"><i class="fas fa-box-open"></i></div>
+                                    <p class="fw-bold text-dark mb-1">No results on {{ platform }}</p>
+                                    <small class="text-muted">Try broadening your search or removing filters.</small>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="glass-card rounded-4 shadow-sm no-results-state py-5 text-center">
+                    <div class="no-results-icon mb-3"><i class="fas fa-search fa-3x text-muted opacity-50"></i></div>
+                    <h3 class="fw-bold text-dark mb-2">No matching product found.</h3>
+                    <p class="text-muted mb-4">We could not find an exact match for "<strong>{{ query }}</strong>".</p>
+                    <a href="/" class="btn btn-primary rounded-pill px-4 fw-semibold"><i class="fas fa-arrow-left me-2"></i>New Search</a>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- ════ 2. PRODUCT SPECIFICATION COMPARISON TABLE VIEW ════ -->
+            <div id="viewSpecTable" style="display:none;">
+                {% if all_results %}
+
+                <!-- Top Comparison Summary Badges -->
+                {% if summary_badges %}
+                <div class="summary-badges-row">
+                    {% if summary_badges.get('lowest_price') %}
+                    {% set lp = summary_badges.lowest_price %}
+                    <div class="summary-badge-card badge-lowest-price">
+                        <div class="badge-icon-box"><i class="fas fa-tag"></i></div>
+                        <div class="overflow-hidden">
+                            <small class="text-uppercase fw-bold text-success d-block" style="font-size:0.7rem; letter-spacing:0.5px;">Lowest Price</small>
+                            <span class="fw-bold text-dark text-truncate d-block" style="font-size:0.85rem;" title="{{ lp.title }}">{{ lp.title[:22] }}...</span>
+                            <span class="badge bg-success small">{{ lp.price }} ({{ lp.platform }})</span>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if summary_badges.get('highest_rating') %}
+                    {% set hr = summary_badges.highest_rating %}
+                    <div class="summary-badge-card badge-highest-rating">
+                        <div class="badge-icon-box"><i class="fas fa-star"></i></div>
+                        <div class="overflow-hidden">
+                            <small class="text-uppercase fw-bold text-warning d-block" style="font-size:0.7rem; letter-spacing:0.5px;">Highest Rating</small>
+                            <span class="fw-bold text-dark text-truncate d-block" style="font-size:0.85rem;" title="{{ hr.title }}">{{ hr.title[:22] }}...</span>
+                            <span class="badge bg-warning text-dark small">★ {{ hr.rating }} ({{ hr.platform }})</span>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if summary_badges.get('most_reviews') %}
+                    {% set mr = summary_badges.most_reviews %}
+                    <div class="summary-badge-card badge-most-reviews">
+                        <div class="badge-icon-box"><i class="fas fa-comments"></i></div>
+                        <div class="overflow-hidden">
+                            <small class="text-uppercase fw-bold text-purple d-block" style="font-size:0.7rem; letter-spacing:0.5px; color:#7e22ce;">Most Reviews</small>
+                            <span class="fw-bold text-dark text-truncate d-block" style="font-size:0.85rem;" title="{{ mr.title }}">{{ mr.title[:22] }}...</span>
+                            <span class="badge style-purple small" style="background:#7e22ce; color:#fff;">{{ mr.reviews }} Reviews ({{ mr.platform }})</span>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if summary_badges.get('best_discount') %}
+                    {% set bd = summary_badges.best_discount %}
+                    <div class="summary-badge-card badge-best-discount">
+                        <div class="badge-icon-box"><i class="fas fa-percent"></i></div>
+                        <div class="overflow-hidden">
+                            <small class="text-uppercase fw-bold text-info d-block" style="font-size:0.7rem; letter-spacing:0.5px; color:#0284c7;">Best Discount</small>
+                            <span class="fw-bold text-dark text-truncate d-block" style="font-size:0.85rem;" title="{{ bd.title }}">{{ bd.title[:22] }}...</span>
+                            <span class="badge bg-info text-white small">{{ bd.discount }} ({{ bd.platform }})</span>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if summary_badges.get('best_value') %}
+                    {% set bv = summary_badges.best_value %}
+                    <div class="summary-badge-card badge-best-value">
+                        <div class="badge-icon-box"><i class="fas fa-award"></i></div>
+                        <div class="overflow-hidden">
+                            <small class="text-uppercase fw-bold text-emerald d-block" style="font-size:0.7rem; letter-spacing:0.5px; color:#059669;">Best Value</small>
+                            <span class="fw-bold text-dark text-truncate d-block" style="font-size:0.85rem;" title="{{ bv.title }}">{{ bv.title[:22] }}...</span>
+                            <span class="badge bg-primary small">{{ bv.price }} (Top Deal)</span>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <!-- Main Specification Table Container Card -->
+                <div class="spec-comparison-table-card border-0 shadow-lg mb-4">
+
+                    <!-- Table Header & Controls Bar -->
+                    <div class="card-header py-3 px-3 border-0 d-flex align-items-center justify-content-between flex-wrap gap-2" style="background:#0d1117;">
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <h5 class="mb-0 fw-bold text-white"><i class="fas fa-list-alt text-primary me-2"></i>Product Specification Comparison</h5>
+                            {% set cat_name = all_results[0].specs.category if (all_results and all_results[0].specs and all_results[0].specs.category) else 'General' %}
+                            <span class="badge bg-primary text-white rounded-pill px-3 py-1" style="font-size:0.8rem;"><i class="fas fa-tag me-1"></i>Category: {{ cat_name }}</span>
+                        </div>
+
+                        <!-- Table Search & Sort Controls -->
+                        <div class="d-flex align-items-center gap-2 flex-wrap ms-auto">
+                            <!-- Sort options -->
+                            <div class="d-flex gap-1 flex-wrap">
+                                <button class="spec-table-sort-btn active" onclick="sortSpecTable('relevance', this)" title="Sort by Relevance"><i class="fas fa-bullseye me-1"></i>Relevance</button>
+                                <button class="spec-table-sort-btn" onclick="sortSpecTable('price', this)" title="Sort by Price"><i class="fas fa-tag me-1"></i>Lowest Price</button>
+                                <button class="spec-table-sort-btn" onclick="sortSpecTable('rating', this)" title="Sort by Rating"><i class="fas fa-star me-1"></i>Highest Rating</button>
+                                <button class="spec-table-sort-btn" onclick="sortSpecTable('reviews', this)" title="Sort by Reviews"><i class="fas fa-comments me-1"></i>Most Reviews</button>
+                                <button class="spec-table-sort-btn" onclick="sortSpecTable('discount', this)" title="Sort by Discount"><i class="fas fa-percent me-1"></i>Highest Discount</button>
+                            </div>
+                            <!-- Search Table Filter -->
+                            <input type="text" id="specTableFilterInput" class="form-control form-control-sm shadow-none"
+                                   placeholder="Filter Specs..." onkeyup="filterSpecTable()"
+                                   style="max-width:180px; background:#000; color:#fff; border:1px solid rgba(255,255,255,0.25); border-radius:20px;">
+                        </div>
+                    </div>
+
+                    <!-- Responsive Specification Table -->
+                    <div class="table-responsive" style="max-height:650px; overflow-y:auto;">
+                        <table class="table table-hover mb-0 text-center align-middle" id="specComparisonTable">
+                            <thead>
+                                <tr>
+                                    <th style="min-width:70px;">Image</th>
+                                    <th style="min-width:200px; text-align:left;">Product Name</th>
+                                    <th style="min-width:90px;">Brand</th>
+                                    <th style="min-width:110px;">Category</th>
+                                    <th style="min-width:100px;">Model Number</th>
+                                    <th style="min-width:90px;">Platform</th>
+                                    <th style="min-width:100px;">Current Price</th>
+                                    <th style="min-width:95px;">Original Price</th>
+                                    <th style="min-width:90px;">Discount %</th>
+                                    <th style="min-width:95px;">Rating</th>
+                                    <th style="min-width:90px;">Reviews</th>
+                                    <th style="min-width:95px;">Availability</th>
+                                    <th style="min-width:100px;">Seller</th>
+                                    <th style="min-width:110px;">Delivery Time</th>
+                                    <th style="min-width:110px;">Warranty</th>
+                                    <th style="min-width:240px; text-align:left;">Product Specifications</th>
+                                    <th style="min-width:100px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in all_results %}
+                                <tr data-price="{{ item.price_num or 999999 }}"
+                                    data-rating="{{ item.specs.rating_num if item.specs else 0 }}"
+                                    data-reviews="{{ item.reviews | replace(',', '') if item.reviews else 0 }}"
+                                    data-discount="{{ item.discount | replace('% off', '') | replace('%', '') if item.discount else 0 }}"
+                                    data-similarity="{{ item.similarity_score or 0 }}"
+                                    class="{% if item.is_lowest_price %}table-success{% endif %}">
+                                    
+                                    <!-- Image -->
+                                    <td>
+                                        <img src="{{ item.image }}" alt="{{ item.title }}"
+                                             style="width:48px; height:48px; object-fit:contain; border-radius:8px; background:#fff; padding:2px;"
+                                             onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=60';">
+                                    </td>
+
+                                    <!-- Product Name -->
+                                    <td class="text-start" style="max-width:220px;">
+                                        <div class="fw-semibold text-light text-truncate-2" style="font-size:0.83rem; line-height:1.3;" title="{{ item.title }}">
+                                            {{ item.title }}
+                                        </div>
+                                        {% if item.is_lowest_price %}
+                                        <span class="badge bg-success mt-1" style="font-size:0.68rem;"><i class="fas fa-check-circle me-1"></i>Lowest Price Deal</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Brand -->
+                                    <td>
+                                        <span class="badge bg-dark text-light border" style="font-size:0.75rem;">
+                                            {{ item.specs.brand if (item.specs and item.specs.brand and item.specs.brand != 'N/A') else 'Not Available' }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Category -->
+                                    <td>
+                                        <span class="badge bg-secondary text-white" style="font-size:0.75rem;">
+                                            {{ item.specs.category if (item.specs and item.specs.category) else 'Not Available' }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Model Number -->
+                                    <td>
+                                        <code class="text-warning small">
+                                            {{ item.specs.model_number if (item.specs and item.specs.model_number and item.specs.model_number != 'N/A') else 'Not Available' }}
+                                        </code>
+                                    </td>
+
+                                    <!-- Platform -->
+                                    <td>
+                                        <span class="badge fw-bold" style="font-size:0.75rem;
+                                            {% if item.platform == 'Amazon' %}background:#FF9900; color:#000;
+                                            {% elif item.platform == 'Flipkart' %}background:#2874f0; color:#fff;
+                                            {% else %}background:#F43397; color:#fff;{% endif %}">
+                                            {{ item.platform }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Current Price -->
+                                    <td>
+                                        <span class="{% if item.is_lowest_price %}price-highlight-lowest{% else %}fw-bold text-white{% endif %}" style="font-size:0.92rem;">
+                                            {{ item.price }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Original Price -->
+                                    <td>
+                                        {% if item.original_price and item.original_price != 'N/A' %}
+                                        <del class="text-muted small">{{ item.original_price }}</del>
+                                        {% else %}
+                                        <span class="text-muted small">Not Available</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Discount % -->
+                                    <td>
+                                        {% if item.discount and item.discount != 'N/A' %}
+                                        <span class="{% if item.is_best_discount %}discount-highlight-blue{% else %}badge bg-secondary{% endif %}" style="font-size:0.75rem;">
+                                            {{ item.discount }}
+                                        </span>
+                                        {% else %}
+                                        <span class="text-muted small">Not Available</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Rating -->
+                                    <td>
+                                        {% if item.rating and item.rating != 'N/A' %}
+                                        <span class="rating-highlight-gold" style="font-size:0.83rem;">
+                                            <i class="fas fa-star me-1"></i>{{ item.rating }}
+                                        </span>
+                                        {% else %}
+                                        <span class="text-muted small">Not Available</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Number of Reviews -->
+                                    <td>
+                                        {% if item.reviews and item.reviews != '0' %}
+                                        <span class="text-info small fw-semibold">
+                                            <i class="fas fa-comments me-1"></i>{{ item.reviews }}
+                                        </span>
+                                        {% else %}
+                                        <span class="text-muted small">Not Available</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Availability -->
+                                    <td>
+                                        {% if item.in_stock %}
+                                        <span class="badge" style="background:rgba(16,185,129,0.2); color:#34d399; font-size:0.7rem;"><i class="fas fa-check-circle me-1"></i>In Stock</span>
+                                        {% else %}
+                                        <span class="badge bg-danger" style="font-size:0.7rem;">Out of Stock</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Seller -->
+                                    <td>
+                                        <span class="small text-muted" title="{{ item.specs.seller if item.specs else 'Not Available' }}">
+                                            {{ item.specs.seller[:15] if (item.specs and item.specs.seller and item.specs.seller != 'N/A') else 'Not Available' }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Delivery Time -->
+                                    <td>
+                                        <span class="small text-muted">
+                                            {{ item.specs.delivery if (item.specs and item.specs.delivery) else 'Not Available' }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Warranty -->
+                                    <td>
+                                        <span class="small text-muted">
+                                            {{ item.specs.warranty if (item.specs and item.specs.warranty) else 'Not Available' }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Category Specifications (Dynamic) -->
+                                    <td class="text-start">
+                                        {% if item.specs and item.specs.category_specs %}
+                                        <div class="d-flex flex-column gap-1" style="font-size:0.78rem;">
+                                            {% for spec_name, spec_val in item.specs.category_specs.items() %}
+                                            <div class="text-truncate" style="max-width:230px;">
+                                                <span style="color:#38bdf8; font-weight:600;">{{ spec_name }}:</span>
+                                                <span class="text-light">{{ spec_val }}</span>
+                                            </div>
+                                            {% endfor %}
+                                        </div>
+                                        {% else %}
+                                        <span class="text-muted small">Not Available</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <td>
+                                        <a href="javascript:void(0)"
+                                           data-url="{{ item.link }}"
+                                           data-platform="{{ item.platform }}"
+                                           data-product-name="{{ item.title }}"
+                                           data-price="{{ item.price }}"
+                                           data-rating="{{ item.rating }}"
+                                           data-reviews="{{ item.reviews }}"
+                                           data-image="{{ item.image }}"
+                                           onclick="triggerBuyRedirect(this)"
+                                           class="btn btn-primary btn-sm rounded-pill px-3 py-1 fw-bold" style="font-size:0.78rem;">
+                                            <i class="fas fa-shopping-cart me-1"></i>Buy on {{ item.platform }}
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {% else %}
+                <div class="glass-card rounded-4 shadow-sm no-results-state py-5 text-center">
+                    <div class="no-results-icon mb-3"><i class="fas fa-search fa-3x text-muted opacity-50"></i></div>
+                    <h3 class="fw-bold text-dark mb-2">No matching product found.</h3>
+                    <p class="text-muted mb-4">We could not find an exact match for "<strong>{{ query }}</strong>".</p>
+                    <a href="/" class="btn btn-primary rounded-pill px-4 fw-semibold"><i class="fas fa-arrow-left me-2"></i>New Search</a>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- ════ ALL RESULTS VIEW ════ -->
+            <div id="viewAll" style="display:none;">
+                <!-- Sort Tabs -->
+                <div class="sort-tabs mb-3">
+                    <button class="sort-tab active" id="sortBestMatch" onclick="applySortView('best_match', this)">
+                        <i class="fas fa-bullseye"></i> Best Match
+                    </button>
+                    <button class="sort-tab" id="sortLowestPrice" onclick="applySortView('lowest_price', this)">
+                        <i class="fas fa-tag"></i> Lowest Price
+                    </button>
+                    <button class="sort-tab" id="sortHighestRated" onclick="applySortView('highest_rated', this)">
+                        <i class="fas fa-star"></i> Highest Rated
+                    </button>
+                    <button class="sort-tab" id="sortBestDiscount" onclick="applySortView('best_discount', this)">
+                        <i class="fas fa-percent"></i> Best Discount
+                    </button>
+                </div>
+
+                <!-- Rendered sort views (hidden by default, shown by JS) -->
+                {% for view_key, view_products in sort_views.items() %}
+                <div class="sort-view all-results-grid" id="sortView_{{ view_key }}"
+                     style="{% if view_key != 'best_match' %}display:none;{% endif %}">
+                    {% if view_products %}
+                    {% for item in view_products %}
+                    <div class="product-card {% if item.get('is_lowest_price') %}best-price-card{% endif %}">
+                        <div class="d-flex flex-wrap gap-1 mb-2">
+                            {% if item.get('is_lowest_price') %}<span class="badge bg-success" style="font-size:0.7rem;">Lowest Price</span>{% endif %}
+                            {% if item.get('is_best_rated') %}<span class="badge bg-warning text-dark" style="font-size:0.7rem;">Best Rated</span>{% endif %}
+                            {% if item.get('is_best_discount') %}<span class="badge bg-danger" style="font-size:0.7rem;">Best Discount</span>{% endif %}
+                            <span class="badge ms-auto" style="font-size:0.7rem;
+                                {% if item.platform == 'Amazon' %}background:rgba(255,153,0,0.15); color:#b45309;
+                                {% elif item.platform == 'Flipkart' %}background:rgba(40,116,240,0.12); color:#1d4ed8;
+                                {% else %}background:rgba(244,51,151,0.12); color:#9d174d;{% endif %}">
+                                {{ item.platform }}
+                            </span>
+                        </div>
+                        <div class="product-image-container" style="height:120px;">
+                            <img src="{{ item.image }}" alt="{{ item.title }}" class="product-img" referrerpolicy="no-referrer" loading="lazy" onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=60';">
+                        </div>
+                        <h6 class="fw-semibold text-dark mb-1" style="font-size:0.82rem; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; height:2.6em;">
+                            {{ item.title }}
+                        </h6>
+                        {% if item.match_badge %}
+                        <div class="mt-1">
+                            <span class="badge bg-primary text-white" style="font-size:0.68rem; padding: 2px 6px; border-radius:10px;">
+                                <i class="fas fa-bullseye me-1"></i>{{ item.match_badge }}
+                            </span>
+                        </div>
+                        {% endif %}
+                        {% if item.matched_specs %}
+                        <div class="d-flex flex-wrap gap-1 mt-1">
+                            {% for mspec in item.matched_specs[:2] %}
+                            <span class="badge bg-success-subtle text-success border border-success" style="font-size:0.65rem;">
+                                ✓ {{ mspec }}
+                            </span>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        <div class="d-flex align-items-baseline gap-1 flex-wrap mt-1">
+                            <span class="price-current" style="font-size:1rem;">{{ item.price }}</span>
+                            {% if item.discount and item.discount != 'N/A' %}
+                            <span class="price-discount">{{ item.discount }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="small mt-1 text-muted">
+                            <i class="fas fa-star text-warning" style="font-size:0.75rem;"></i>
+                            {{ item.rating | default('N/A', true) }}
+                            <span class="ms-1">({{ item.reviews | default('0', true) }})</span>
+                        </div>
+                        <a href="javascript:void(0)"
+                           data-url="{{ item.link }}"
+                           data-platform="{{ item.platform }}"
+                           data-product-name="{{ item.title }}"
+                           data-price="{{ item.price }}"
+                           data-rating="{{ item.rating }}"
+                           data-reviews="{{ item.reviews }}"
+                           data-image="{{ item.image }}"
+                           onclick="triggerBuyRedirect(this)"
+                           class="btn btn-primary btn-sm w-100 mt-2 rounded-pill fw-bold" style="font-size:0.8rem;">
+                            <i class="fas fa-shopping-cart me-1"></i>Buy on {{ item.platform }}
+                        </a>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <div style="grid-column:1/-1;" class="text-center text-muted py-5">
+                        <i class="fas fa-box-open fa-3x mb-3 opacity-25"></i>
+                        <p class="mb-0">No results to display.</p>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- ════════════════════════════ 6. TOP BEST PRICES ACROSS WEBSITES ════════════════════════════ -->
+            <div class="glass-card rounded-4 shadow-sm p-4 mt-4" id="topBestPricesSection">
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4 border-bottom pb-3">
+                    <div>
+                        <h4 class="fw-bold text-dark mb-1 d-flex align-items-center gap-2">
+                            <span>🏆 Top Best Prices Across Websites</span>
+                        </h4>
+                        <p class="text-muted small mb-0">Lowest valid price scraped from each supported platform for "{{ query }}"</p>
+                    </div>
+                    <span class="badge bg-primary-subtle text-primary border border-primary px-3 py-2 rounded-pill fw-semibold" style="font-size:0.8rem;">
+                        <i class="fas fa-bolt me-1"></i> Real Scraped Results
+                    </span>
+                </div>
+
+                <div class="row g-3">
+                    {% for platform_name in ['Amazon', 'Flipkart', 'Meesho'] %}
+                    {% set p_info = top_prices.get(platform_name) if top_prices else None %}
+                    <div class="col-lg-4 col-md-6 col-12">
+                        <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden top-price-card {% if p_info and p_info.is_overall_best %}highlight-lowest-card{% endif %}"
+                             style="background: rgba(255,255,255,0.85); border: 1.5px solid {% if p_info and p_info.is_overall_best %}#10b981{% else %}rgba(0,0,0,0.08){% endif %} !important; transition: all 0.25s ease;">
+                            
+                            <!-- Platform Header -->
+                            <div class="card-header border-0 py-3 px-3 d-flex align-items-center justify-content-between text-white
+                                {% if platform_name == 'Amazon' %}bg-amazon{% elif platform_name == 'Flipkart' %}bg-flipkart{% else %}bg-meesho{% endif %}">
+                                <div class="d-flex align-items-center gap-2">
+                                    {% if platform_name == 'Amazon' %}
+                                    <span class="fs-5">🛒</span>
+                                    {% elif platform_name == 'Flipkart' %}
+                                    <span class="fs-5">🛍️</span>
+                                    {% else %}
+                                    <span class="fs-5">🛒</span>
+                                    {% endif %}
+                                    <span class="fw-bold fs-6">{{ platform_name }}</span>
+                                </div>
+                                {% if p_info and p_info.is_overall_best %}
+                                <span class="badge bg-white text-success fw-bold px-2 py-1 shadow-sm" style="font-size:0.72rem;">
+                                    <i class="fas fa-crown me-1"></i>Lowest Price
+                                </span>
+                                {% endif %}
+                            </div>
+
+                            <!-- Card Body -->
+                            <div class="card-body p-3 d-flex flex-column justify-content-between">
+                                {% if p_info and p_info.available and p_info.product %}
+                                <div>
+                                    <!-- Price -->
+                                    <div class="mb-2">
+                                        <small class="text-uppercase fw-bold text-muted d-block" style="font-size:0.7rem; letter-spacing:0.5px;">Best Price</small>
+                                        <span class="fs-3 fw-extrabold text-success" style="font-weight: 800;">{{ p_info.price_formatted }}</span>
+                                    </div>
+
+                                    <!-- Image & Title -->
+                                    <div class="d-flex gap-3 align-items-center my-2 p-2 rounded-3" style="background: rgba(0,0,0,0.02);">
+                                        <div style="width: 60px; height: 60px; flex-shrink: 0;" class="d-flex align-items-center justify-content-center bg-white rounded-2 border p-1">
+                                            <img src="{{ p_info.image }}" alt="{{ p_info.title }}"
+                                                 style="max-width: 100%; max-height: 100%; object-fit: contain;"
+                                                 referrerpolicy="no-referrer" loading="lazy"
+                                                 onerror="this.onerror=null; this.src='https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300&auto=format&fit=crop&q=60';">
+                                        </div>
+                                        <div class="overflow-hidden">
+                                            <small class="text-uppercase fw-bold text-muted d-block" style="font-size:0.68rem;">Product Name</small>
+                                            <h6 class="fw-semibold text-dark mb-0 text-truncate-2" style="font-size:0.83rem; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;" title="{{ p_info.title }}">
+                                                {{ p_info.title }}
+                                            </h6>
+                                        </div>
+                                    </div>
+
+                                    <!-- Rating -->
+                                    <div class="mt-2 mb-3">
+                                        {% if p_info.rating %}
+                                        <span class="badge bg-warning-subtle text-dark border border-warning px-2 py-1 fw-bold" style="font-size:0.75rem;">
+                                            ⭐ {{ p_info.rating }}
+                                            {% if p_info.reviews %}<span class="fw-normal text-muted ms-1">({{ p_info.reviews }})</span>{% endif %}
+                                        </span>
+                                        {% else %}
+                                        <span class="badge bg-light text-muted border px-2 py-1" style="font-size:0.75rem;">
+                                            ⭐ Rating N/A
+                                        </span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+
+                                <!-- View Deal Button -->
+                                <a href="javascript:void(0)"
+                                   data-url="{{ p_info.link }}"
+                                   data-platform="{{ platform_name }}"
+                                   data-product-name="{{ p_info.title }}"
+                                   data-price="{{ p_info.price_formatted }}"
+                                   data-rating="{{ p_info.rating }}"
+                                   data-reviews="{{ p_info.reviews }}"
+                                   data-image="{{ p_info.image }}"
+                                   onclick="triggerBuyRedirect(this)"
+                                   class="btn btn-primary btn-sm w-100 rounded-pill py-2 fw-bold shadow-sm d-flex align-items-center justify-content-center gap-2 mt-2">
+                                    <i class="fas fa-external-link-alt"></i> View Deal
+                                </a>
+
+                                {% else %}
+
+                                <!-- Fallback State for missing platform result -->
+                                <div class="text-center py-4 my-auto">
+                                    <div class="mb-2 text-muted opacity-50">
+                                        <i class="fas fa-box-open fa-2x"></i>
+                                    </div>
+                                    <h6 class="fw-bold text-secondary mb-1">No product available</h6>
+                                    <p class="small text-muted mb-0">No valid product found for this platform in current search.</p>
+                                </div>
+                                <button disabled class="btn btn-outline-secondary btn-sm w-100 rounded-pill py-2 opacity-50 mt-2">
+                                    Not Available
+                                </button>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <!-- ════════════════════════════ 7. BEST OVERALL DEAL ════════════════════════════ -->
+            {% if best_overall_deal %}
+            <div class="card border-0 shadow-lg rounded-4 overflow-hidden mt-4 text-white best-overall-deal-card"
+                 style="background: linear-gradient(135deg, #052e16 0%, #064e3b 50%, #0f172a 100%); border: 2px solid #10b981 !important;">
+                <div class="card-body p-4 position-relative">
+                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-3">
+                        <div class="d-flex align-items-center gap-3">
+                            <div class="bg-success text-white rounded-circle d-flex align-items-center justify-content-center shadow-lg"
+                                 style="width: 56px; height: 56px; flex-shrink: 0; background: linear-gradient(135deg, #10b981, #059669) !important;">
+                                <i class="fas fa-trophy fs-4 text-warning"></i>
+                            </div>
+                            <div>
+                                <span class="badge bg-warning text-dark fw-bold text-uppercase px-3 py-1 rounded-pill mb-1" style="letter-spacing:0.8px; font-size:0.75rem;">
+                                    🏆 BEST OVERALL DEAL
+                                </span>
+                                <h4 class="fw-bold text-white mb-1 d-flex align-items-center gap-2 flex-wrap">
+                                    <span>{{ best_overall_deal.platform }}</span>
+                                    <span class="badge bg-white text-dark fs-6 px-3 py-1 rounded-pill ms-2">{{ best_overall_deal.price_formatted }}</span>
+                                </h4>
+                                <p class="text-light opacity-90 mb-0 fw-medium" style="font-size:0.95rem;">
+                                    {{ best_overall_deal.title }}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="d-flex flex-column align-items-end justify-content-center text-md-end ms-auto">
+                            {% if savings_info %}
+                            <div class="alert alert-success border-0 rounded-3 py-2 px-3 mb-2 shadow-sm text-dark d-flex align-items-center gap-2" style="background: rgba(52,211,153,0.2) !important; color: #a7f3d0 !important;">
+                                <i class="fas fa-piggy-bank text-warning fs-5"></i>
+                                <span class="fw-bold" style="font-size:0.95rem;">
+                                    Save {{ savings_info.amount_formatted }} compared with {{ savings_info.compared_platform }}.
+                                </span>
+                            </div>
+                            {% endif %}
+                            <a href="javascript:void(0)"
+                               data-url="{{ best_overall_deal.link }}"
+                               data-platform="{{ best_overall_deal.platform }}"
+                               data-product-name="{{ best_overall_deal.title }}"
+                               data-price="{{ best_overall_deal.price_formatted }}"
+                               data-rating="{{ best_overall_deal.rating }}"
+                               data-reviews="{{ best_overall_deal.reviews }}"
+                               data-image="{{ best_overall_deal.image }}"
+                               onclick="triggerBuyRedirect(this)"
+                               class="btn btn-success btn-lg rounded-pill px-4 py-2 fw-bold shadow-lg d-flex align-items-center gap-2">
+                                <i class="fas fa-shopping-cart"></i> Claim Best Deal Now
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- ════════════════════ Step 3: AUTH PROMPT BANNER (UNAUTHENTICATED) ════════════════════ -->
+            {% if not current_user %}
+            <div class="card border-0 shadow-lg rounded-4 p-4 text-center my-4"
+                 style="background: linear-gradient(135deg, rgba(37,99,235,0.08), rgba(16,185,129,0.08)); border: 1.5px solid rgba(37,99,235,0.2) !important;">
+                <div class="d-inline-flex align-items-center justify-content-center bg-primary text-white rounded-circle shadow mb-3" style="width: 54px; height: 54px; font-size: 1.4rem;">
+                    <i class="fas fa-bookmark"></i>
+                </div>
+                <h4 class="fw-bold text-dark mb-2">Want to save your searches and get the full SmartBuy experience?</h4>
+                <p class="text-muted small mb-4" style="max-width: 600px; margin: 0 auto;">
+                    Create an account or sign in to save search history, receive private deal alerts in your SmartBuy Inbox, and submit product feedback.
+                </p>
+                <div class="d-flex justify-content-center gap-3 flex-wrap">
+                    <a href="/signup" class="btn btn-primary rounded-pill px-4 py-2.5 fw-bold shadow-sm"><i class="fas fa-pen-fancy me-2"></i>Create Account</a>
+                    <a href="/signin" class="btn btn-outline-primary rounded-pill px-4 py-2.5 fw-bold shadow-sm"><i class="fas fa-lock me-2"></i>Sign In</a>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- ════════════════════ Step 6: MANDATORY RATING & FEEDBACK (AUTHENTICATED) ════════════════════ -->
+            {% if current_user %}
+            <div class="card border-0 shadow-lg rounded-4 p-4 my-4"
+                 style="background: rgba(255, 255, 255, 0.95); border: 1.5px solid rgba(245,158,11,0.3) !important;">
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3 pb-2 border-bottom">
+                    <div>
+                        <h4 class="fw-bold text-dark mb-1 d-flex align-items-center gap-2">
+                            <i class="fas fa-star text-warning"></i> Rate Your SmartBuy Experience
+                        </h4>
+                        <p class="text-muted small mb-0">Help us improve product search and price accuracy across websites</p>
+                    </div>
+                    <span class="badge bg-warning text-dark rounded-pill px-3 py-1.5 fw-bold" style="font-size:0.8rem;">
+                        Feedback Saved to Private Inbox
+                    </span>
+                </div>
+
+                <form action="/feedback/new" method="POST">
+                    <input type="hidden" name="redirect_to" value="{{ request.full_path }}">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold small text-secondary">Rating (1 to 5 Stars)</label>
+                            <select name="rating" class="form-select rounded-pill px-3 shadow-none fw-bold text-warning" required>
+                                <option value="5" selected>⭐⭐⭐⭐⭐ (5 / 5 - Excellent)</option>
+                                <option value="4">⭐⭐⭐⭐ (4 / 5 - Good)</option>
+                                <option value="3">⭐⭐⭐ (3 / 5 - Average)</option>
+                                <option value="2">⭐⭐ (2 / 5 - Poor)</option>
+                                <option value="1">⭐ (1 / 5 - Terrible)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-bold small text-secondary">Feedback Title</label>
+                            <input type="text" name="title" class="form-control rounded-pill px-3 shadow-none" placeholder="e.g. Great price comparison on {{ query }}" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold small text-secondary">Feedback Message</label>
+                            <textarea name="message" rows="3" class="form-control rounded-4 px-3 py-2 shadow-none" placeholder="Share your experience comparing Amazon, Flipkart, and Meesho results..." required></textarea>
+                        </div>
+                        <div class="col-12 text-end">
+                            <button type="submit" class="btn btn-warning text-dark rounded-pill px-5 py-2.5 fw-bold shadow-sm">
+                                <i class="fas fa-paper-plane me-2"></i>Submit Feedback
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="d-none position-fixed top-0 start-0 w-100 h-100
+     d-flex flex-column align-items-center justify-content-center text-white">
+    <div class="spinner-border text-primary mb-3" style="width:3rem; height:3rem;" role="status">
+        <span class="visually-hidden">Loading...</span>
+    </div>
+    <h4 class="fw-bold mb-1">Searching Live</h4>
+    <p class="opacity-75 small">Scraping Amazon, Flipkart & Meesho simultaneously...</p>
+</div>
+
+<!-- Modals (Sign In / Sign Up) -->
+<div class="modal fade modal-glass-premium" id="signinModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0">
+            <div class="modal-header border-0"><h5 class="modal-title fw-bold"><i class="fas fa-lock text-primary me-2"></i>Sign In</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <form onsubmit="event.preventDefault(); alert('Signed in! (Simulated)'); bootstrap.Modal.getInstance(document.getElementById('signinModal')).hide();">
+                    <div class="mb-3"><input type="email" class="form-control rounded-pill px-3" placeholder="Email" required></div>
+                    <div class="mb-3"><input type="password" class="form-control rounded-pill px-3" placeholder="Password" required></div>
+                    <button type="submit" class="btn btn-primary w-100 rounded-pill fw-semibold" style="background:linear-gradient(135deg,var(--primary),var(--secondary));border:none;">Sign In</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade modal-glass-premium" id="signupModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0">
+            <div class="modal-header border-0"><h5 class="modal-title fw-bold"><i class="fas fa-user-shield text-danger me-1"></i>Sign Up Required</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">Create a free SmartBuy account to open product pages.</p>
+                <form id="signupForm">
+                    <div class="mb-3"><input type="text" class="form-control rounded-pill px-3" id="usernameInput" placeholder="Full Name" required></div>
+                    <div class="mb-3"><input type="email" class="form-control rounded-pill px-3" id="signupEmailInput" placeholder="Email" required></div>
+                    <div class="mb-3"><input type="password" class="form-control rounded-pill px-3" id="signupPasswordInput" placeholder="Password" required></div>
+                    <button type="submit" class="btn btn-secondary w-100 rounded-pill fw-semibold" style="background:linear-gradient(135deg,var(--secondary),var(--accent));border:none;">Sign Up & Continue</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+/* Results Page — View & Sort Controls */
+function switchView(view) {
+    const specTable = document.getElementById('viewSpecTable');
+    const platformView = document.getElementById('viewPlatform');
+    const allView = document.getElementById('viewAll');
+
+    const tabSpecTable = document.getElementById('tabSpecTable');
+    const tabPlatform = document.getElementById('tabPlatform');
+    const tabAll = document.getElementById('tabAll');
+
+    if (specTable) specTable.style.display = (view === 'specTable') ? '' : 'none';
+    if (platformView) platformView.style.display = (view === 'platform') ? '' : 'none';
+    if (allView) allView.style.display = (view === 'all') ? '' : 'none';
+
+    if (tabSpecTable) tabSpecTable.classList.toggle('active', view === 'specTable');
+    if (tabPlatform) tabPlatform.classList.toggle('active', view === 'platform');
+    if (tabAll) tabAll.classList.toggle('active', view === 'all');
+}
+
+function sortSpecTable(sortKey, btn) {
+    const tbody = document.querySelector('#specComparisonTable tbody');
+    if (!tbody) return;
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+
+    rows.sort((a, b) => {
+        if (sortKey === 'price') {
+            const pA = parseFloat(a.dataset.price || 999999);
+            const pB = parseFloat(b.dataset.price || 999999);
+            return pA - pB;
+        } else if (sortKey === 'rating') {
+            const rA = parseFloat(a.dataset.rating || 0);
+            const rB = parseFloat(b.dataset.rating || 0);
+            return rB - rA;
+        } else if (sortKey === 'reviews') {
+            const rvA = parseInt(a.dataset.reviews || 0);
+            const rvB = parseInt(b.dataset.reviews || 0);
+            return rvB - rvA;
+        } else if (sortKey === 'discount') {
+            const dA = parseInt(a.dataset.discount || 0);
+            const dB = parseInt(b.dataset.discount || 0);
+            return dB - dA;
+        } else {
+            const simA = parseFloat(a.dataset.similarity || 0);
+            const simB = parseFloat(b.dataset.similarity || 0);
+            return simB - simA;
+        }
+    });
+
+    rows.forEach(r => tbody.appendChild(r));
+
+    document.querySelectorAll('.spec-table-sort-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+}
+
+function filterSpecTable() {
+    const input = document.getElementById('specTableFilterInput');
+    if (!input) return;
+    const filter = input.value.toLowerCase();
+    const rows = document.querySelectorAll('#specComparisonTable tbody tr');
+
+    rows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        row.style.display = text.includes(filter) ? '' : 'none';
+    });
+}
+
+function applySortView(sortKey, btn) {
+    document.querySelectorAll('.sort-view').forEach(el => el.style.display = 'none');
+    const target = document.getElementById('sortView_' + sortKey);
+    if (target) target.style.display = '';
+    document.querySelectorAll('.sort-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+}
+
+function showLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) {
+        overlay.classList.remove('d-none');
+        overlay.classList.add('d-flex');
+    }
+}
+
+function toggleDarkMode() {
+    document.body.classList.toggle('dark-mode');
+    const isDark = document.body.classList.contains('dark-mode');
+    localStorage.setItem('smartbuy_theme', isDark ? 'dark' : 'light');
+    updateThemeIcon(isDark);
+}
+
+function updateThemeIcon(isDark) {
+    const icon = document.getElementById('themeIcon');
+    if (icon) {
+        icon.className = isDark ? 'fas fa-sun text-warning' : 'fas fa-moon';
+    }
+}
+
+(function() {
+    const saved = localStorage.getItem('smartbuy_theme');
+    if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.body.classList.add('dark-mode');
+        updateThemeIcon(true);
+    }
+})();
+</script>
+</body>
+</html>

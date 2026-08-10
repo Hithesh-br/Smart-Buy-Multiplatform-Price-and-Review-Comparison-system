@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Searches — SmartBuy Multiplatform Price Comparison</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .page-card {
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 24px;
+            backdrop-filter: blur(12px);
+        }
+        body.dark-mode .page-card {
+            background: rgba(30, 41, 59, 0.95) !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+            color: #f8fafc !important;
+        }
+    </style>
+</head>
+<body class="premium-bg">
+
+<!-- NAVBAR -->
+<nav class="navbar navbar-expand-lg navbar-glass sticky-top shadow-sm py-3">
+    <div class="container-fluid px-4">
+        <a class="navbar-brand d-flex align-items-center text-dark me-4" href="/">
+            <span class="fs-4 fw-bold">Smart<span style="color:var(--secondary)">-Buy</span></span>
+            <i class="fas fa-bolt text-primary ms-1"></i>
+        </a>
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse"
+                data-bs-target="#navbarContent" aria-controls="navbarContent"
+                aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarContent">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0 align-items-lg-center gap-1">
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/"><i class="fas fa-home me-1 text-primary"></i>Home</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/about"><i class="fas fa-info-circle me-1"></i>About SmartBuy</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold active text-primary" href="/my-searches"><i class="fas fa-history me-1"></i>My Searches</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/inbox"><i class="fas fa-inbox me-1 text-primary"></i>Inbox {% if unread_inbox_count > 0 %}<span class="badge bg-danger rounded-pill ms-1">{{ unread_inbox_count }}</span>{% endif %}</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/my-feedback"><i class="fas fa-comment-alt me-1 text-warning"></i>My Feedback</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/profile"><i class="fas fa-user-circle me-1 text-success"></i>Profile</a></li>
+            </ul>
+            <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
+                {% if current_user %}
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle fw-bold btn btn-outline-primary rounded-pill px-3 py-1 text-dark" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fas fa-user-circle me-1 text-primary"></i>{{ current_user.name }}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end rounded-4 border-0 shadow-lg p-2">
+                        <li><a class="dropdown-item rounded-3 py-2" href="/profile"><i class="fas fa-id-card me-2 text-primary"></i>Profile</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-searches"><i class="fas fa-history me-2 text-info"></i>My Searches</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-feedback"><i class="fas fa-comment-alt me-2 text-warning"></i>My Feedback</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item rounded-3 py-2 text-danger fw-semibold" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                    </ul>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-5">
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show rounded-4 shadow-sm mb-4" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="row justify-content-center">
+        <div class="col-lg-10">
+            <div class="page-card p-4 p-md-5 shadow-lg">
+
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4 pb-3 border-bottom">
+                    <div>
+                        <h2 class="fw-extrabold text-dark mb-1 d-flex align-items-center gap-2">
+                            <i class="fas fa-history text-primary"></i> My Search History
+                        </h2>
+                        <p class="text-muted small mb-0">Your saved product queries and specification searches</p>
+                    </div>
+                    <span class="badge bg-primary text-white rounded-pill px-3 py-2 fw-bold">
+                        {{ history | length }} Total Searches
+                    </span>
+                </div>
+
+                {% if history %}
+                <div class="table-responsive rounded-4 border overflow-hidden bg-white shadow-sm">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="bg-light">
+                            <tr>
+                                <th class="py-3 px-4 fw-bold text-secondary">Product Name</th>
+                                <th class="py-3 px-3 fw-bold text-secondary">Category</th>
+                                <th class="py-3 px-3 fw-bold text-secondary">Selected Specifications</th>
+                                <th class="py-3 px-3 fw-bold text-secondary">Date & Time</th>
+                                <th class="py-3 px-4 text-end fw-bold text-secondary">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in history %}
+                            <tr>
+                                <td class="py-3 px-4">
+                                    <span class="fw-bold text-dark fs-6">{{ item.product_name }}</span>
+                                </td>
+                                <td class="py-3 px-3">
+                                    <span class="badge bg-secondary-subtle text-dark border px-2.5 py-1 rounded-pill" style="font-size:0.75rem;">
+                                        <i class="fas fa-tag me-1 text-primary"></i>{{ item.category or 'General' }}
+                                    </span>
+                                </td>
+                                <td class="py-3 px-3">
+                                    {% if item.specifications %}
+                                    <span class="small text-muted" title="{{ item.specifications }}">{{ item.specifications }}</span>
+                                    {% else %}
+                                    <span class="small text-muted opacity-50">None</span>
+                                    {% endif %}
+                                </td>
+                                <td class="py-3 px-3">
+                                    <small class="text-muted"><i class="far fa-clock me-1"></i>{{ item.searched_at }}</small>
+                                </td>
+                                <td class="py-3 px-4 text-end">
+                                    <a href="/search?q={{ item.product_name | urlencode }}" class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold">
+                                        <i class="fas fa-search me-1"></i>Re-search
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <div class="text-muted opacity-25 mb-3"><i class="fas fa-history fa-4x"></i></div>
+                    <h5 class="fw-bold text-secondary mb-2">No search history recorded yet</h5>
+                    <p class="text-muted small mb-4">When you search for products across Amazon, Flipkart & Meesho, your search history will appear here.</p>
+                    <a href="/" class="btn btn-primary rounded-pill px-4 fw-bold"><i class="fas fa-search me-2"></i>Start Searching</a>
+                </div>
+                {% endif %}
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

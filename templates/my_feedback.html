@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Feedback — SmartBuy Multiplatform Price Comparison</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .page-card {
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 24px;
+            backdrop-filter: blur(12px);
+        }
+        body.dark-mode .page-card {
+            background: rgba(30, 41, 59, 0.95) !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+            color: #f8fafc !important;
+        }
+        .star-rating-select select {
+            font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body class="premium-bg">
+
+<!-- NAVBAR -->
+<nav class="navbar navbar-expand-lg navbar-glass sticky-top shadow-sm py-3">
+    <div class="container-fluid px-4">
+        <a class="navbar-brand d-flex align-items-center text-dark me-4" href="/">
+            <span class="fs-4 fw-bold">Smart<span style="color:var(--secondary)">-Buy</span></span>
+            <i class="fas fa-bolt text-primary ms-1"></i>
+        </a>
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse"
+                data-bs-target="#navbarContent" aria-controls="navbarContent"
+                aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarContent">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0 align-items-lg-center gap-1">
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/"><i class="fas fa-home me-1 text-primary"></i>Home</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/about"><i class="fas fa-info-circle me-1"></i>About SmartBuy</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/my-searches"><i class="fas fa-history me-1 text-info"></i>My Searches</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/inbox"><i class="fas fa-inbox me-1 text-primary"></i>Inbox {% if unread_inbox_count > 0 %}<span class="badge bg-danger rounded-pill ms-1">{{ unread_inbox_count }}</span>{% endif %}</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold active text-primary" href="/my-feedback"><i class="fas fa-comment-alt me-1"></i>My Feedback</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/profile"><i class="fas fa-user-circle me-1 text-success"></i>Profile</a></li>
+            </ul>
+            <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
+                {% if current_user %}
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle fw-bold btn btn-outline-primary rounded-pill px-3 py-1 text-dark" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fas fa-user-circle me-1 text-primary"></i>{{ current_user.name }}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end rounded-4 border-0 shadow-lg p-2">
+                        <li><a class="dropdown-item rounded-3 py-2" href="/profile"><i class="fas fa-id-card me-2 text-primary"></i>Profile</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-searches"><i class="fas fa-history me-2 text-info"></i>My Searches</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-feedback"><i class="fas fa-comment-alt me-2 text-warning"></i>My Feedback</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item rounded-3 py-2 text-danger fw-semibold" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                    </ul>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-5">
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show rounded-4 shadow-sm mb-4" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="row g-4">
+
+        <!-- Left Column: Submit New Feedback Form -->
+        <div class="col-lg-5">
+            <div class="page-card p-4 p-md-4 shadow-lg h-100">
+                <div class="mb-3 border-bottom pb-3">
+                    <h4 class="fw-bold text-dark mb-1 d-flex align-items-center gap-2">
+                        <i class="fas fa-pen-alt text-warning"></i> Share Your Feedback
+                    </h4>
+                    <p class="text-muted small mb-0">Your feedback helps improve search and price comparisons</p>
+                </div>
+
+                <form action="/feedback/new" method="POST">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-secondary">Subject / Feedback Title</label>
+                        <input type="text" name="title" class="form-control rounded-pill px-3 shadow-none" placeholder="e.g. Product Search Experience" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-secondary">Rating</label>
+                        <select name="rating" class="form-select rounded-pill px-3 shadow-none fw-bold text-warning">
+                            <option value="5" selected>⭐⭐⭐⭐⭐ (5 / 5 - Excellent)</option>
+                            <option value="4">⭐⭐⭐⭐ (4 / 5 - Good)</option>
+                            <option value="3">⭐⭐⭐ (3 / 5 - Average)</option>
+                            <option value="2">⭐⭐ (2 / 5 - Poor)</option>
+                            <option value="1">⭐ (1 / 5 - Terrible)</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold small text-secondary">Feedback Message</label>
+                        <textarea name="message" rows="4" class="form-control rounded-4 px-3 py-2 shadow-none" placeholder="Write your detailed feedback here..." required></textarea>
+                    </div>
+
+                    <button type="submit" class="btn btn-warning text-dark w-100 rounded-pill py-2.5 fw-bold shadow-sm">
+                        <i class="fas fa-paper-plane me-2"></i>Submit Feedback
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Right Column: My Feedback List -->
+        <div class="col-lg-7">
+            <div class="page-card p-4 p-md-4 shadow-lg h-100">
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4 pb-3 border-bottom">
+                    <div>
+                        <h4 class="fw-bold text-dark mb-1 d-flex align-items-center gap-2">
+                            <i class="fas fa-comments text-primary"></i> My Feedback
+                        </h4>
+                        <p class="text-muted small mb-0">Feedback submitted from your account ({{ current_user.email }})</p>
+                    </div>
+                    <span class="badge bg-warning text-dark rounded-pill px-3 py-2 fw-bold">
+                        {{ feedbacks | length }} Entries
+                    </span>
+                </div>
+
+                {% if feedbacks %}
+                <div class="d-flex flex-column gap-3">
+                    {% for fb in feedbacks %}
+                    <div class="card border-0 shadow-sm rounded-4 p-3 bg-white">
+                        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-2">
+                            <div>
+                                <div class="mb-1">
+                                    {% for star in range(fb.rating) %}
+                                    <i class="fas fa-star text-warning"></i>
+                                    {% endfor %}
+                                    {% for empty_star in range(5 - fb.rating) %}
+                                    <i class="far fa-star text-muted"></i>
+                                    {% endfor %}
+                                    <span class="ms-2 fw-bold text-dark" style="font-size:0.85rem;">({{ fb.rating }}/5)</span>
+                                </div>
+                                <h6 class="fw-bold text-dark mb-1">{{ fb.title }}</h6>
+                            </div>
+                            <small class="text-muted"><i class="far fa-calendar-alt me-1"></i>{{ fb.created_at[:10] }}</small>
+                        </div>
+
+                        <p class="text-secondary small mb-3" style="line-height:1.6; white-space: pre-line;">
+                            "{{ fb.message }}"
+                        </p>
+
+                        <div class="d-flex justify-content-end gap-2 border-top pt-2">
+                            <!-- Edit Modal Trigger -->
+                            <button class="btn btn-outline-primary btn-sm rounded-pill px-3 fw-bold" data-bs-toggle="modal" data-bs-target="#editModal{{ fb.id }}">
+                                <i class="fas fa-edit me-1"></i>Edit
+                            </button>
+                            <!-- Delete Modal Trigger -->
+                            <button class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-bold" data-bs-toggle="modal" data-bs-target="#deleteModal{{ fb.id }}">
+                                <i class="fas fa-trash-alt me-1"></i>Delete
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Edit Modal -->
+                    <div class="modal fade" id="editModal{{ fb.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content rounded-4 border-0 shadow-lg p-3">
+                                <div class="modal-header border-0">
+                                    <h5 class="modal-title fw-bold text-dark"><i class="fas fa-edit text-primary me-2"></i>Edit Feedback</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <form action="/feedback/edit/{{ fb.id }}" method="POST">
+                                    <div class="modal-body">
+                                        <div class="mb-3">
+                                            <label class="form-label fw-bold small text-secondary">Title</label>
+                                            <input type="text" name="title" class="form-control rounded-pill px-3" value="{{ fb.title }}" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label fw-bold small text-secondary">Rating</label>
+                                            <select name="rating" class="form-select rounded-pill px-3 fw-bold text-warning">
+                                                <option value="5" {% if fb.rating == 5 %}selected{% endif %}>⭐⭐⭐⭐⭐ (5 / 5)</option>
+                                                <option value="4" {% if fb.rating == 4 %}selected{% endif %}>⭐⭐⭐⭐ (4 / 5)</option>
+                                                <option value="3" {% if fb.rating == 3 %}selected{% endif %}>⭐⭐⭐ (3 / 5)</option>
+                                                <option value="2" {% if fb.rating == 2 %}selected{% endif %}>⭐⭐ (2 / 5)</option>
+                                                <option value="1" {% if fb.rating == 1 %}selected{% endif %}>⭐ (1 / 5)</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label fw-bold small text-secondary">Message</label>
+                                            <textarea name="message" rows="4" class="form-control rounded-4 px-3 py-2" required>{{ fb.message }}</textarea>
+                                        </div>
+                                    </div>
+                                    <div class="modal-footer border-0">
+                                        <button type="button" class="btn btn-secondary rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                                        <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">Save Changes</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Delete Confirmation Modal -->
+                    <div class="modal fade" id="deleteModal{{ fb.id }}" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content rounded-4 border-0 shadow-lg p-3">
+                                <div class="modal-header border-0">
+                                    <h5 class="modal-title fw-bold text-danger"><i class="fas fa-exclamation-triangle me-2"></i>Delete Feedback</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <p class="text-secondary mb-0">Are you sure you want to delete this feedback item? This action cannot be undone.</p>
+                                </div>
+                                <div class="modal-footer border-0">
+                                    <button type="button" class="btn btn-secondary rounded-pill px-3" data-bs-dismiss="modal">Cancel</button>
+                                    <form action="/feedback/delete/{{ fb.id }}" method="POST" class="d-inline">
+                                        <button type="submit" class="btn btn-danger rounded-pill px-4 fw-bold">Delete Feedback</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <div class="text-muted opacity-25 mb-3"><i class="fas fa-comment-dots fa-4x"></i></div>
+                    <h6 class="fw-bold text-secondary mb-1">No feedback submitted yet</h6>
+                    <p class="text-muted small mb-0">Use the form on the left to share your thoughts and ratings with us.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

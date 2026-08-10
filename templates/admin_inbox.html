@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📥 SmartBuy Admin Inbox | Administrator Only</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: 'Poppins', system-ui, -apple-system, sans-serif;
+            min-height: 100vh;
+        }
+        .admin-navbar {
+            background: rgba(30, 41, 59, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .inbox-card {
+            background: rgba(30, 41, 59, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            padding: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        .inbox-item {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            transition: all 0.2s ease;
+        }
+        .inbox-item.unread {
+            border-left: 4px solid var(--primary);
+            background: rgba(37, 99, 235, 0.08);
+        }
+        .inbox-item:hover {
+            border-color: rgba(255, 255, 255, 0.18);
+            transform: translateY(-2px);
+        }
+        .badge-type {
+            font-size: 0.78rem;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 20px;
+        }
+        .bg-new_user { background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); }
+        .bg-product_selected { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
+        .bg-feedback { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3); }
+    </style>
+</head>
+<body>
+
+<!-- Admin Navbar -->
+<nav class="navbar navbar-expand-lg admin-navbar sticky-top py-3">
+    <div class="container-fluid px-4">
+        <a class="navbar-brand d-flex align-items-center text-white me-4" href="/admin/dashboard">
+            <i class="fas fa-user-shield text-danger fs-3 me-2"></i>
+            <span class="fs-4 fw-bold">Smart<span class="text-primary">Buy</span> Admin</span>
+        </a>
+        <button class="navbar-toggler border-0 text-white" type="button" data-bs-toggle="collapse" data-bs-target="#adminNavbar">
+            <i class="fas fa-bars"></i>
+        </button>
+        <div class="collapse navbar-collapse" id="adminNavbar">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0 gap-2">
+                <li class="nav-item">
+                    <a class="nav-link text-white fw-semibold" href="/admin/dashboard"><i class="fas fa-tachometer-alt me-1 text-primary"></i>Admin Dashboard</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link text-white active fw-semibold" href="/admin/inbox"><i class="fas fa-inbox me-1 text-danger"></i>SmartBuy Inbox</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link text-white fw-semibold" href="/admin/users"><i class="fas fa-users me-1 text-info"></i>Users</a>
+                </li>
+            </ul>
+            <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
+                <li class="nav-item">
+                    <a class="btn btn-outline-light btn-sm rounded-pill px-3" href="/" target="_blank"><i class="fas fa-external-link-alt me-1"></i>View Site</a>
+                </li>
+                <li class="nav-item">
+                    <a class="btn btn-danger btn-sm rounded-pill px-3 fw-semibold" href="/logout"><i class="fas fa-sign-out-alt me-1"></i>Logout</a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- Main Container -->
+<div class="container py-4" style="max-width: 900px;">
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} border-0 rounded-4 shadow-sm mb-4" role="alert">
+              <i class="fas fa-info-circle me-2"></i>{{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <div>
+            <h2 class="fw-bold mb-1"><i class="fas fa-inbox text-danger me-2"></i>SMARTBUY ADMIN INBOX</h2>
+            <p class="text-secondary mb-0">System-wide notifications for registered user signups, product selections, and ratings</p>
+        </div>
+        <span class="badge bg-danger rounded-pill fs-6 px-3 py-2">Administrator Access Only</span>
+    </div>
+
+    <div class="inbox-card">
+        {% for n in notifications %}
+        <div class="inbox-item {% if not n.is_read %}unread{% endif %}">
+            <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-2">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge-type bg-{{ n.notification_type }}">
+                        {% if n.notification_type == 'new_user' %}
+                        <i class="fas fa-user-plus me-1"></i>New User Registered
+                        {% elif n.notification_type == 'product_selected' %}
+                        <i class="fas fa-shopping-cart me-1"></i>Product Selected
+                        {% else %}
+                        <i class="fas fa-comment-alt me-1"></i>User Feedback
+                        {% endif %}
+                    </span>
+                    <h5 class="fw-bold mb-0 text-white">{{ n.title }}</h5>
+                </div>
+                <span class="text-secondary small"><i class="far fa-clock me-1"></i>{{ n.created_at }}</span>
+            </div>
+
+            <p class="text-light mb-3" style="font-size: 0.95rem; white-space: pre-line;">{{ n.message }}</p>
+
+            <div class="d-flex align-items-center justify-content-between border-top border-secondary border-opacity-25 pt-3 flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-3">
+                    {% if n.user_name %}
+                    <span class="small text-secondary"><i class="fas fa-user me-1 text-primary"></i><strong>Name:</strong> {{ n.user_name }}</span>
+                    <span class="small text-secondary"><i class="fas fa-envelope me-1 text-info"></i><strong>Email:</strong> {{ n.user_email }}</span>
+                    {% endif %}
+                    <span class="badge bg-success rounded-pill px-2 py-1" style="font-size: 0.75rem;">Status: Active</span>
+                </div>
+
+                <div class="d-flex align-items-center gap-2">
+                    {% if n.user_id %}
+                    <a href="/admin/user/{{ n.user_id }}" class="btn btn-primary btn-sm rounded-pill px-3 fw-semibold">
+                        <i class="fas fa-id-card me-1"></i>View User Details
+                    </a>
+                    {% endif %}
+
+                    {% if not n.is_read %}
+                    <form action="/admin/inbox/read/{{ n.id }}" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm rounded-circle" title="Mark Read">
+                            <i class="fas fa-check"></i>
+                        </button>
+                    </form>
+                    {% endif %}
+
+                    <form action="/admin/inbox/delete/{{ n.id }}" method="POST" style="display:inline;">
+                        <button type="submit" class="btn btn-outline-danger btn-sm rounded-circle" title="Delete Notification" onclick="return confirm('Delete this notification?')">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center text-secondary py-5">
+            <i class="fas fa-inbox fs-1 mb-3 text-secondary opacity-50 d-block"></i>
+            <h5>Your Admin SmartBuy Inbox is empty.</h5>
+            <p class="small text-secondary">New user signups and product selections will appear here automatically.</p>
+        </div>
+        {% endfor %}
+    </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

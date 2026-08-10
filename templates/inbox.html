@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartBuy Inbox — Personal Activity Center</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .page-card {
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 24px;
+            backdrop-filter: blur(12px);
+        }
+        body.dark-mode .page-card {
+            background: rgba(30, 41, 59, 0.95) !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+            color: #f8fafc !important;
+        }
+        .inbox-item {
+            transition: all 0.2s ease;
+            border-left: 4px solid transparent !important;
+        }
+        .inbox-item.unread {
+            background: rgba(37, 99, 235, 0.04) !important;
+            border-left-color: var(--primary) !important;
+        }
+        .inbox-type-search { color: #2563eb; background: rgba(37,99,235,0.1); }
+        .inbox-type-feedback { color: #f59e0b; background: rgba(245,158,11,0.1); }
+        .inbox-type-best_deal { color: #10b981; background: rgba(16,185,129,0.1); }
+        .inbox-type-system { color: #8b5cf6; background: rgba(139,92,246,0.1); }
+    </style>
+</head>
+<body class="premium-bg">
+
+<!-- NAVBAR -->
+<nav class="navbar navbar-expand-lg navbar-glass sticky-top shadow-sm py-3">
+    <div class="container-fluid px-4">
+        <a class="navbar-brand d-flex align-items-center text-dark me-4" href="/">
+            <span class="fs-4 fw-bold">Smart<span style="color:var(--secondary)">-Buy</span></span>
+            <i class="fas fa-bolt text-primary ms-1"></i>
+        </a>
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse"
+                data-bs-target="#navbarContent" aria-controls="navbarContent"
+                aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarContent">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0 align-items-lg-center gap-1">
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/"><i class="fas fa-home me-1 text-primary"></i>Home</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/about"><i class="fas fa-info-circle me-1 text-secondary"></i>About SmartBuy</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/my-searches"><i class="fas fa-history me-1 text-info"></i>My Searches</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold active text-primary" href="/inbox"><i class="fas fa-inbox me-1"></i>Inbox {% if unread_inbox_count > 0 %}<span class="badge bg-danger rounded-pill">{{ unread_inbox_count }}</span>{% endif %}</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/my-feedback"><i class="fas fa-comment-alt me-1 text-warning"></i>My Feedback</a></li>
+                <li class="nav-item"><a class="nav-link px-3 fw-semibold" href="/profile"><i class="fas fa-user-circle me-1 text-success"></i>Profile</a></li>
+            </ul>
+            <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
+                {% if current_user %}
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle fw-bold btn btn-outline-primary rounded-pill px-3 py-1 text-dark" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fas fa-user-circle me-1 text-primary"></i>{{ current_user.name }}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end rounded-4 border-0 shadow-lg p-2">
+                        <li><a class="dropdown-item rounded-3 py-2" href="/profile"><i class="fas fa-id-card me-2 text-primary"></i>Profile</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/inbox"><i class="fas fa-inbox me-2 text-primary"></i>SmartBuy Inbox</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-searches"><i class="fas fa-history me-2 text-info"></i>My Searches</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-feedback"><i class="fas fa-comment-alt me-2 text-warning"></i>My Feedback</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item rounded-3 py-2 text-danger fw-semibold" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                    </ul>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<div class="container py-5">
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show rounded-4 shadow-sm mb-4" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="row justify-content-center">
+        <div class="col-lg-9">
+            <div class="page-card p-4 p-md-5 shadow-lg">
+
+                <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 pb-4 mb-4 border-bottom">
+                    <div>
+                        <h2 class="fw-extrabold text-dark mb-1 d-flex align-items-center gap-2">
+                            <i class="fas fa-inbox text-primary"></i> SmartBuy Inbox
+                        </h2>
+                        <p class="text-muted small mb-0">Your private activity notifications, deal alerts, and saved comparison logs</p>
+                    </div>
+                    <div>
+                        {% if unread_inbox_count > 0 %}
+                        <span class="badge bg-danger rounded-pill px-3 py-2 fw-bold me-1">
+                            {{ unread_inbox_count }} Unread
+                        </span>
+                        {% endif %}
+                        <span class="badge bg-primary text-white rounded-pill px-3 py-2 fw-bold">
+                            {{ inbox_messages | length }} Total
+                        </span>
+                    </div>
+                </div>
+
+                {% if inbox_messages %}
+                <div class="d-flex flex-column gap-3">
+                    {% for msg in inbox_messages %}
+                    <div class="card border-0 shadow-sm rounded-4 p-3.5 bg-white inbox-item {% if not msg.is_read %}unread{% endif %}">
+                        <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-2">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge rounded-pill p-2 px-3 fw-bold inbox-type-{{ msg.message_type }}">
+                                    {% if msg.message_type == 'search' %}
+                                    <i class="fas fa-search me-1"></i>Search Completed
+                                    {% elif msg.message_type == 'best_deal' %}
+                                    <i class="fas fa-trophy me-1"></i>Best Deal Found
+                                    {% elif msg.message_type == 'selected_product' %}
+                                    <i class="fas fa-shopping-cart me-1"></i>Selected Product
+                                    {% elif msg.message_type == 'deal_opened' %}
+                                    <i class="fas fa-external-link-alt me-1"></i>Deal Opened
+                                    {% elif msg.message_type == 'feedback' %}
+                                    <i class="fas fa-comment-alt me-1"></i>Feedback Submitted
+                                    {% else %}
+                                    <i class="fas fa-bell me-1"></i>Notification
+                                    {% endif %}
+                                </span>
+                                <h6 class="fw-bold text-dark mb-0">{{ msg.title }}</h6>
+                            </div>
+                            <small class="text-muted"><i class="far fa-clock me-1"></i>{{ msg.created_at }}</small>
+                        </div>
+
+                        <div class="text-secondary small mb-3" style="line-height: 1.6; white-space: pre-line;">
+                            {{ msg.message }}
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2 border-top pt-2">
+                            {% if msg.message_type in ['selected_product', 'best_deal', 'search'] %}
+                            <a href="/profile" class="btn btn-primary btn-sm rounded-pill px-3 fw-bold">
+                                <i class="fas fa-eye me-1"></i>View Product
+                            </a>
+                            {% endif %}
+                            {% if not msg.is_read %}
+                            <form action="/inbox/read/{{ msg.id }}" method="POST" class="d-inline">
+                                <button type="submit" class="btn btn-outline-secondary btn-sm rounded-pill px-3 fw-semibold">
+                                    <i class="fas fa-check-double me-1"></i>Mark as Read
+                                </button>
+                            </form>
+                            {% endif %}
+                            <form action="/inbox/delete/{{ msg.id }}" method="POST" class="d-inline">
+                                <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill px-3 fw-semibold">
+                                    <i class="fas fa-trash-alt me-1"></i>Delete
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <div class="text-muted opacity-25 mb-3"><i class="fas fa-inbox fa-4x"></i></div>
+                    <h5 class="fw-bold text-secondary mb-2">Your inbox is empty</h5>
+                    <p class="text-muted small mb-4">When you search products, receive deal alerts, or submit feedback, your private notifications will appear here.</p>
+                    <a href="/" class="btn btn-primary rounded-pill px-4 fw-bold"><i class="fas fa-search me-2"></i>Start Product Search</a>
+                </div>
+                {% endif %}
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart-Buy: Multiplatform Price Review Comparison System</title>
+    <meta name="description" content="Smart-Buy: Multiplatform Price Review Comparison System. Compare prices and reviews for any product across Amazon, Flipkart, and Meesho in real-time.">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ── Hero Search Section ── */
+        .hero-section {
+            min-height: 70vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px 40px;
+        }
+        .hero-badge {
+            background: linear-gradient(135deg, rgba(37,99,235,0.1), rgba(147,51,234,0.1));
+            border: 1px solid rgba(37,99,235,0.2);
+            border-radius: 30px;
+            padding: 6px 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 24px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            animation: floatIn 0.6s ease both;
+        }
+        @keyframes floatIn {
+            from { opacity: 0; transform: translateY(-16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .hero-title {
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 800;
+            line-height: 1.15;
+            letter-spacing: -1.5px;
+            animation: floatIn 0.7s ease 0.1s both;
+        }
+        .hero-subtitle {
+            font-size: 1.05rem;
+            color: #475569;
+            max-width: 600px;
+            text-align: center;
+            animation: floatIn 0.7s ease 0.2s both;
+        }
+        /* ── Platform Badges ── */
+        .platform-badge-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 10px;
+            animation: floatIn 0.7s ease 0.3s both;
+        }
+        .platform-badge-item {
+            background: rgba(255,255,255,0.7);
+            border: 1px solid rgba(0,0,0,0.08);
+            border-radius: 12px;
+            padding: 5px 14px;
+            font-size: 0.82rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .pb-amazon  { color: #FF9900; }
+        .pb-flipkart{ color: #2874f0; }
+        .pb-meesho  { color: #F43397; }
+        /* ── Search Bar ── */
+        .hero-search-wrap {
+            width: 100%;
+            max-width: 720px;
+            animation: floatIn 0.7s ease 0.35s both;
+        }
+        .hero-search-box {
+            background: #fff;
+            border: 1.5px solid rgba(37,99,235,0.18);
+            border-radius: 50px;
+            padding: 6px 6px 6px 24px;
+            box-shadow: 0 12px 40px rgba(37,99,235,0.1);
+            display: flex;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+        .hero-search-box:focus-within {
+            border-color: var(--primary);
+            box-shadow: 0 16px 50px rgba(37,99,235,0.18);
+            transform: translateY(-2px);
+        }
+        .hero-search-input {
+            flex: 1;
+            border: none;
+            outline: none;
+            background: transparent;
+            font-size: 1.05rem;
+            font-family: 'Poppins', sans-serif;
+            color: #0f172a;
+            padding: 8px 0;
+        }
+        .hero-search-input::placeholder { color: #94a3b8; }
+        .hero-search-btn {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            border-radius: 40px;
+            padding: 12px 30px;
+            color: #fff;
+            font-weight: 600;
+            font-family: 'Poppins', sans-serif;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+        .hero-search-btn:hover {
+            transform: scale(1.04);
+            box-shadow: 0 6px 20px rgba(37,99,235,0.35);
+        }
+        /* ── Quick Filters ── */
+        .quick-filters {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 14px;
+            font-size: 0.85rem;
+            animation: floatIn 0.7s ease 0.45s both;
+        }
+        .quick-filter-label { color: #64748b; font-weight: 500; }
+        .quick-filter-tag {
+            background: rgba(255,255,255,0.8);
+            border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 20px;
+            padding: 4px 14px;
+            font-weight: 500;
+            color: #334155;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+        .quick-filter-tag:hover {
+            background: rgba(37,99,235,0.08);
+            border-color: rgba(37,99,235,0.25);
+            color: var(--primary);
+        }
+        /* ── Category Grid ── */
+        .category-section {
+            padding: 20px 0 60px;
+        }
+        .section-label {
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 16px;
+        }
+        .category-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 12px;
+        }
+        .category-chip {
+            background: rgba(255,255,255,0.7);
+            border: 1px solid rgba(0,0,0,0.07);
+            border-radius: 18px;
+            padding: 14px 12px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            text-decoration: none;
+            color: #334155;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        .category-chip:hover {
+            background: rgba(255,255,255,0.95);
+            border-color: rgba(37,99,235,0.25);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(37,99,235,0.1);
+            color: var(--primary);
+        }
+        .category-chip-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(37,99,235,0.1), rgba(147,51,234,0.1));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            color: var(--primary);
+            transition: all 0.25s ease;
+        }
+        .category-chip:hover .category-chip-icon {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #fff;
+        }
+        .category-chip-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+        /* ── Trending Searches ── */
+        .trending-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        .trending-tag {
+            background: rgba(255,255,255,0.75);
+            border: 1px solid rgba(0,0,0,0.08);
+            border-radius: 20px;
+            padding: 5px 14px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            color: #334155;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+        .trending-tag:hover {
+            background: rgba(37,99,235,0.08);
+            color: var(--primary);
+        }
+        /* ── How It Works ── */
+        .how-step {
+            text-align: center;
+            padding: 20px;
+        }
+        .how-step-number {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #fff;
+            font-weight: 800;
+            font-size: 1rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 12px rgba(37,99,235,0.3);
+        }
+        /* ── Stat Numbers ── */
+        .stat-number {
+            font-size: 2rem;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        /* ── Skeleton ── */
+        .skeleton {
+            background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 8px;
+        }
+        @keyframes shimmer {
+            0%   { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        /* ── Loading Overlay ── */
+        #loadingOverlay {
+            background: rgba(15,23,42,0.88);
+            backdrop-filter: blur(8px);
+            z-index: 9999;
+        }
+        .platform-searching {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 20px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            margin: 4px 0;
+            font-size: 0.9rem;
+        }
+        .platform-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse-dot 1.2s infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 0.3; transform: scale(0.9); }
+            50%       { opacity: 1; transform: scale(1.2); }
+        }
+        .dot-amazon  { background: #FF9900; animation-delay: 0s; }
+        .dot-flipkart{ background: #2874f0; animation-delay: 0.3s; }
+        .dot-meesho  { background: #F43397; animation-delay: 0.6s; }
+
+        /* ── Dark Mode ── */
+        body.dark-mode {
+            background-color: #0f172a !important;
+            color: #f8fafc !important;
+        }
+        body.dark-mode .navbar-glass,
+        body.dark-mode .glass-card,
+        body.dark-mode .hero-search-box,
+        body.dark-mode .quick-filter-tag,
+        body.dark-mode .category-chip,
+        body.dark-mode .trending-tag,
+        body.dark-mode .modal-content {
+            background: rgba(30, 41, 59, 0.95) !important;
+            border-color: rgba(255, 255, 255, 0.12) !important;
+            color: #f8fafc !important;
+        }
+        body.dark-mode .text-dark,
+        body.dark-mode .hero-title,
+        body.dark-mode .navbar-brand {
+            color: #f8fafc !important;
+        }
+        body.dark-mode .hero-subtitle,
+        body.dark-mode .text-muted {
+            color: #94a3b8 !important;
+        }
+        body.dark-mode .hero-search-input {
+            color: #fff !important;
+        }
+    </style>
+</head>
+<body class="premium-bg">
+
+<!-- ════════════════════════════ NAVBAR ════════════════════════════ -->
+<nav class="navbar navbar-expand-lg navbar-glass sticky-top shadow-sm py-3">
+    <div class="container-fluid px-4">
+        <a class="navbar-brand d-flex align-items-center text-dark me-4" href="/" title="Smart-Buy: Multiplatform Price And Review Comparison System">
+            <span class="fs-4 fw-bold">Smart<span style="color:var(--secondary)">-Buy</span></span>
+            <i class="fas fa-bolt text-primary fs-4 ms-2"></i>
+        </a>
+        <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse"
+                data-bs-target="#navbarContent" aria-controls="navbarContent"
+                aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarContent">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0 align-items-lg-center gap-1">
+                {% if current_user and current_user.is_admin %}
+                <li class="nav-item">
+                    <a class="nav-link px-3 fw-semibold text-danger" href="/admin/dashboard"><i class="fas fa-tachometer-alt me-1"></i>Admin Dashboard</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link px-3 fw-semibold text-danger" href="/admin/inbox"><i class="fas fa-inbox me-1"></i>SmartBuy Inbox {% if admin_unread_count > 0 %}<span class="badge bg-danger rounded-pill ms-1">{{ admin_unread_count }}</span>{% endif %}</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link px-3 fw-semibold text-info" href="/admin/users"><i class="fas fa-users me-1"></i>Users</a>
+                </li>
+                {% else %}
+                <li class="nav-item">
+                    <a class="nav-link px-3 active fw-semibold" href="/"><i class="fas fa-home me-1 text-primary"></i>Home</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link px-3 fw-semibold" href="/about"><i class="fas fa-info-circle me-1 text-secondary"></i>About</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link px-3 fw-semibold" href="/search?q=Mobiles"><i class="fas fa-search me-1 text-success"></i>Search Products</a>
+                </li>
+                {% if current_user %}
+                <li class="nav-item">
+                    <a class="nav-link px-3 fw-semibold" href="/profile"><i class="fas fa-user-circle me-1 text-primary"></i>Profile</a>
+                </li>
+                {% endif %}
+                {% endif %}
+            </ul>
+            <ul class="navbar-nav ms-auto align-items-lg-center gap-2">
+                <li class="nav-item me-lg-2">
+                    <button class="btn btn-outline-secondary btn-sm rounded-circle p-2" id="themeToggleBtn" onclick="toggleDarkMode()" title="Toggle Dark Mode" style="width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center;">
+                        <i class="fas fa-moon" id="themeIcon"></i>
+                    </button>
+                </li>
+                {% if current_user %}
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle fw-bold btn btn-outline-primary rounded-pill px-3 py-1 text-dark" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fas fa-user-circle me-1 text-primary"></i>{{ current_user.name }}
+                        {% if current_user.is_admin %}<span class="badge bg-danger ms-1">Admin</span>{% endif %}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end rounded-4 border-0 shadow-lg p-2">
+                        {% if current_user.is_admin %}
+                        <li><a class="dropdown-item rounded-3 py-2" href="/admin/dashboard"><i class="fas fa-tachometer-alt me-2 text-danger"></i>Admin Dashboard</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/admin/inbox"><i class="fas fa-inbox me-2 text-danger"></i>SmartBuy Inbox</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/admin/users"><i class="fas fa-users me-2 text-info"></i>Users List</a></li>
+                        {% else %}
+                        <li><a class="dropdown-item rounded-3 py-2" href="/profile"><i class="fas fa-id-card me-2 text-primary"></i>Profile</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-searches"><i class="fas fa-history me-2 text-info"></i>My Searches</a></li>
+                        <li><a class="dropdown-item rounded-3 py-2" href="/my-feedback"><i class="fas fa-comment-alt me-2 text-warning"></i>My Feedback</a></li>
+                        {% endif %}
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item rounded-3 py-2 text-danger fw-semibold" href="/logout"><i class="fas fa-sign-out-alt me-2"></i>Logout</a></li>
+                    </ul>
+                </li>
+                {% else %}
+                <li class="nav-item">
+                    <a class="btn btn-outline-secondary rounded-pill px-3 fw-semibold" href="/signup"><i class="fas fa-pen-fancy me-1"></i>Sign Up</a>
+                </li>
+                <li class="nav-item">
+                    <a class="btn btn-primary rounded-pill px-3 fw-semibold" href="/signin"><i class="fas fa-lock me-1"></i>Sign In</a>
+                </li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- Flash Messages Banner -->
+<div class="container pt-3">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category if category != 'error' else 'danger' }} alert-dismissible fade show rounded-4 shadow-sm mb-3" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+</div>
+
+<!-- ════════════════════════════ HERO ════════════════════════════ -->
+<div class="hero-section">
+    <div style="text-align:center; max-width:900px; width:100%;">
+
+        <div class="hero-badge">
+            <i class="fas fa-bolt"></i>
+            Live price comparison across 3 platforms
+        </div>
+
+        <h1 class="hero-title gradient-text mb-3">
+            Smart-Buy: Multiplatform Price And Review Comparison System
+        </h1>
+
+        <!-- Platform badges -->
+        <div class="platform-badge-row mb-4">
+            <div class="platform-badge-item pb-amazon"><i class="fab fa-amazon"></i> Amazon</div>
+            <div style="color:#94a3b8; font-size:0.8rem;">+</div>
+            <div class="platform-badge-item pb-flipkart"><i class="fas fa-store"></i> Flipkart</div>
+            <div style="color:#94a3b8; font-size:0.8rem;">+</div>
+            <div class="platform-badge-item pb-meesho"><i class="fas fa-tags"></i> Meesho</div>
+        </div>
+
+        <!-- ════ PRODUCT SPECIFICATIONS CARD COMPONENT ════ -->
+        <div class="product-specifications-card mb-4 text-start">
+            <!-- Header -->
+            <div class="d-flex align-items-center gap-3 mb-4">
+                <div class="spec-header-icon-box">
+                    <i class="fas fa-sliders-h"></i>
+                </div>
+                <div>
+                    <h3 class="fw-bold mb-1 text-dark" style="font-size:1.55rem; letter-spacing:-0.5px;">Product Specifications</h3>
+                    <p class="text-muted small mb-0" style="font-size:0.9rem;">
+                        Select category and filter specifications before searching matching products across Amazon, Flipkart, and Meesho.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Category Pills Row -->
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-4" id="categoryPillContainer">
+                <button type="button" class="spec-cat-pill active" data-cat="Mobiles" onclick="switchSpecCategory('Mobiles', this)">
+                    <i class="fas fa-mobile-alt me-2"></i>Mobiles
+                </button>
+                <button type="button" class="spec-cat-pill" data-cat="Laptops" onclick="switchSpecCategory('Laptops', this)">
+                    <i class="fas fa-laptop me-2"></i>Laptops
+                </button>
+                <button type="button" class="spec-cat-pill" data-cat="Headphones" onclick="switchSpecCategory('Headphones', this)">
+                    <i class="fas fa-headphones me-2"></i>Headphones
+                </button>
+                <button type="button" class="spec-cat-pill" data-cat="Smartwatches" onclick="switchSpecCategory('Smartwatches', this)">
+                    <i class="fas fa-clock me-2"></i>Smartwatches
+                </button>
+                <button type="button" class="spec-cat-pill" data-cat="Home Appliances" onclick="switchSpecCategory('Home Appliances', this)">
+                    <i class="fas fa-tv me-2"></i>Home Appliances
+                </button>
+            </div>
+
+            <!-- Form -->
+            <form action="/search" method="GET" id="mainSearchForm" onsubmit="showLoading()">
+                <input type="hidden" name="category" id="specCategoryInput" value="Mobiles">
+
+                <!-- 3x3 Specifications Grid -->
+                <div class="row g-3 mb-4" id="specFieldsGrid">
+                    <!-- Populated dynamically via JS -->
+                </div>
+
+                <!-- Bottom Search Input Pill -->
+                <div class="hero-search-box position-relative" id="searchBoxContainer" style="border-radius:50px; background:#fff; border:1.5px solid #cbd5e1; padding:6px 6px 6px 24px;">
+                    <i class="fas fa-search me-3" style="color:#94a3b8; font-size:1.1rem; flex-shrink:0;"></i>
+                    <input
+                        type="text"
+                        name="q"
+                        id="specSearchInput"
+                        class="hero-search-input autocomplete-input"
+                        placeholder="Enter Product Name (optional, e.g. Samsung Galaxy S23)..."
+                        autocomplete="off"
+                        aria-label="Search Product"
+                    >
+                    <button type="submit" class="hero-search-btn" id="searchBtn" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); border-radius:40px; padding:12px 32px; font-weight:700;">
+                        <i class="fas fa-search me-2"></i>
+                        <span>Search Products</span>
+                    </button>
+                    <!-- Autocomplete dropdown -->
+                    <div id="autocompleteDropdown" class="autocomplete-dropdown d-none"></div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Trending Searches -->
+        {% if trending_searches %}
+        <div class="mt-2">
+            <small class="text-muted fw-semibold me-2"><i class="fas fa-fire text-danger me-1"></i>Trending:</small>
+            <div class="trending-row d-inline-flex flex-wrap">
+                {% for term in trending_searches %}
+                <a href="/search?q={{ term | urlencode }}" class="trending-tag">{{ term }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ════════════════════════════ CATEGORIES ════════════════════════════ -->
+<div class="container category-section">
+    <p class="section-label text-center"><i class="fas fa-compass me-2"></i>Browse by Category</p>
+    <div class="category-grid">
+        {% for cat in category_hints %}
+        <a href="/search?q={{ cat.query | urlencode }}" class="category-chip scroll-anim fade-up"
+           title="Search {{ cat.query }}">
+            <div class="category-chip-icon">
+                <i class="{{ cat.icon }}"></i>
+            </div>
+            <span class="category-chip-label">{{ cat.label }}</span>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- ════════════════════════════ HOW IT WORKS ════════════════════════════ -->
+<div class="container pb-5 scroll-anim fade-up">
+    <div class="glass-card rounded-4 p-4 p-md-5">
+        <h2 class="text-center fw-bold mb-1" style="font-size:1.5rem;">How SmartBuy Works</h2>
+        <p class="text-center text-muted mb-4 small">Real-time search engine — no static database</p>
+        <div class="row g-3 text-center">
+            <div class="col-6 col-md-3">
+                <div class="how-step">
+                    <div class="how-step-number">1</div>
+                    <h6 class="fw-bold">Type Anything</h6>
+                    <p class="text-muted small mb-0">Any product — electronics, grocery, fashion, furniture</p>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="how-step">
+                    <div class="how-step-number">2</div>
+                    <h6 class="fw-bold">Live Scraping</h6>
+                    <p class="text-muted small mb-0">Amazon, Flipkart & Meesho searched simultaneously</p>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="how-step">
+                    <div class="how-step-number">3</div>
+                    <h6 class="fw-bold">Smart Ranking</h6>
+                    <p class="text-muted small mb-0">RapidFuzz matching, deduplication & scoring</p>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="how-step">
+                    <div class="how-step-number">4</div>
+                    <h6 class="fw-bold">Best Deals</h6>
+                    <p class="text-muted small mb-0">Lowest price, highest rating, best discount highlighted</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Row -->
+        <hr class="my-4 opacity-25">
+        <div class="row g-2 text-center">
+            <div class="col-4">
+                <div class="stat-number">3</div>
+                <p class="text-muted small mb-0">Platforms</p>
+            </div>
+            <div class="col-4">
+                <div class="stat-number">∞</div>
+                <p class="text-muted small mb-0">Products</p>
+            </div>
+            <div class="col-4">
+                <div class="stat-number">0</div>
+                <p class="text-muted small mb-0">Hardcoded Items</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════════════════ LOADING OVERLAY ════════════════════════════ -->
+<div id="loadingOverlay" class="d-none position-fixed top-0 start-0 w-100 h-100
+     d-flex flex-column align-items-center justify-content-center text-white">
+    <div style="text-align:center; max-width:380px;">
+        <div class="spinner-border text-primary mb-3" style="width:3rem; height:3rem;" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <h4 class="fw-bold mb-2"><i class="fas fa-sliders-h text-primary me-2"></i>Searching Products Live</h4>
+        <p class="opacity-75 small mb-3">Searching products using your selected specifications across Amazon, Flipkart & Meesho...</p>
+        <div class="platform-searching">
+            <div class="platform-dot dot-amazon"></div>
+            <span style="color:#FF9900; font-weight:600;">Amazon.in</span>
+            <span class="ms-auto opacity-50 small">searching...</span>
+        </div>
+        <div class="platform-searching">
+            <div class="platform-dot dot-flipkart"></div>
+            <span style="color:#2874f0; font-weight:600;">Flipkart</span>
+            <span class="ms-auto opacity-50 small">searching...</span>
+        </div>
+        <div class="platform-searching">
+            <div class="platform-dot dot-meesho"></div>
+            <span style="color:#F43397; font-weight:600;">Meesho</span>
+            <span class="ms-auto opacity-50 small">searching...</span>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════════════════ MODALS ════════════════════════════ -->
+<!-- About Modal -->
+<div class="modal fade modal-glass-premium" id="aboutModal" tabindex="-1" aria-labelledby="aboutModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content border-0">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold" id="aboutModalLabel">
+                    <i class="fas fa-bolt text-primary me-2"></i>About SmartBuy
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body py-4">
+                <p class="fw-semibold text-dark mb-4">
+                    SmartBuy is a fully dynamic multi-platform price comparison system. No hardcoded products — search anything.
+                </p>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="p-3 rounded-3 bg-light border h-100">
+                            <h6 class="fw-bold text-primary"><i class="fas fa-search me-2"></i>Universal Search</h6>
+                            <p class="text-muted small mb-0 mt-2">Search any product — grocery, electronics, fashion, furniture, pet food, baby care, and everything in between.</p>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="p-3 rounded-3 bg-light border h-100">
+                            <h6 class="fw-bold text-secondary"><i class="fas fa-chart-line me-2"></i>Live Price Comparison</h6>
+                            <p class="text-muted small mb-0 mt-2">Real-time Playwright scrapers fetch current prices from Amazon, Flipkart, and Meesho simultaneously.</p>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="p-3 rounded-3 bg-light border h-100">
+                            <h6 class="fw-bold text-info"><i class="fas fa-robot me-2"></i>RapidFuzz Matching</h6>
+                            <p class="text-muted small mb-0 mt-2">Adaptive similarity scoring filters irrelevant results. Works for electronics, groceries, and everything else.</p>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="p-3 rounded-3 bg-light border h-100">
+                            <h6 class="fw-bold text-success"><i class="fas fa-sliders-h me-2"></i>Dynamic Filters</h6>
+                            <p class="text-muted small mb-0 mt-2">Filters are generated from actual search results — no predefined dropdowns. Brand, price, rating, discount, and more.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-0 pt-0">
+                <button type="button" class="btn btn-secondary rounded-pill px-4" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sign In Modal -->
+<div class="modal fade modal-glass-premium" id="signinModal" tabindex="-1" aria-labelledby="signinModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold" id="signinModalLabel"><i class="fas fa-lock text-primary me-2"></i>Sign In</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body py-4">
+                <form onsubmit="event.preventDefault(); alert('Signed in successfully! (Simulated)'); bootstrap.Modal.getInstance(document.getElementById('signinModal')).hide();">
+                    <div class="mb-3">
+                        <label for="emailInput" class="form-label fw-semibold small text-muted">Email address</label>
+                        <input type="email" class="form-control rounded-pill px-3" id="emailInput" placeholder="name@example.com" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="passwordInput" class="form-label fw-semibold small text-muted">Password</label>
+                        <input type="password" class="form-control rounded-pill px-3" id="passwordInput" placeholder="Enter password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 rounded-pill py-2 fw-semibold"
+                            style="background: linear-gradient(135deg, var(--primary), var(--secondary)); border: none;">
+                        Sign In
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sign Up Modal -->
+<div class="modal fade modal-glass-premium" id="signupModal" tabindex="-1" aria-labelledby="signupModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold" id="signupModalLabel"><i class="fas fa-user-plus text-secondary me-2"></i>Create Account</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body py-4">
+                <form id="signupForm">
+                    <div class="mb-3">
+                        <label for="usernameInput" class="form-label fw-semibold small text-muted">Full Name</label>
+                        <input type="text" class="form-control rounded-pill px-3" id="usernameInput" placeholder="John Doe" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="signupEmailInput" class="form-label fw-semibold small text-muted">Email address</label>
+                        <input type="email" class="form-control rounded-pill px-3" id="signupEmailInput" placeholder="name@example.com" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="signupPasswordInput" class="form-label fw-semibold small text-muted">Password</label>
+                        <input type="password" class="form-control rounded-pill px-3" id="signupPasswordInput" placeholder="Create password" required>
+                    </div>
+                    <button type="submit" class="btn btn-secondary w-100 rounded-pill py-2 fw-semibold"
+                            style="background: linear-gradient(135deg, var(--secondary), var(--accent)); border: none;">
+                        Sign Up
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════════════════ FOOTER ════════════════════════════ -->
+<footer class="premium-footer py-5 mt-auto">
+    <div class="container">
+        <div class="row g-4">
+            <div class="col-md-6 col-lg-5">
+                <a class="d-flex align-items-center text-dark text-decoration-none fw-bold fs-4 mb-3" href="/">
+                    <i class="fas fa-bolt text-primary me-2"></i>SmartBuy
+                </a>
+                <p class="text-muted small" style="max-width:320px;">
+                    The ultimate dynamic multi-platform price comparison system. Search any product, compare real-time prices, and find the best deal instantly.
+                </p>
+            </div>
+            <div class="col-sm-6 col-md-3">
+                <h6 class="fw-bold mb-3 text-dark">Resources</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><a class="footer-link small" href="#" data-bs-toggle="modal" data-bs-target="#aboutModal">About</a></li>
+                    <li class="mb-2"><a class="footer-link small" href="https://github.com" target="_blank"><i class="fab fa-github me-1"></i>GitHub</a></li>
+                    <li class="mb-2"><a class="footer-link small" href="/api/search?q=laptop">API Demo</a></li>
+                </ul>
+            </div>
+            <div class="col-sm-6 col-md-3">
+                <h6 class="fw-bold mb-3 text-dark">Legal & Contact</h6>
+                <ul class="list-unstyled">
+                    <li class="mb-2"><a class="footer-link small" href="#" onclick="alert('Privacy Policy (Simulated)');">Privacy Policy</a></li>
+                    <li class="mb-2"><a class="footer-link small" href="#" onclick="alert('Contact: support@smartbuy.com');">Contact Support</a></li>
+                </ul>
+            </div>
+        </div>
+        <hr class="my-4 opacity-25">
+        <div class="d-flex justify-content-between align-items-center flex-wrap">
+            <span class="small text-muted">© 2026 Smart-Buy: Multiplatform Price Review Comparison System. All rights reserved.</span>
+            <span class="small text-muted">Developed for Production Multiplatform Price & Review Comparison.</span>
+        </div>
+    </div>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+function showLoading() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) {
+        overlay.classList.remove('d-none');
+        overlay.classList.add('d-flex');
+    }
+}
+
+function toggleDarkMode() {
+    document.body.classList.toggle('dark-mode');
+    const isDark = document.body.classList.contains('dark-mode');
+    localStorage.setItem('smartbuy_theme', isDark ? 'dark' : 'light');
+    updateThemeIcon(isDark);
+}
+
+function updateThemeIcon(isDark) {
+    const icon = document.getElementById('themeIcon');
+    if (icon) {
+        icon.className = isDark ? 'fas fa-sun text-warning' : 'fas fa-moon';
+    }
+}
+
+(function() {
+    const saved = localStorage.getItem('smartbuy_theme');
+    if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.body.classList.add('dark-mode');
+        updateThemeIcon(true);
+    }
+})();
+
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof switchSpecCategory === 'function') {
+        switchSpecCategory('Mobiles');
+    }
+});
+</script>
+</body>
+</html>
