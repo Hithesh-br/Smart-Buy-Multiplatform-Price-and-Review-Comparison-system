@@ -22,7 +22,7 @@ import time
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("meesho_scraper")
 
-MAX_RESULTS = 20
+MAX_RESULTS = 10
 MAX_ATTEMPTS = 2
 
 USER_AGENTS = [
@@ -231,10 +231,11 @@ def get_meesho_products(query: str) -> list:
                 ua = USER_AGENTS[0] # Use the desktop user agent for Firefox
                 context = browser.new_context(
                     user_agent=ua,
-                    viewport={"width": 1366, "height": 768},
+                    viewport={"width": 1280, "height": 720},
                     locale="en-IN",
                 )
                 page = context.new_page()
+                page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff2,ttf,mp4,avi}", lambda route: route.abort())
 
                 # Try to mask webdriver for extra stealth
                 page.add_init_script("""
@@ -245,7 +246,7 @@ def get_meesho_products(query: str) -> list:
 
                 url = f"https://www.meesho.com/search?q={query.replace(' ', '%20')}"
                 try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                    page.goto(url, wait_until="domcontentloaded", timeout=12000)
                 except Exception as goto_err:
                     logger.warning(f"[Meesho] page.goto warning: {goto_err}")
 
@@ -253,20 +254,11 @@ def get_meesho_products(query: str) -> list:
                 try:
                     page.wait_for_selector(
                         'div[class*="NewProductCard"], div[class*="ProductListItem"], h5',
-                        timeout=5000
+                        timeout=4000
                     )
                 except Exception:
                     pass
 
-                # Scroll to trigger lazy loading
-                try:
-                    for scroll_y in [0.3, 0.6, 0.9]:
-                        page.evaluate(f"window.scrollTo(0, document.body.scrollHeight * {scroll_y})")
-                        page.wait_for_timeout(600)
-                except Exception:
-                    pass
-
-                page.wait_for_timeout(1500)
                 html = page.content()
                 browser.close()
 
@@ -361,7 +353,6 @@ def get_meesho_products(query: str) -> list:
 
         except Exception as e:
             logger.error(f"[Meesho] Error on attempt {attempt + 1}: {e}", exc_info=True)
-            time.sleep(2)
 
     logger.info(f"[Meesho] Returned {len(results)} items for '{query}'")
     return results

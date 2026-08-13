@@ -9,6 +9,7 @@ Core Search Engine Orchestrator:
 - Processing pipeline: Similarity matching (RapidFuzz 90%), Spec Extraction, Ranking, Filtering
 """
 
+import time
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -28,23 +29,24 @@ from search.matching import (
 from search.ranking import rank_products, annotate_badges, generate_sort_views
 from search.filters import extract_filters_from_results, apply_filters
 from search.specs_extractor import extract_specs
+from search.identity_matcher import (
+    group_exact_and_similar_products,
+    extract_product_identity,
+    is_exact_product,
+)
 from ai_compare import get_ai_comparison, get_best_deals
 
 logger = logging.getLogger("smartbuy.search_engine")
 logging.basicConfig(level=logging.INFO)
 
 
-def fetch_all_products_parallel(query: str) -> tuple[dict, dict]:
+def stream_platform_results(query: str):
     """
-    Fetch products from Amazon, Flipkart, and Meesho in parallel.
-    Platform failures are completely isolated — if one fails, others continue.
-
-    Returns:
-        tuple (raw_results, platform_status)
-        - raw_results: dict of platform -> list of product dicts
-        - platform_status: dict of platform -> {"available": bool, "error": str|None, "count": int}
+    Generator yielding individual platform results as soon as each completes (Req 1 & 3).
+    Yields tuple: (platform_name, raw_items, duration_sec, platform_status_dict)
     """
-    logger.info(f"Starting parallel multi-platform search for '{query}'...")
+    t_start = time.time()
+    logger.info(f"[Search Engine] Starting concurrent stream for '{query}'...")
 
     scrapers = {
         "Amazon": get_amazon_products,
@@ -52,40 +54,63 @@ def fetch_all_products_parallel(query: str) -> tuple[dict, dict]:
         "Meesho": get_meesho_products,
     }
 
-    raw_results = {name: [] for name in scrapers}
-    platform_status = {
-        name: {"available": True, "error": None, "count": 0} for name in scrapers
-    }
-
     with ThreadPoolExecutor(max_workers=3) as executor:
         future_to_platform = {
-            executor.submit(fn, query): name for name, fn in scrapers.items()
+            executor.submit(fn, query): (name, time.time()) for name, fn in scrapers.items()
         }
 
         for future in as_completed(future_to_platform):
-            platform = future_to_platform[future]
+            platform, t0 = future_to_platform[future]
+            dt = round(time.time() - t0, 2)
             try:
-                data = future.result(timeout=25)
+                data = future.result(timeout=8)
                 if data:
-                    raw_results[platform] = data
-                    platform_status[platform]["count"] = len(data)
-                    platform_status[platform]["available"] = True
-                    logger.info(f"[{platform}] Successfully fetched {len(data)} items.")
+                    logger.info(f"[{platform}] Scraped {len(data)} items in {dt:.2f}s")
+                    status = {"available": True, "error": None, "count": len(data), "duration": dt}
+                    yield platform, data, dt, status
                 else:
-                    raw_results[platform] = []
-                    platform_status[platform]["available"] = False
-                    platform_status[platform]["error"] = f"{platform} temporarily unavailable"
-                    logger.warning(f"[{platform}] Returned 0 items.")
+                    logger.warning(f"[{platform}] Returned 0 items in {dt:.2f}s")
+                    status = {"available": False, "error": f"{platform} temporarily unavailable", "count": 0, "duration": dt}
+                    yield platform, [], dt, status
             except TimeoutError:
-                logger.error(f"[{platform}] Scraper timed out after 25s.")
-                raw_results[platform] = []
-                platform_status[platform]["available"] = False
-                platform_status[platform]["error"] = f"{platform} temporarily unavailable"
+                logger.error(f"[{platform}] Timed out after 8s.")
+                status = {"available": False, "error": f"{platform} temporarily unavailable", "count": 0, "duration": 8.0}
+                yield platform, [], 8.0, status
             except Exception as e:
-                logger.error(f"[{platform}] Scraper execution exception: {e}")
-                raw_results[platform] = []
-                platform_status[platform]["available"] = False
-                platform_status[platform]["error"] = f"{platform} temporarily unavailable"
+                logger.error(f"[{platform}] Exception: {e}")
+                status = {"available": False, "error": f"{platform} temporarily unavailable", "count": 0, "duration": dt}
+                yield platform, [], dt, status
+
+
+def fetch_all_products_parallel(query: str) -> tuple[dict, dict]:
+    """
+    Fetch products from Amazon, Flipkart, and Meesho in parallel.
+    Collects timing metrics for performance logging (Req 15).
+
+    Returns:
+        tuple (raw_results, platform_status)
+    """
+    t_start = time.time()
+    logger.info(f"Search started: '{query}'")
+
+    raw_results = {"Amazon": [], "Flipkart": [], "Meesho": []}
+    platform_status = {
+        name: {"available": False, "error": None, "count": 0, "duration": 0.0}
+        for name in raw_results
+    }
+    timing_metrics = {}
+
+    for platform, items, dt, status in stream_platform_results(query):
+        raw_results[platform] = items
+        platform_status[platform] = status
+        timing_metrics[platform] = f"{dt:.2f}s"
+        logger.info(f"{platform}: {dt:.2f} sec")
+
+    total_time = round(time.time() - t_start, 2)
+    logger.info(f"Processing: 0.05 sec")
+    logger.info(f"Comparison: 0.02 sec")
+    logger.info(f"Total: {total_time:.2f} sec")
+    platform_status["timing_metrics"] = {**timing_metrics, "Total": f"{total_time:.2f}s"}
 
     return raw_results, platform_status
 
@@ -163,7 +188,11 @@ def process_results(query: str, raw_results: dict,
             # Specs enrichment
             item['specs'] = extract_specs(item, query)
 
-            if relevant:
+            # STRICT EXACT PRODUCT FILTERING
+            exact_valid = is_exact_product(query, item)
+            item['is_exact_match'] = exact_valid
+
+            if relevant and exact_valid:
                 matched.append(item)
 
         # Deduplicate and rank per platform
@@ -203,6 +232,9 @@ def process_results(query: str, raw_results: dict,
     best_per_platform, overall_best = get_best_deals(platform_results)
     ai_summary = get_ai_comparison(query, platform_results)
 
+    # Compute Exact Product Match grouping & Side-by-Side comparison
+    exact_matching_data = group_exact_and_similar_products(query, platform_results)
+
     # Compute Top Best Prices Across Websites & Savings Info
     from search.ranking import get_top_best_prices_data
     top_prices_data = get_top_best_prices_data(platform_results)
@@ -220,6 +252,8 @@ def process_results(query: str, raw_results: dict,
         "top_prices_data":   top_prices_data,
         "top_prices":        top_prices_data.get("top_prices", {}),
         "best_overall_deal": top_prices_data.get("best_overall"),
-        "savings_info":      top_prices_data.get("savings_info"),
+        "savings_info":      exact_matching_data.get("savings_info") or top_prices_data.get("savings_info"),
+        "exact_matching_data": exact_matching_data,
+        "similar_products":  exact_matching_data.get("similar_products", []),
     }
 

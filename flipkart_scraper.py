@@ -22,7 +22,7 @@ import time
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("flipkart_scraper")
 
-MAX_RESULTS = 20
+MAX_RESULTS = 10
 MAX_ATTEMPTS = 2
 
 USER_AGENTS = [
@@ -100,6 +100,7 @@ def _find_price_in_container(container) -> tuple:
 def get_flipkart_products(query: str) -> list:
     """
     Scrape Flipkart search results for ANY query.
+    Optimized for maximum speed with asset route blocking and 6s max timeout.
     """
     logger.info(f"[Flipkart] Scraping for '{query}'...")
     results = []
@@ -111,40 +112,27 @@ def get_flipkart_products(query: str) -> list:
                 ua = USER_AGENTS[attempt % len(USER_AGENTS)]
                 context = browser.new_context(
                     user_agent=ua,
-                    viewport={"width": 1366, "height": 768},
+                    viewport={"width": 1280, "height": 720},
                     locale="en-IN",
                 )
                 page = context.new_page()
+                page.route("**/*.{png,jpg,jpeg,gif,webp,svg,woff2,ttf,mp4,avi}", lambda route: route.abort())
 
                 url = f"https://www.flipkart.com/search?q={query.replace(' ', '%20')}&sort=relevance"
                 try:
-                    page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                    page.goto(url, wait_until="domcontentloaded", timeout=12000)
                 except Exception as e:
                     logger.warning(f"[Flipkart] goto: {e}")
-
-                # Close login popup if present
-                try:
-                    for btn_sel in ['button._2KpZ6l._2doB4z', 'button[class*="close"]', 'span._30XB9F']:
-                        try:
-                            btn = page.locator(btn_sel).first
-                            if btn.is_visible(timeout=1500):
-                                btn.click()
-                                break
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
 
                 # Wait for product results
                 try:
                     page.wait_for_selector(
                         'div.jIjQ8S, div._1AtVbE, a[href*="/p/"]',
-                        timeout=5000
+                        timeout=4000
                     )
                 except Exception:
                     pass
 
-                page.wait_for_timeout(1000)
                 html = page.content()
                 browser.close()
 
@@ -444,7 +432,6 @@ def get_flipkart_products(query: str) -> list:
 
         except Exception as e:
             logger.error(f"[Flipkart] Error on attempt {attempt + 1}: {e}", exc_info=True)
-            time.sleep(2)
 
     logger.info(f"[Flipkart] Returned {len(results)} items for '{query}'")
     return results

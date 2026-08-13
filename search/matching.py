@@ -13,6 +13,7 @@ Algorithm:
 
 import re
 from rapidfuzz import fuzz
+from search.identity_matcher import is_exact_product
 from search.normalizer import (
     normalize_title,
     normalize_query,
@@ -24,6 +25,7 @@ from search.normalizer import (
 
 ACCESSORY_KEYWORDS = {'case', 'cover', 'protector', 'skin', 'guard', 'cable', 
                       'charger', 'strap', 'band', 'glass', 'sleeve', 'backcover'}
+
 
 
 # ---------------------------------------------------------------------------

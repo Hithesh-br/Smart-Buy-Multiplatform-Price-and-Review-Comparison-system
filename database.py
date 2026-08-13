@@ -11,7 +11,7 @@ MongoDB database layer for SmartBuy:
 
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 # pyrefly: ignore [missing-import]
 from pymongo import MongoClient, ASCENDING, DESCENDING
 # pyrefly: ignore [missing-import]
@@ -82,7 +82,8 @@ def init_db(app=None):
 
         collections = [
             "users", "search_history", "selected_products",
-            "feedback", "admin_inbox", "search_queries", "inbox_messages"
+            "feedback", "admin_inbox", "search_queries", "inbox_messages",
+            "product_cache"
         ]
         existing = db.list_collection_names()
         for col in collections:
@@ -97,6 +98,8 @@ def init_db(app=None):
         db.admin_inbox.create_index([("created_at", DESCENDING)])
         db.search_queries.create_index([("query", ASCENDING)], unique=True)
         db.inbox_messages.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
+        db.product_cache.create_index([("cache_key", ASCENDING), ("scraped_at", DESCENDING)])
+        db.product_cache.create_index([("scraped_at", ASCENDING)], expireAfterSeconds=600)
 
         # Ensure default administrator account exists
         admin_email = "admin@smartbuy.com"
@@ -107,7 +110,7 @@ def init_db(app=None):
                 "email": admin_email,
                 "password_hash": generate_password_hash("admin123"),
                 "is_admin": True,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "last_login": None
             })
 
@@ -150,7 +153,7 @@ def create_user(name: str, email: str, password_hash: str):
             "email": email_clean,
             "password_hash": password_hash,
             "is_admin": False,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
             "last_login": None
         }
 
@@ -205,8 +208,18 @@ def get_user_by_id(user_id) -> dict | None:
         return None
 
     try:
+        from flask import g, has_request_context
+        if has_request_context() and hasattr(g, 'current_user') and g.current_user:
+            if str(g.current_user.get('id', '')) == str(user_id) or str(g.current_user.get('_id', '')) == str(user_id):
+                return g.current_user
+
         doc = db.users.find_one({"_id": oid})
-        return format_doc(doc) if doc else None
+        formatted = format_doc(doc) if doc else None
+
+        if has_request_context() and formatted:
+            g.current_user = formatted
+
+        return formatted
     except Exception as e:
         logger.error(f"Error fetching user by ID: {e}")
         return None
@@ -224,7 +237,7 @@ def update_user_last_login(user_id) -> None:
         user = db.users.find_one({"_id": oid})
         db.users.update_one(
             {"_id": oid},
-            {"$set": {"last_login": datetime.utcnow()}}
+            {"$set": {"last_login": datetime.now(timezone.utc)}}
         )
 
         if user:
@@ -287,8 +300,8 @@ def log_search_query(query: str) -> None:
             {"query": q},
             {
                 "$inc": {"search_count": 1},
-                "$set": {"last_searched_at": datetime.utcnow()},
-                "$setOnInsert": {"created_at": datetime.utcnow()}
+                "$set": {"last_searched_at": datetime.now(timezone.utc)},
+                "$setOnInsert": {"created_at": datetime.now(timezone.utc)}
             },
             upsert=True
         )
@@ -334,7 +347,7 @@ def log_user_search(user_id, product_name: str, category: str = "", specificatio
             "platforms": plat_list,
             "best_platform": best_platform or "SmartBuy",
             "best_price": best_price or 0,
-            "searched_at": datetime.utcnow()
+            "searched_at": datetime.now(timezone.utc)
         }
 
         res = db.search_history.insert_one(search_doc)
@@ -399,7 +412,7 @@ def create_inbox_message(user_id, message_type: str, title: str, message: str, r
             "message": message.strip(),
             "related_search_id": to_object_id(related_search_id),
             "is_read": False,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.now(timezone.utc)
         }
         res = db.inbox_messages.insert_one(doc)
         return str(res.inserted_id)
@@ -523,7 +536,7 @@ def create_user_feedback(user_id, title: str, message: str, rating: int) -> str 
             "rating": rating_val,
             "title": t_clean,
             "message": m_clean,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.now(timezone.utc)
         }
 
         res = db.feedback.insert_one(fb_doc)
@@ -604,7 +617,7 @@ def update_user_feedback(feedback_id, user_id, title: str, message: str, rating:
     try:
         res = db.feedback.update_one(
             {"_id": fid, "user_id": uid},
-            {"$set": {"title": title.strip(), "message": message.strip(), "rating": rating_val, "updated_at": datetime.utcnow()}}
+            {"$set": {"title": title.strip(), "message": message.strip(), "rating": rating_val, "updated_at": datetime.now(timezone.utc)}}
         )
         return res.matched_count > 0
     except Exception as e:
@@ -668,7 +681,7 @@ def save_user_selected_product(user_id, search_id, product_name: str, platform: 
             "specifications": specs,
             "image_url": image_url or "",
             "product_url": product_url or "",
-            "selected_at": datetime.utcnow()
+            "selected_at": datetime.now(timezone.utc)
         }
 
         res = db.selected_products.insert_one(prod_doc)
@@ -842,7 +855,7 @@ def create_admin_inbox_notification(user_id=None, user_name="", email="", event_
             "event_type": event_type.strip(),
             "title": title.strip() or event_type.strip(),
             "message": message.strip(),
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
             "is_read": False
         }
 
@@ -962,3 +975,55 @@ def get_user_full_details_for_admin(user_id) -> dict | None:
     except Exception as e:
         logger.error(f"Error fetching user full details: {e}")
         return user
+
+
+# ════════════════════ MONGODB PRODUCT CACHING ════════════════════
+
+def save_product_cache(cache_key: str, processed_data: dict) -> bool:
+    """
+    Store search comparison data in MongoDB smartbuy_db.product_cache collection.
+    Req 5: Stores cache_key, processed results, scraped_at timestamp.
+    """
+    if not cache_key or not processed_data or db is None:
+        return False
+    try:
+        doc = {
+            "cache_key": cache_key,
+            "data": processed_data,
+            "scraped_at": datetime.now(timezone.utc)
+        }
+        db.product_cache.update_one(
+            {"cache_key": cache_key},
+            {"$set": doc},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error saving product_cache: {e}")
+        return False
+
+
+def get_product_cache(cache_key: str, ttl_seconds: int = 60) -> dict | None:
+    """
+    Retrieve cached product data from MongoDB smartbuy_db.product_cache if within TTL window (default 60s).
+    """
+    if not cache_key or db is None:
+        return None
+    try:
+        doc = db.product_cache.find_one({"cache_key": cache_key})
+        if not doc or "scraped_at" not in doc or "data" not in doc:
+            return None
+
+        scraped_at = doc["scraped_at"]
+        if isinstance(scraped_at, datetime):
+            age = (datetime.now(timezone.utc) - scraped_at).total_seconds()
+            if age <= ttl_seconds:
+                logger.info(f"MongoDB product_cache HIT for '{cache_key[:50]}' (age: {age:.1f}s)")
+                return doc["data"]
+            else:
+                logger.info(f"MongoDB product_cache EXPIRED for '{cache_key[:50]}' (age: {age:.1f}s > {ttl_seconds}s)")
+        return None
+    except Exception as e:
+        logger.error(f"Error reading product_cache: {e}")
+        return None
+

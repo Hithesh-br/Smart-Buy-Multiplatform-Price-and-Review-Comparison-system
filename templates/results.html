@@ -234,6 +234,32 @@
             border-color: rgba(255, 255, 255, 0.15) !important;
         }
     </style>
+    <style>
+        /* ── Skeleton loading animation ── */
+        .skeleton-card {
+            background: rgba(255, 255, 255, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 16px;
+            animation: skeleton-pulse 1.4s infinite ease-in-out;
+        }
+        .skeleton-box {
+            background: #cbd5e1;
+            border-radius: 8px;
+        }
+        .skeleton-img { height: 130px; width: 100%; margin-bottom: 12px; }
+        .skeleton-title { height: 18px; width: 85%; margin-bottom: 8px; }
+        .skeleton-price { height: 22px; width: 45%; margin-bottom: 12px; }
+        .skeleton-btn { height: 36px; width: 100%; border-radius: 20px; }
+        @keyframes skeleton-pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1.0; }
+            100% { opacity: 0.5; }
+        }
+        body.dark-mode .skeleton-card { background: rgba(30, 41, 59, 0.6); }
+        body.dark-mode .skeleton-box { background: #334155; }
+    </style>
 </head>
 <body class="premium-bg">
 
@@ -323,7 +349,7 @@
             <h1 class="mb-1 fw-bold" style="font-size:1.4rem;">
                 Results for: <span class="gradient-text">{{ query }}</span>
             </h1>
-            <p class="text-muted small mb-0">
+            <p class="text-muted small mb-0" id="resultsCountSubtitle">
                 <i class="fas fa-layer-group me-1"></i>
                 {% set total = (platform_results.get('Amazon',[])|length) + (platform_results.get('Flipkart',[])|length) + (platform_results.get('Meesho',[])|length) %}
                 {{ total }} results found across
@@ -337,28 +363,46 @@
         </a>
     </div>
 
-    {% if ai_summary %}
+    <!-- Live SSE Progress Banner (Req 3 & 14 & 15) -->
+    <div id="sseProgressBanner" class="alert border-0 shadow-sm mb-3 py-3 rounded-4 glass-card" style="background: rgba(37,99,235,0.06); border: 1px solid rgba(37,99,235,0.2);">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div class="d-flex align-items-center gap-3 flex-wrap">
+                <span class="fw-bold fs-6 text-dark" id="sseStatusTitle">
+                    <i class="fas fa-spinner fa-spin text-primary me-2" id="sseSpinner"></i>
+                    <span id="sseStatusText">Searching products across Amazon, Flipkart, Meesho...</span>
+                </span>
+                <div class="d-flex gap-2 flex-wrap" id="ssePlatformChips">
+                    <span class="badge rounded-pill bg-secondary px-3 py-2" id="chip-Amazon">⏳ Searching Amazon...</span>
+                    <span class="badge rounded-pill bg-secondary px-3 py-2" id="chip-Flipkart">⏳ Searching Flipkart...</span>
+                    <span class="badge rounded-pill bg-secondary px-3 py-2" id="chip-Meesho">⏳ Searching Meesho...</span>
+                </div>
+            </div>
+            <div class="text-muted small fw-bold font-monospace" id="sseTimingLog"></div>
+        </div>
+    </div>
+
     <!-- AI Summary Banner -->
-    <div class="best-deal-banner alert border-0 shadow-sm mb-3 py-3 rounded-4" style="background: rgba(16,185,129,0.1) !important; color: #065f46 !important;">
-        <div class="d-flex align-items-center gap-2 flex-wrap">
+    <div id="aiSummaryBanner" class="best-deal-banner alert border-0 shadow-sm mb-3 py-3 rounded-4" style="background: rgba(16,185,129,0.1) !important; color: #065f46 !important; {% if not ai_summary %}display:none;{% endif %}">
+        <div class="d-flex align-items-center gap-2 flex-wrap" id="aiSummaryContent">
+            {% if ai_summary %}
             <i class="fas fa-trophy text-warning fs-5"></i>
             <strong>Best Price Found:</strong>
-            <span class="fw-bold fs-5">{{ overall_best.price }}</span>
-            on <strong>{{ overall_best.platform }}</strong>
+            <span class="fw-bold fs-5">{{ overall_best.price if overall_best else '' }}</span>
+            on <strong>{{ overall_best.platform if overall_best else '' }}</strong>
             —
             <a href="javascript:void(0)"
-               data-url="{{ overall_best.link }}"
-               data-platform="{{ overall_best.platform }}"
+               data-url="{{ overall_best.link if overall_best else '#' }}"
+               data-platform="{{ overall_best.platform if overall_best else '' }}"
                data-product-name="{{ query }}"
-               data-price="{{ overall_best.price }}"
+               data-price="{{ overall_best.price if overall_best else '' }}"
                onclick="triggerBuyRedirect(this)"
                class="alert-link text-decoration-underline fw-bold">View Deal</a>
             <span class="ms-auto text-muted small d-none d-md-inline">
-                <i class="fas fa-robot me-1"></i>{{ ai_summary[:120] }}{% if ai_summary|length > 120 %}...{% endif %}
+                <i class="fas fa-robot me-1"></i>{{ ai_summary[:120] if ai_summary else '' }}
             </span>
+            {% endif %}
         </div>
     </div>
-    {% endif %}
 
     <div class="row g-3">
         <!-- ════ FILTER SIDEBAR ════ -->
@@ -496,9 +540,330 @@
                 {% set has_results = (platform_results.get('Amazon',[])|length > 0) or (platform_results.get('Flipkart',[])|length > 0) or (platform_results.get('Meesho',[])|length > 0) %}
 
                 {% if has_results %}
+
+                <!-- ════════════════════════════════════════════════════════════════ -->
+                <!-- EXACT PRODUCT / MODEL-LEVEL SIDE-BY-SIDE COMPARISON SECTION -->
+                <!-- ════════════════════════════════════════════════════════════════ -->
+                {% if exact_matching_data %}
+                <div class="card border-0 shadow-lg mb-4 glass-card overflow-hidden" style="border-radius: 20px; background: rgba(255, 255, 255, 0.88); backdrop-filter: blur(16px);">
+                    <div class="card-header border-0 py-3 px-4 d-flex align-items-center justify-content-between flex-wrap gap-2" style="background: linear-gradient(135deg, #0f172a, #1e293b); color: #fff;">
+                        <div>
+                            <div class="badge bg-primary-subtle text-primary mb-1 text-uppercase fw-bold" style="letter-spacing: 1px; font-size: 0.72rem;">
+                                <i class="fas fa-bullseye me-1"></i> Exact Product Identity Comparison
+                            </div>
+                            <h5 class="fw-bold mb-0 text-white">
+                                {{ exact_matching_data.query_summary }}
+                            </h5>
+                        </div>
+                        <span class="badge bg-success border border-success text-white px-3 py-2 rounded-pill" style="font-size: 0.82rem;">
+                            <i class="fas fa-check-circle me-1"></i> Model-Level Variant Matching Active
+                        </span>
+                    </div>
+
+                    <!-- Highlights Banner (Best Price, Highest Rating, Most Reviews, Savings) -->
+                    <div class="p-3 bg-light border-bottom d-flex flex-wrap gap-3 align-items-center justify-content-around">
+                        {% if exact_matching_data.best_price_info %}
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="rounded-circle bg-success text-white d-flex align-items-center justify-content-center fw-bold fs-5" style="width: 40px; height: 40px;">🏆</div>
+                            <div>
+                                <small class="text-muted text-uppercase fw-bold" style="font-size: 0.7rem;">Best / Lowest Price</small>
+                                <div class="fw-bold text-success" style="font-size: 1rem;">
+                                    {{ exact_matching_data.best_price_info.platform }}: {{ exact_matching_data.best_price_info.price }}
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if exact_matching_data.savings_info %}
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center fs-5" style="width: 40px; height: 40px;"><i class="fas fa-piggy-bank"></i></div>
+                            <div>
+                                <small class="text-muted text-uppercase fw-bold" style="font-size: 0.7rem;">Max Savings</small>
+                                <div class="fw-bold text-primary" style="font-size: 1rem;">
+                                    Save {{ exact_matching_data.savings_info.savings_amount }} (vs {{ exact_matching_data.savings_info.compared_to_platform }})
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if exact_matching_data.highest_rating_info %}
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="rounded-circle bg-warning text-dark d-flex align-items-center justify-content-center fw-bold fs-5" style="width: 40px; height: 40px;">⭐</div>
+                            <div>
+                                <small class="text-muted text-uppercase fw-bold" style="font-size: 0.7rem;">Highest Rating</small>
+                                <div class="fw-bold text-dark" style="font-size: 1rem;">
+                                    {{ exact_matching_data.highest_rating_info.platform }}: {{ exact_matching_data.highest_rating_info.rating }} / 5.0
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if exact_matching_data.most_reviews_info %}
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="rounded-circle bg-info text-white d-flex align-items-center justify-content-center fs-5" style="width: 40px; height: 40px;">💬</div>
+                            <div>
+                                <small class="text-muted text-uppercase fw-bold" style="font-size: 0.7rem;">Most Reviews</small>
+                                <div class="fw-bold text-dark" style="font-size: 1rem;">
+                                    {{ exact_matching_data.most_reviews_info.platform }}: {{ exact_matching_data.most_reviews_info.reviews }} reviews
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <!-- Side-by-Side Exact Comparison Table -->
+                    <div class="table-responsive p-3">
+                        <table class="table table-hover align-middle border mb-0" style="border-radius: 12px; overflow: hidden;">
+                            <thead class="table-dark">
+                                <tr class="text-center align-middle">
+                                    <th style="width: 22%;" class="text-start ps-3">Specification / Feature</th>
+                                    <th style="width: 26%;">
+                                        <div class="d-flex align-items-center justify-content-center gap-2">
+                                            <span class="badge bg-warning text-dark px-3 py-2 fs-6">Amazon</span>
+                                        </div>
+                                    </th>
+                                    <th style="width: 26%;">
+                                        <div class="d-flex align-items-center justify-content-center gap-2">
+                                            <span class="badge bg-primary text-white px-3 py-2 fs-6">Flipkart</span>
+                                        </div>
+                                    </th>
+                                    <th style="width: 26%;">
+                                        <div class="d-flex align-items-center justify-content-center gap-2">
+                                            <span class="badge bg-danger text-white px-3 py-2 fs-6">Meesho</span>
+                                        </div>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                 <!-- Row 1: Product Match Status -->
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-box me-2 text-primary"></i>Product Match</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center">
+                                        {% if item %}
+                                        <div class="fw-semibold text-dark mb-1" style="font-size: 0.85rem; line-height: 1.35;">
+                                            {{ item.title[:65] }}{% if item.title|length > 65 %}...{% endif %}
+                                        </div>
+                                        <span class="badge bg-success-subtle text-success border border-success" style="font-size: 0.72rem;">
+                                            <i class="fas fa-check-circle me-1"></i>Exact Match
+                                        </span>
+                                        {% else %}
+                                        <div class="alert alert-secondary py-2 px-2 mb-0 text-danger fw-bold" style="font-size: 0.78rem; background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.2);">
+                                            <i class="fas fa-times-circle me-1 text-danger"></i>EXACT PRODUCT NOT FOUND
+                                        </div>
+                                        {% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+
+                                <!-- Row 2: Brand -->
+                                {% if exact_matching_data.query_identity.brand %}
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-copyright me-2 text-primary"></i>Brand</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center fw-semibold text-dark">
+                                        {% if item %}{{ item.identity.brand.title() if item.identity.brand else exact_matching_data.query_identity.brand.title() }}{% else %}—{% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endif %}
+
+                                <!-- Row 3: Model -->
+                                {% if exact_matching_data.query_identity.model %}
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-mobile me-2 text-primary"></i>Model</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center fw-semibold text-dark">
+                                        {% if item %}{{ item.identity.model.upper() if item.identity.model else exact_matching_data.query_identity.model.upper() }}{% else %}—{% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endif %}
+
+                                <!-- Row 4: Network / 5G -->
+                                {% if '5g' in query.lower() or exact_matching_data.query_identity.network == '5g' %}
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-wifi me-2 text-success"></i>Network</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center fw-semibold text-dark">
+                                        {% if item %}<span class="badge bg-success-subtle text-success border border-success">5G</span>{% else %}—{% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endif %}
+
+                                <!-- Row 5: Price -->
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-tag me-2 text-success"></i>Scraped Price</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center">
+                                        {% if item %}
+                                        <div class="fs-5 fw-bold text-success mb-0">{{ item.price }}</div>
+                                        {% if exact_matching_data.best_price_info and exact_matching_data.best_price_info.platform == plat %}
+                                        <span class="badge bg-success text-white mt-1" style="font-size: 0.7rem;"><i class="fas fa-trophy me-1"></i>Best Price</span>
+                                        {% endif %}
+                                        {% else %}
+                                        <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+
+                                <!-- Row 6: Rating -->
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-star me-2 text-warning"></i>Rating</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center">
+                                        {% if item and item.rating and item.rating != 'N/A' %}
+                                        <span class="fw-bold text-dark"><i class="fas fa-star text-warning me-1"></i>{{ item.rating }}</span>
+                                        {% if exact_matching_data.highest_rating_info and exact_matching_data.highest_rating_info.platform == plat %}
+                                        <span class="badge bg-warning text-dark ms-1" style="font-size: 0.7rem;">⭐ Highest</span>
+                                        {% endif %}
+                                        {% else %}
+                                        <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+
+                                <!-- Row 7: Reviews -->
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-comments me-2 text-info"></i>Total Reviews</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center">
+                                        {% if item and item.reviews %}
+                                        <span class="fw-semibold text-dark">{{ item.reviews }} reviews</span>
+                                        {% if exact_matching_data.most_reviews_info and exact_matching_data.most_reviews_info.platform == plat %}
+                                        <span class="badge bg-info text-white ms-1" style="font-size: 0.7rem;">💬 Most</span>
+                                        {% endif %}
+                                        {% else %}
+                                        <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+
+                                <!-- Row 8: RAM -->
+                                {% if exact_matching_data.query_identity.ram %}
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-memory me-2 text-secondary"></i>RAM Capacity</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center fw-semibold text-dark">
+                                        {% if item %}{{ item.identity.ram.upper() if item.identity.ram else exact_matching_data.query_identity.ram.upper() }}{% else %}—{% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endif %}
+
+                                <!-- Row 9: Storage -->
+                                {% if exact_matching_data.query_identity.storage %}
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-hdd me-2 text-secondary"></i>Storage Capacity</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center fw-semibold text-dark">
+                                        {% if item %}{{ item.identity.storage.upper() if item.identity.storage else exact_matching_data.query_identity.storage.upper() }}{% else %}—{% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endif %}
+
+                                <!-- Row 10: Processor -->
+                                {% if exact_matching_data.query_identity.processor or exact_matching_data.query_identity.generation %}
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-microchip me-2 text-secondary"></i>Processor & Generation</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center fw-semibold text-dark">
+                                        {% if item %}
+                                        {{ item.identity.processor.title() if item.identity.processor else '' }} {{ item.identity.generation.title() if item.identity.generation else '' }}
+                                        {% else %}—{% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endif %}
+
+                                <!-- Row 11: Color -->
+                                {% if exact_matching_data.query_identity.color %}
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-palette me-2 text-secondary"></i>Color Variant</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center fw-semibold text-dark">
+                                        {% if item %}{{ item.identity.color.title() if item.identity.color else exact_matching_data.query_identity.color.title() }}{% else %}—{% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endif %}
+
+                                <!-- Row 12: Size -->
+                                {% if exact_matching_data.query_identity.size %}
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-ruler-combined me-2 text-secondary"></i>Size Variant</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center fw-semibold text-dark">
+                                        {% if item %}{{ item.identity.size.upper() if item.identity.size else exact_matching_data.query_identity.size.upper() }}{% else %}—{% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endif %}
+
+                                <!-- Row 13: Gender -->
+                                {% if exact_matching_data.query_identity.gender %}
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-user-tag me-2 text-secondary"></i>Target Gender</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center fw-semibold text-dark">
+                                        {% if item %}{{ item.identity.gender.title() if item.identity.gender else exact_matching_data.query_identity.gender.title() }}{% else %}—{% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                                {% endif %}
+
+                                <!-- Row 8: Action / Buy Link -->
+                                <tr>
+                                    <td class="fw-bold bg-light ps-3"><i class="fas fa-shopping-cart me-2 text-primary"></i>Buy Link</td>
+                                    {% for plat in ['Amazon', 'Flipkart', 'Meesho'] %}
+                                    {% set item = exact_matching_data.exact_matches.get(plat) %}
+                                    <td class="text-center">
+                                        {% if item %}
+                                        <a href="javascript:void(0)"
+                                           data-url="{{ item.link }}"
+                                           data-platform="{{ plat }}"
+                                           data-product-name="{{ item.title }}"
+                                           data-price="{{ item.price }}"
+                                           data-rating="{{ item.rating }}"
+                                           data-reviews="{{ item.reviews }}"
+                                           data-image="{{ item.image }}"
+                                           class="btn btn-sm btn-primary buy-btn rounded-pill px-3 shadow-sm">
+                                           <i class="fas fa-external-link-alt me-1"></i>Buy on {{ plat }}
+                                        </a>
+                                        {% else %}
+                                        <button class="btn btn-sm btn-outline-secondary disabled rounded-pill px-3">Unavailable</button>
+                                        {% endif %}
+                                    </td>
+                                    {% endfor %}
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
+
                 <div class="row g-3 comparison-grid">
-                    {% for platform, items in platform_results.items() %}
-                    <div class="col-lg-4 col-md-6">
+                    {% for platform in ['Amazon', 'Flipkart', 'Meesho'] %}
+                    {% set items = platform_results.get(platform, []) %}
+                    <div class="col-lg-4 col-md-6" id="col-{{ platform }}">
                         <div class="card border-0 shadow-sm h-100 glass-card platform-column-card" style="border-radius:16px;">
                             <!-- Platform Vertical Header -->
                             <div class="card-header border-0 text-white text-center py-3 d-flex align-items-center justify-content-center
@@ -512,11 +877,11 @@
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/8/80/Meesho_Logo_Logo.svg" alt="Meesho" style="height:20px; filter:brightness(0) invert(1); margin-right:8px;">
                                 {% endif %}
                                 <span class="fw-bold fs-6">{{ platform }}</span>
-                                <span class="badge bg-white text-dark ms-2 small">{{ items|length }} Items</span>
+                                <span class="badge bg-white text-dark ms-2 small" id="col-badge-{{ platform }}">{{ items|length }} Items</span>
                             </div>
 
                             <!-- Vertical Product Cards Column -->
-                            <div class="card-body p-3">
+                            <div class="card-body p-3" id="col-body-{{ platform }}">
                                 {% if platform_status and platform_status.get(platform) and not platform_status[platform].available %}
                                 <div class="alert alert-warning border-0 shadow-sm rounded-4 text-center py-3 mb-3" style="background: rgba(245, 158, 11, 0.15); color: #d97706;">
                                     <i class="fas fa-exclamation-triangle me-1"></i>

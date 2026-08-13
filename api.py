@@ -16,9 +16,9 @@ import time
 import re
 import logging
 from functools import wraps
-from flask import Blueprint, render_template, request, redirect, jsonify, session, flash, url_for
+from flask import Blueprint, render_template, request, redirect, jsonify, session, flash, url_for, Response, stream_with_context
 from werkzeug.security import generate_password_hash, check_password_hash
-from search_engine import fetch_all_products_parallel, process_results
+from search_engine import fetch_all_products_parallel, process_results, stream_platform_results
 from cache import get_cached_search, set_cached_search
 from database import (
     log_search_query, get_trending_queries, get_query_count,
@@ -68,6 +68,21 @@ def admin_required(f):
             return render_template('403.html'), 403
         return f(*args, **kwargs)
     return decorated_function
+
+
+@api_bp.app_errorhandler(404)
+def not_found_error(error):
+    if request.path.startswith('/api/'):
+        return jsonify({"status": "error", "message": "Resource not found"}), 404
+    return render_template('index.html', category_hints=CATEGORY_HINTS, trending_searches=get_trending_queries(limit=8)), 404
+
+
+@api_bp.app_errorhandler(500)
+def internal_server_error(error):
+    logger.error(f"Internal Server Error: {error}", exc_info=True)
+    if request.path.startswith('/api/'):
+        return jsonify({"status": "error", "message": "Internal Server Error"}), 500
+    return render_template('index.html', category_hints=CATEGORY_HINTS, trending_searches=get_trending_queries(limit=8)), 500
 
 
 # Category hint chips for home page
@@ -206,14 +221,14 @@ def handle_buy_click():
     if 'user_id' in session:
         user_id = session['user_id']
         user = get_user_by_id(user_id)
-        user_name = user['name'] if user else 'User'
+        user_name = user.get('name', 'User') if isinstance(user, dict) else 'User'
 
         save_user_selected_product(
-            user_id, None, pending_product['product_name'],
-            pending_product['platform'], pending_product['price'],
-            pending_product['rating'], pending_product['reviews'],
-            pending_product['specifications'], pending_product['image_url'],
-            pending_product['product_url']
+            user_id, None, pending_product.get('product_name', 'Searched Product'),
+            pending_product.get('platform', 'Online Store'), pending_product.get('price', ''),
+            pending_product.get('rating', ''), pending_product.get('reviews', ''),
+            pending_product.get('specifications', ''), pending_product.get('image_url', ''),
+            pending_product.get('product_url', '')
         )
         return redirect(url_for('api.profile'))
 
@@ -317,24 +332,26 @@ def signin():
         password = request.form.get('password', '')
 
         user = get_user_by_email(email)
-        if user and check_password_hash(user['password_hash'], password):
-            session['user_id'] = user['id']
-            session['user_name'] = user['name']
+        if user and check_password_hash(user.get('password_hash', ''), password):
+            u_id = str(user.get('id') or user.get('_id', ''))
+            u_name = user.get('name', 'User')
+            session['user_id'] = u_id
+            session['user_name'] = u_name
             session['is_admin'] = user.get('is_admin', 0)
-            update_user_last_login(user['id'])
+            update_user_last_login(u_id)
 
             # Transfer pending session purchase data to authenticated user account
             pending_prod = session.get('pending_product') or session.get('pending_purchase') or session.get('pending_selected_product')
             if pending_prod:
                 save_user_selected_product(
-                    user['id'], None, pending_prod.get('product_name', ''),
+                    u_id, None, pending_prod.get('product_name', ''),
                     pending_prod.get('platform', ''), pending_prod.get('price', ''),
                     pending_prod.get('rating', ''), pending_prod.get('reviews', ''),
                     pending_prod.get('specifications', ''), pending_prod.get('image_url', ''),
                     pending_prod.get('product_url', '')
                 )
 
-            flash(f"Welcome back, {user['name']}! 👋", "success")
+            flash(f"Welcome back, {u_name}! 👋", "success")
             if user.get('is_admin'):
                 return redirect(url_for('api.admin_dashboard'))
             return redirect(url_for('api.profile'))
@@ -438,11 +455,12 @@ def create_feedback():
     fb_id = create_user_feedback(session['user_id'], title, message, rating)
     if fb_id:
         user = get_user_by_id(session['user_id'])
-        user_name = user['name'] if user else 'User'
+        user_name = user.get('name', 'User') if isinstance(user, dict) else 'User'
+        user_email = user.get('email', '') if isinstance(user, dict) else ''
         create_admin_inbox_notification(
             user_id=session['user_id'],
             user_name=user_name,
-            email=user['email'] if user else '',
+            email=user_email,
             event_type='FEEDBACK_SUBMITTED',
             title='New User Feedback',
             message=f"{user_name} submitted rating {rating}/5 stars: '{title}'"
@@ -616,9 +634,10 @@ def profile_change_password():
     confirm_password = request.form.get('confirm_password', '')
 
     user = get_user_by_id(session['user_id'])
-    full_user = get_user_by_email(user['email']) if user else None
+    user_email = user.get('email', '') if isinstance(user, dict) else ''
+    full_user = get_user_by_email(user_email) if user_email else None
 
-    if not full_user or not check_password_hash(full_user['password_hash'], current_password):
+    if not full_user or not check_password_hash(full_user.get('password_hash', ''), current_password):
         flash("Current password is incorrect.", "danger")
         return redirect(url_for('api.profile'))
 
@@ -743,9 +762,85 @@ def search():
         **processed
     }
 
-    results_for_view = processed['sort_views'].get(sort_by, processed['sort_views']['best_match'])
+    sort_views = processed.get('sort_views', {})
+    results_for_view = sort_views.get(sort_by, sort_views.get('best_match', []))
     return render_template('results.html', sort_by=sort_by,
                            results_for_view=results_for_view, **render_data)
+
+
+@api_bp.route('/api/search/stream', methods=['GET'])
+def api_search_stream():
+    """
+    Server-Sent Events (SSE) streaming endpoint (Req 3).
+    Streams results to frontend progressively as each scraper completes:
+      Amazon results received -> Display Amazon
+      Flipkart results received -> Display Flipkart
+      Meesho results received -> Display Meesho
+    """
+    raw_q = request.args.get('q', '')
+    query = clean_text(raw_q)[:100]
+
+    category_val = request.args.get('category', '').strip()
+    filter_params = parse_filter_params(request.args)
+    cache_key = f"{normalize_query(query)}|cat:{category_val}|{json.dumps(filter_params, sort_keys=True)}"
+
+    def generate_events():
+        if not query:
+            yield f"event: error\ndata: {json.dumps({'error': 'Query parameter q is required'})}\n\n"
+            return
+
+        # 1. Check Short-Term Cache (60s TTL)
+        cached_data = get_cached_search(cache_key, ttl_seconds=60)
+        if cached_data:
+            logger.info(f"SSE: Yielding instant cached results for '{query}'")
+            yield f"event: cached_result\ndata: {json.dumps(cached_data)}\n\n"
+            return
+
+        # Log query
+        log_search_query(query)
+
+        # 2. Yield Initial Status Event
+        platform_status = {
+            "Amazon": {"available": False, "searching": True, "count": 0},
+            "Flipkart": {"available": False, "searching": True, "count": 0},
+            "Meesho": {"available": False, "searching": True, "count": 0},
+        }
+        yield f"event: status\ndata: {json.dumps({'platform_status': platform_status, 'query': query})}\n\n"
+
+        # 3. Stream platform scrapers concurrently
+        raw_results = {"Amazon": [], "Flipkart": [], "Meesho": []}
+        t_start = time.time()
+
+        for platform, items, dt, status in stream_platform_results(query):
+            raw_results[platform] = items
+            platform_status[platform] = status
+
+            # Process single platform items for immediate rendering
+            single_raw = {platform: items}
+            single_processed = process_results(query, single_raw, filter_params, {platform: status})
+            plat_items = single_processed.get("platform_results", {}).get(platform, [])
+
+            event_payload = {
+                "platform": platform,
+                "items": plat_items,
+                "status": status,
+                "duration": dt
+            }
+            yield f"event: platform_result\ndata: {json.dumps(event_payload)}\n\n"
+
+        # 4. All scrapers completed — compute overall comparison & badges
+        processed = process_results(query, raw_results, filter_params, platform_status)
+
+        # Store in 60s cache
+        set_cached_search(cache_key, processed)
+
+        total_dt = round(time.time() - t_start, 2)
+        processed["total_duration"] = total_dt
+        logger.info(f"SSE Search Completed for '{query}' in {total_dt:.2f}s")
+
+        yield f"event: complete\ndata: {json.dumps(processed)}\n\n"
+
+    return Response(stream_with_context(generate_events()), mimetype='text/event-stream')
 
 
 @api_bp.route('/api/search', methods=['GET'])
@@ -764,15 +859,17 @@ def api_search():
         "status": "success",
         "query": query,
         "platform_status": platform_status,
-        "results": processed["platform_results"],
-        "all_results": processed["all_results"],
-        "best_per_platform": processed["best_per_platform"],
-        "overall_best": processed["overall_best"],
-        "ai_summary": processed["ai_summary"],
+        "results": processed.get("platform_results", {}),
+        "all_results": processed.get("all_results", []),
+        "best_per_platform": processed.get("best_per_platform", {}),
+        "overall_best": processed.get("overall_best"),
+        "ai_summary": processed.get("ai_summary"),
         "top_prices_data": processed.get("top_prices_data"),
         "top_prices": processed.get("top_prices"),
         "best_overall_deal": processed.get("best_overall_deal"),
         "savings_info": processed.get("savings_info"),
+        "exact_matching_data": processed.get("exact_matching_data"),
+        "similar_products": processed.get("similar_products"),
     })
 
 
@@ -826,11 +923,13 @@ def admin_login():
         email = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
         user = get_user_by_email(email)
-        if user and user.get('is_admin') and check_password_hash(user['password_hash'], password):
-            session['user_id'] = user['id']
-            session['user_name'] = user['name']
+        if user and user.get('is_admin') and check_password_hash(user.get('password_hash', ''), password):
+            u_id = str(user.get('id') or user.get('_id', ''))
+            u_name = user.get('name', 'Admin')
+            session['user_id'] = u_id
+            session['user_name'] = u_name
             session['is_admin'] = 1
-            update_user_last_login(user['id'])
+            update_user_last_login(u_id)
             flash("Welcome to the SmartBuy Admin Portal!", "success")
             return redirect(url_for('api.admin_dashboard'))
         else:

@@ -128,6 +128,8 @@ def detect_category(title: str, query: str = "") -> str:
         return "Beauty & Personal Care"
     if any(w in text for w in ['cooker', 'pan', 'tawa', 'stove', 'mixer', 'knife', 'bottle', 'lunch box', 'kettle', 'chimney', 'cutlery', 'pot']):
         return "Kitchen Products"
+    if any(w in text for w in ['cloth', 'clothes', 'clothing', 'fashion', 'apparel', 'shirt', 'tshirt', 't-shirt', 'jeans', 'trouser', 'pant', 'dress', 'jacket', 'coat', 'hoodie', 'sweater', 'saree', 'kurti', 'kurta', 'lehenga', 'top', 'blouse', 'shorts', 'skirt', 'tracksuit', 'suit', 'blazer', 'shoes', 'sneakers']):
+        return "Clothing & Fashion"
     if any(w in text for w in ['chair', 'table', 'sofa', 'bed', 'desk', 'wardrobe', 'bookshelf', 'recliner', 'furniture']):
         return "Furniture"
     return "General Products"
@@ -268,6 +270,14 @@ def extract_specs(item: dict, query: str = "") -> dict:
         cat_specs["Capacity"] = specs.get('capacity', specs.get('volume', 'Not Available'))
         cat_specs["Color"] = specs.get('color', 'Not Available')
         cat_specs["Wattage"] = specs.get('wattage', 'Not Available')
+    elif category == "Clothing & Fashion":
+        cat_specs["Brand"] = specs.get('brand', 'Not Available')
+        cat_specs["Size"] = specs.get('size', 'S / M / L / XL / XXL')
+        cat_specs["Color"] = specs.get('color', 'Not Available')
+        cat_specs["Fabric / Material"] = specs.get('material', '100% Cotton / Denim / Polyester')
+        cat_specs["Fit Type"] = "Slim Fit" if 'slim' in title_lower else ("Regular Fit" if 'regular' in title_lower else ("Oversized" if 'oversized' in title_lower else "Standard Fit"))
+        cat_specs["Gender"] = "Women" if any(w in title_lower for w in ['women', 'lady', 'ladies', 'girl', 'saree', 'kurti', 'lehenga']) else ("Men" if any(w in title_lower for w in ['men', 'man', 'boy', 'gent']) else "Unisex")
+        cat_specs["Care Instructions"] = "Machine Wash"
     else:
         cat_specs["Material"] = specs.get('material', 'Not Available')
         cat_specs["Color"] = specs.get('color', 'Not Available')
