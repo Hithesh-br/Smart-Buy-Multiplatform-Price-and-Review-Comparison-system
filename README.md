@@ -48,7 +48,7 @@ smartbuy/
 
 ---
 
-## Installation & Setup
+## Installation & Setup.
 
 ### Prerequisites
 - Python 3.10+
@@ -68,7 +68,7 @@ SECRET_KEY=smartbuy_super_secret_key
 # Optional: GOOGLE_API_KEY=your_gemini_api_key
 ```
 
-### 3. Start Application
+### 3. Start Application.
 ```bash
 python app.py
 ```
