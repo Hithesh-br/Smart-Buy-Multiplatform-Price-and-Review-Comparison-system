@@ -238,19 +238,39 @@ def handle_buy_click():
         else:
             platform = 'Online Store'
 
+    # Sanitize and normalize platform
+    platform_clean = platform.strip()
+    p_low = platform_clean.lower()
+    if 'amazon' in p_low:
+        platform_clean = 'Amazon'
+    elif 'flipkart' in p_low:
+        platform_clean = 'Flipkart'
+    elif 'meesho' in p_low:
+        platform_clean = 'Meesho'
+    elif platform_clean:
+        platform_clean = platform_clean.capitalize()
+    else:
+        platform_clean = 'Online Store'
+
     product_name = request.args.get('product_name', '').strip() or request.args.get('title', '').strip() or 'Searched Product'
     price = request.args.get('price', '').strip()
+    price_num_raw = request.args.get('price_num', '').strip()
     rating = request.args.get('rating', '').strip()
     reviews = request.args.get('reviews', '').strip()
     image = request.args.get('image', '').strip()
     specifications = request.args.get('specifications', '').strip()
     search_query = request.args.get('search_query', '').strip()
 
-    deal_url = normalize_external_url(deal_url_raw, platform)
+    # If price is missing or placeholder, resolve from price_num or query
+    if not price or price.lower() in ('', 'not available', 'none', 'price unavailable', 'n/a', 'best deal', 'best'):
+        if price_num_raw and price_num_raw.isdigit():
+            price = f"₹{int(price_num_raw):,}"
+
+    deal_url = normalize_external_url(deal_url_raw, platform_clean)
 
     pending_product = {
         'product_name': product_name,
-        'platform': platform,
+        'platform': platform_clean,
         'price': price,
         'rating': rating,
         'reviews': reviews,
@@ -791,14 +811,30 @@ def profile():
         if db_prod:
             selected_product = {
                 'product_name': db_prod.get('product_name', 'Searched Product'),
-                'platform': db_prod.get('platform', 'Online Store'),
+                'platform': (db_prod.get('platform') or 'Online Store').capitalize(),
                 'price': db_prod.get('price', ''),
+                'price_num': db_prod.get('price_num'),
                 'rating': db_prod.get('rating', ''),
                 'reviews': db_prod.get('reviews', ''),
                 'specifications': db_prod.get('specifications', ''),
                 'image_url': db_prod.get('image_url', ''),
                 'product_url': db_prod.get('product_url', '')
             }
+
+    if selected_product:
+        plat_clean = str(selected_product.get('platform') or '').strip().lower()
+        if 'amazon' in plat_clean:
+            selected_product['platform'] = 'Amazon'
+        elif 'flipkart' in plat_clean:
+            selected_product['platform'] = 'Flipkart'
+        elif 'meesho' in plat_clean:
+            selected_product['platform'] = 'Meesho'
+        elif selected_product.get('platform'):
+            selected_product['platform'] = selected_product['platform'].capitalize()
+
+        if not selected_product.get('price') or str(selected_product.get('price')).strip().lower() in ('', 'none', 'n/a', 'price unavailable', 'not available'):
+            if selected_product.get('price_num'):
+                selected_product['price'] = f"₹{int(selected_product['price_num']):,}"
 
     return render_template('profile.html', stats=stats, selected_product=selected_product, restored_comparison=selected_product)
 
@@ -906,7 +942,29 @@ def search():
         user_id = session.get('user_id')
         if user_id:
             try:
-                log_user_search(user_id, p_name, src_prod.get('category', 'General'), num_results=3, platforms_found="Amazon, Flipkart, Meesho")
+                best_deal = comp_result.get('best_deal') or comp_result.get('overall_best')
+                b_plat = ""
+                b_price = None
+                b_title = ""
+                b_url = ""
+                if isinstance(best_deal, dict):
+                    b_plat = best_deal.get('platform') or ""
+                    b_price = best_deal.get('price_num') or best_deal.get('price')
+                    b_title = best_deal.get('title') or best_deal.get('product_name') or ""
+                    b_url = best_deal.get('link') or best_deal.get('product_url') or ""
+                elif src_prod:
+                    b_plat = comp_result.get('source_platform_name') or comp_result.get('source_platform') or ""
+                    b_price = src_prod.get('price_num') or src_prod.get('price')
+                    b_title = p_name
+                    b_url = url_param
+
+                log_user_search(
+                    user_id, p_name, src_prod.get('category', 'General'),
+                    num_results=3, platforms_found="Amazon, Flipkart, Meesho",
+                    best_platform=b_plat, best_price=b_price,
+                    best_product_title=b_title, best_product_url=b_url,
+                    best_deal=best_deal
+                )
             except Exception:
                 pass
 
@@ -1069,10 +1127,24 @@ def search():
         if not specs_dict and specs_str:
             specs_dict = {"details": specs_str}
 
+        best_deal = processed.get('best_overall_deal') or processed.get('best_deal') or processed.get('comparison_data', {}).get('best_deal')
+        b_plat = ""
+        b_price = None
+        b_title = ""
+        b_url = ""
+        if isinstance(best_deal, dict):
+            b_plat = best_deal.get('platform') or ""
+            b_price = best_deal.get('price_num') or best_deal.get('price')
+            b_title = best_deal.get('title') or best_deal.get('product_name') or ""
+            b_url = best_deal.get('link') or best_deal.get('product_url') or ""
+
         search_id = log_user_search(
             user_id, query, category_val or "General",
             specifications=specs_dict, search_query=query,
-            num_results=total_count, platforms_found=platforms_str
+            num_results=total_count, platforms_found=platforms_str,
+            best_platform=b_plat, best_price=b_price,
+            best_product_title=b_title, best_product_url=b_url,
+            best_deal=best_deal, platform_results=processed.get('platform_results')
         )
 
         # Automatic inbox message: Search Completed
@@ -1085,13 +1157,13 @@ def search():
         )
 
         # Automatic inbox message: Best Deal Found
-        best_deal = processed.get('best_overall_deal')
-        if best_deal and best_deal.get('formatted_price'):
+        if best_deal and (best_deal.get('formatted_price') or best_deal.get('price')):
+            f_price = best_deal.get('formatted_price') or best_deal.get('price')
             create_inbox_message(
                 user_id,
                 'best_deal',
                 'Best Deal Found 🏆',
-                f"The lowest price for '{query}' is ₹{best_deal['formatted_price']} on {best_deal.get('platform', 'SmartBuy').capitalize()}.",
+                f"The lowest price for '{query}' is ₹{f_price} on {best_deal.get('platform', 'SmartBuy').capitalize()}.",
                 search_id
             )
 

@@ -46,15 +46,15 @@ class MeeshoScraper:
 
         # Map string status to ScrapeStatus enum
         if status_str == "success":
-            status_enum = ScrapeStatus.SUCCESS if items else ScrapeStatus.NO_PRODUCTS_FOUND
+            status_enum = ScrapeStatus.SUCCESS if items else ScrapeStatus.NO_RESULTS
         elif status_str == "blocked":
-            status_enum = ScrapeStatus.ACCESS_BLOCKED
+            status_enum = ScrapeStatus.BLOCKED
         elif status_str == "timeout":
             status_enum = ScrapeStatus.TIMEOUT
-        elif status_str == "no_products_found":
-            status_enum = ScrapeStatus.NO_PRODUCTS_FOUND
+        elif status_str in ("no_products_found", "no_results"):
+            status_enum = ScrapeStatus.NO_RESULTS
         else:
-            status_enum = getattr(ScrapeStatus, "SCRAPER_ERROR", ScrapeStatus.UNAVAILABLE)
+            status_enum = getattr(ScrapeStatus, "SCRAPER_ERROR", ScrapeStatus.UNKNOWN_ERROR)
 
         return items, status_enum, err_msg
 

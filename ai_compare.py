@@ -84,3 +84,40 @@ def get_ai_comparison(query, platform_results):
                     f"{cheapest_platform} offers the lowest price ({price}) for '{title[:45]}...'. "
                     f"Check individual cards below for ratings and stock availability.")
         return f"Compare live deals for '{query}' across Amazon, Flipkart, and Meesho below."
+
+
+def calculate_best_deal(platform_results, query=""):
+    """
+    Calculate the authentic best deal across platforms, excluding accessories
+    when the query is for a primary product (like a phone or laptop).
+    """
+    query_low = (query or "").lower()
+    accessory_terms = ["cover", "case", "protector", "tempered", "pouch", "skin", "stand"]
+    is_device = any(d in query_low for d in ["phone", "5g", "laptop", "mobile", "vivo", "iphone", "samsung", "realme"])
+
+    best_plat = None
+    best_price = None
+    best_item = None
+
+    for platform, items in platform_results.items():
+        for item in items:
+            title = (item.get("title") or item.get("name") or "").lower()
+            if is_device and any(term in title for term in accessory_terms):
+                continue
+            
+            p_val = item.get("price_num")
+            if p_val is None:
+                p_val = _parse_price(item.get("price"))
+            
+            if p_val is not None and p_val > 0:
+                if best_price is None or p_val < best_price:
+                    best_price = p_val
+                    best_plat = platform
+                    best_item = item
+
+    return {
+        "best_platform": best_plat or "Not Available",
+        "best_price": best_price,
+        "product": best_item
+    }
+

@@ -132,20 +132,29 @@ def calculate_standard_unit_price(price_num: Optional[int], qty_info: Dict[str, 
     if not price_num or price_num <= 0 or not qty_info:
         return None
 
-    grams = qty_info.get("quantity_in_grams")
-    if grams and grams > 0:
-        per_100g = round((price_num / grams) * 100, 1)
-        return f"₹{per_100g:g} / 100g"
+    try:
+        grams = float(qty_info.get("quantity_in_grams") or 0)
+        if grams > 0:
+            per_100g = round((price_num / grams) * 100, 1)
+            return f"₹{per_100g:g} / 100g"
+    except (ValueError, TypeError):
+        pass
 
-    mls = qty_info.get("quantity_in_ml")
-    if mls and mls > 0:
-        per_100ml = round((price_num / mls) * 100, 1)
-        return f"₹{per_100ml:g} / 100ml"
+    try:
+        mls = float(qty_info.get("quantity_in_ml") or 0)
+        if mls > 0:
+            per_100ml = round((price_num / mls) * 100, 1)
+            return f"₹{per_100ml:g} / 100ml"
+    except (ValueError, TypeError):
+        pass
 
-    pack_count = qty_info.get("pack_count", 1)
-    if pack_count and pack_count > 1:
-        per_item = round(price_num / pack_count, 1)
-        return f"₹{per_item:g} / item"
+    try:
+        pack_count = int(qty_info.get("pack_count") or 1)
+        if pack_count > 1:
+            per_item = round(price_num / pack_count, 1)
+            return f"₹{per_item:g} / item"
+    except (ValueError, TypeError):
+        pass
 
     return None
 

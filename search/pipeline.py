@@ -19,6 +19,7 @@ Guarantees:
 - Returns "No exact cross-platform match available" when cross-platform identity is unverified
 """
 
+import re
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -47,6 +48,16 @@ def run_comparison_pipeline(
 
     # 1. Query Understanding / Target Entity Extraction
     if is_url_search and source_product:
+        pack_q = source_product.get("pack_quantity")
+        pack_cnt = None
+        if pack_q is not None:
+            try:
+                m_p = re.search(r'\d+', str(pack_q))
+                if m_p:
+                    pack_cnt = int(m_p.group(0))
+            except (ValueError, TypeError):
+                pack_cnt = None
+
         target_info = {
             "raw_query": clean_q,
             "brand": source_product.get("brand"),
@@ -57,7 +68,7 @@ def run_comparison_pipeline(
             "storage": source_product.get("storage"),
             "network": source_product.get("network"),
             "weight": source_product.get("weight"),
-            "pack_count": source_product.get("pack_quantity"),
+            "pack_count": pack_cnt,
             "is_accessory": False,
         }
     else:

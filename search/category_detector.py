@@ -73,7 +73,7 @@ def detect_category(
         return "face_wash"
     if re.search(r'\b(shampoo|conditioner|hair\s*wash|hair\s*cleanser|hair\s*oil)\b', primary_text):
         return "shampoo"
-    if re.search(r'\b(lipstick|lip\s*stick|lip\s*gloss|lip\s*balm|mascara|eyeliner|eye\s*liner|kajal|foundation|compact|blush|nail\s*polish|makeup)\b', primary_text):
+    if re.search(r'\b(lipstick|lip\s*stick|lip\s*gloss|lip\s*balm|mascara|eyeliner|eye\s*liner|kajal|foundation|compact|blush|nail\s*polish|makeup|hair\s*dryer|dryer|trimmer|shaver|straightener)\b', primary_text):
         return "beauty"
     if re.search(r'\b(sunscreen|sun\s*screen|spf\s*\d+|sun\s*block|moisturizer|serum|creams?|lotion|skincare|cosmetics?|face\s*mask|peel)\b', primary_text):
         return "skincare"
@@ -101,7 +101,7 @@ def detect_category(
         return "tablet"
     if re.search(r'\b(camera|cameras|dslr|mirrorless|gopro|digicam|webcam|tripod)\b', primary_text):
         return "camera"
-    if re.search(r'\b(tv|tvs|television|televisions|led\s*tv|smart\s*tv|4k\s*tv|oled|qled|bravia)\b', primary_text):
+    if re.search(r'\b(tv|tvs|television|televisions|led\s*tv|smart\s*tv|4k\s*tv|oled|qled|bravia|refrigerator|fridge|washing\s*machine|microwave)\b', primary_text):
         return "television"
     if re.search(r'\b(monitor|printer|keyboard|mouse|router|ssd|hard\s*drive|pendrive|electronics)\b', primary_text):
         return "electronics"

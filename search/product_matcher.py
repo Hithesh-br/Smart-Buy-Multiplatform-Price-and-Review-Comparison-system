@@ -282,9 +282,27 @@ def evaluate_product_match(
 
     # ── 5. Quantity & Pack Count Scoring (15 pts) ─────────────────────────────
     qty_pts = 15.0
-    tgt_pack = target_info.get("pack_count")
+    tgt_pack_raw = target_info.get("pack_count")
+    tgt_pack = None
+    if tgt_pack_raw is not None:
+        try:
+            m = re.search(r'\d+', str(tgt_pack_raw))
+            if m:
+                tgt_pack = int(m.group(0))
+        except (ValueError, TypeError):
+            tgt_pack = None
+
     if tgt_pack and tgt_pack > 1:
-        cand_pack = int(candidate.get("pack_quantity") or 1)
+        cand_pack_raw = candidate.get("pack_quantity")
+        cand_pack = 1
+        if cand_pack_raw is not None:
+            try:
+                m_c = re.search(r'\d+', str(cand_pack_raw))
+                if m_c:
+                    cand_pack = int(m_c.group(0))
+            except (ValueError, TypeError):
+                cand_pack = 1
+
         if cand_pack == tgt_pack:
             reasons.append(f"Pack count verified: {tgt_pack}")
         else:
