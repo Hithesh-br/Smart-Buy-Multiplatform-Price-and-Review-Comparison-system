@@ -5089,3 +5089,207 @@ retry=0
 products=15
 duration=21.79s
 
+[20:00:15] AMAZON
+query="hp laptop charger"
+provider=amazon_provider
+status=success
+retry=0
+products=19
+url=https://www.amazon.in/s?k=hp%20laptop%20charger
+duration=3.46s
+
+[20:00:15] AMAZON
+query="hp laptop charger"
+provider=amazon_provider
+status=success
+retry=0
+products=19
+duration=3.46s
+
+[20:00:20] FLIPKART
+query="hp laptop charger"
+provider=flipkart_provider
+status=success
+retry=0
+products=20
+url=https://www.flipkart.com/search?q=hp%20laptop%20charger
+duration=7.85s
+
+[20:00:20] FLIPKART
+query="hp laptop charger"
+provider=flipkart_provider
+status=success
+retry=0
+products=20
+duration=7.85s
+
+[20:00:25] MEESHO
+query="hp laptop charger"
+provider=meesho_provider
+status=success
+retry=2
+products=15
+url=https://www.meesho.com/search?q=hp+laptop+charger
+duration=13.12s
+
+[20:00:25] MEESHO
+query="hp laptop charger"
+provider=meesho_provider
+status=success
+retry=0
+products=15
+duration=13.14s
+
+[20:01:47] AMAZON
+query="boAt Smartwatch"
+provider=amazon_provider
+status=success
+retry=0
+products=20
+url=https://www.amazon.in/s?k=boAt%20Smartwatch
+duration=3.83s
+
+[20:01:47] AMAZON
+query="boAt Smartwatch"
+provider=amazon_provider
+status=success
+retry=0
+products=20
+duration=3.83s
+
+[20:01:49] FLIPKART
+query="boAt Smartwatch"
+provider=flipkart_provider
+status=success
+retry=0
+products=20
+url=https://www.flipkart.com/search?q=boAt%20Smartwatch
+duration=5.72s
+
+[20:01:49] FLIPKART
+query="boAt Smartwatch"
+provider=flipkart_provider
+status=success
+retry=0
+products=20
+duration=5.73s
+
+[20:01:58] MEESHO
+query="boat smartwatch"
+provider=meesho_provider
+status=success
+retry=2
+products=15
+url=https://www.meesho.com/search?q=boat+smartwatch
+duration=14.73s
+
+[20:01:58] MEESHO
+query="boAt Smartwatch"
+provider=meesho_provider
+status=success
+retry=0
+products=15
+duration=14.76s
+
+[20:04:26] FLIPKART
+query="blanket"
+provider=flipkart_provider
+status=success
+retry=0
+products=20
+url=https://www.flipkart.com/search?q=blanket
+duration=6.88s
+
+[20:04:26] AMAZON
+query="blanket"
+provider=amazon_provider
+status=success
+retry=0
+products=20
+url=https://www.amazon.in/s?k=blanket
+duration=6.93s
+
+[20:04:26] AMAZON
+query="blanket"
+provider=amazon_provider
+status=success
+retry=0
+products=20
+duration=6.93s
+
+[20:04:26] FLIPKART
+query="blanket"
+provider=flipkart_provider
+status=success
+retry=0
+products=20
+duration=6.93s
+
+[20:04:37] MEESHO
+query="blanket"
+provider=meesho_provider
+status=success
+retry=2
+products=15
+url=https://www.meesho.com/search?q=blanket
+duration=17.58s
+
+[20:04:37] MEESHO
+query="blanket"
+provider=meesho_provider
+status=success
+retry=0
+products=15
+duration=17.60s
+
+[20:05:22] AMAZON
+query="mens oversize t-shirt"
+provider=amazon_provider
+status=success
+retry=0
+products=20
+url=https://www.amazon.in/s?k=mens%20oversize%20t-shirt
+duration=5.40s
+
+[20:05:22] AMAZON
+query="mens oversize t-shirt"
+provider=amazon_provider
+status=success
+retry=0
+products=20
+duration=5.40s
+
+[20:05:23] FLIPKART
+query="mens oversize t-shirt"
+provider=flipkart_provider
+status=success
+retry=0
+products=20
+url=https://www.flipkart.com/search?q=mens%20oversize%20t-shirt
+duration=6.31s
+
+[20:05:23] FLIPKART
+query="mens oversize t-shirt"
+provider=flipkart_provider
+status=success
+retry=0
+products=20
+duration=6.32s
+
+[20:05:38] MEESHO
+query="mens oversize t shirt"
+provider=meesho_provider
+status=success
+retry=2
+products=15
+url=https://www.meesho.com/search?q=mens+oversize+t+shirt
+duration=21.19s
+
+[20:05:38] MEESHO
+query="mens oversize t-shirt"
+provider=meesho_provider
+status=success
+retry=0
+products=15
+duration=21.22s
+
