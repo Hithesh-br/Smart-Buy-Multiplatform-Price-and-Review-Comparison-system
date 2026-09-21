@@ -64,3 +64,8 @@ def format_platform_error(platform: str, error_detail: str = "") -> dict:
         "error": msg,
         "items": []
     }
+
+
+# OTP Helper functions imported from otp_utils
+from otp_utils import generate_otp, send_email_otp, send_sms_otp, send_otp_email
+

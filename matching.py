@@ -13,7 +13,6 @@ from search.matching import (
     deduplicate_products,
     cross_platform_deduplicate,
     is_relevant,
-    is_exact_product,
     THRESHOLDS,
 )
 
@@ -23,6 +22,5 @@ __all__ = [
     "deduplicate_products",
     "cross_platform_deduplicate",
     "is_relevant",
-    "is_exact_product",
     "THRESHOLDS",
 ]

@@ -48,5 +48,5 @@ logger = logging.getLogger("smartbuy")
 if __name__ == '__main__':
     port = int(os.getenv("PORT", 5000))
     logger.info(f"Starting Smart-Buy: Multiplatform Price Review Comparison System on port {port}...")
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
 

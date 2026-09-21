@@ -368,7 +368,9 @@
                     <a class="nav-link px-3 fw-semibold" href="/about"><i class="fas fa-info-circle me-1 text-secondary"></i>About</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link px-3 fw-semibold" href="/search?q=Mobiles"><i class="fas fa-search me-1 text-success"></i>Search Products</a>
+                    <!-- FIX: was href="/search?q=Mobiles" — fired a live scrape on every click.
+                         Now points to /#product-specs which scrolls to the search form. -->
+                    <a class="nav-link px-3 fw-semibold" href="/#product-specs"><i class="fas fa-search me-1 text-success"></i>Search Products</a>
                 </li>
                 {% if current_user %}
                 <li class="nav-item">
@@ -452,10 +454,83 @@
             <div class="platform-badge-item pb-meesho"><i class="fas fa-tags"></i> Meesho</div>
         </div>
 
-        <!-- ════ PRODUCT SPECIFICATIONS CARD COMPONENT ════ -->
-        <div class="product-specifications-card mb-4 text-start">
+        <!-- Search Mode Toggle Tabs -->
+        <div class="search-mode-tabs d-flex justify-content-center gap-2 mb-4">
+            <button type="button" class="btn btn-primary rounded-pill px-4 py-2 fw-bold shadow-sm" id="modeNameBtn" onclick="switchSearchMode('name')">
+                <i class="fas fa-font me-2"></i>Search Product Name
+            </button>
+            <button type="button" class="btn btn-outline-primary rounded-pill px-4 py-2 fw-bold shadow-sm" id="modeUrlBtn" onclick="switchSearchMode('url')">
+                <i class="fas fa-link me-2"></i>Search Product URL
+            </button>
+        </div>
+
+        <!-- ════ URL SEARCH CARD COMPONENT ════ -->
+        <div class="product-specifications-card mb-4 text-start d-none" id="urlSearchContainer" style="background: rgba(255, 255, 255, 0.95); border: 1.5px solid rgba(59, 130, 246, 0.25); box-shadow: 0 16px 40px rgba(37, 99, 235, 0.12);">
+            <!-- Header -->
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-4">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="spec-header-icon-box" style="background: linear-gradient(135deg, #2563eb, #7c3aed);">
+                        <i class="fas fa-link text-white"></i>
+                    </div>
+                    <div>
+                        <h3 class="fw-bold mb-1 text-dark" style="font-size:1.55rem; letter-spacing:-0.5px;">Search by Product URL</h3>
+                        <p class="text-muted small mb-0" style="font-size:0.9rem;">
+                            Paste any product link from <strong>Amazon India</strong>, <strong>Flipkart</strong>, or <strong>Meesho</strong> to compare prices and specifications.
+                        </p>
+                    </div>
+                </div>
+                <div id="urlPlatformBadge" style="display: none;"></div>
+            </div>
+
+            <!-- URL Input Pill with Paste and Compare Button -->
+            <div class="hero-search-box position-relative mb-3" style="border-radius:50px; background:#fff; border:1.5px solid #3b82f6; padding:6px 6px 6px 20px; box-shadow: 0 8px 30px rgba(59, 130, 246, 0.15);">
+                <i class="fas fa-globe me-3 text-primary" style="font-size:1.2rem; flex-shrink:0;"></i>
+                <input
+                    type="url"
+                    id="productUrlInput"
+                    class="hero-search-input"
+                    placeholder="Paste Amazon / Flipkart / Meesho product URL (e.g. https://www.amazon.in/dp/...)"
+                    autocomplete="off"
+                    aria-label="Paste Product URL"
+                >
+                <button type="button" class="btn btn-light btn-sm rounded-pill px-3 me-2 fw-semibold text-secondary d-none d-sm-inline-flex align-items-center gap-1" onclick="pasteClipboardToUrl()" title="Paste from clipboard">
+                    <i class="fas fa-paste"></i> Paste
+                </button>
+                <button type="button" class="hero-search-btn" id="urlCompareBtn" onclick="startUrlComparison()" style="background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); border-radius:40px; padding:12px 32px; font-weight:700;">
+                    <i class="fas fa-balance-scale me-2"></i>
+                    <span>Compare Product</span>
+                </button>
+            </div>
+
+            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 text-muted small px-2">
+                <span><i class="fas fa-shield-alt text-success me-1"></i>Supports <strong>amazon.in</strong>, <strong>flipkart.com</strong>, and <strong>meesho.com</strong></span>
+                <span><i class="fas fa-bolt text-warning me-1"></i>Real-time 4-tier live verification</span>
+            </div>
+
+            <!-- Real-time Progress Tracking Container -->
+            <div class="mt-4 p-3 rounded-4 bg-white border shadow-sm d-none" id="urlProgressCard">
+                <div class="d-flex align-items-center justify-content-between mb-3">
+                    <h6 class="fw-bold mb-0 text-dark d-flex align-items-center gap-2">
+                        <i class="fas fa-tasks text-primary"></i>Live Comparison Pipeline
+                    </h6>
+                    <span class="small text-muted" id="urlProgressStatus">Comparing platforms...</span>
+                </div>
+                <div class="progress mb-3" style="height: 6px; border-radius: 10px; background: #e2e8f0;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" id="urlProgressBar" role="progressbar" style="width: 10%;"></div>
+                </div>
+                <div id="urlProgressSteps">
+                    <!-- Populated via JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ════ PRODUCT SPECIFICATIONS CARD COMPONENT ════
+             id="product-specs" is the anchor target for the navbar
+             "Search Products" link (href="/#product-specs"). -->
+        <div class="product-specifications-card mb-4 text-start" id="product-specs">
             <!-- Header -->
             <div class="d-flex align-items-center gap-3 mb-4">
+
                 <div class="spec-header-icon-box">
                     <i class="fas fa-sliders-h"></i>
                 </div>
@@ -469,29 +544,26 @@
 
             <!-- Category Pills Row -->
             <div class="d-flex align-items-center gap-2 flex-wrap mb-4" id="categoryPillContainer">
-                <button type="button" class="spec-cat-pill active" data-cat="Mobiles" onclick="switchSpecCategory('Mobiles', this)">
+                <button type="button" class="spec-cat-pill" data-cat="Mobiles" onclick="switchSpecCategory('Mobiles', this); window.userExplicitlyClickedCategory = true;">
                     <i class="fas fa-mobile-alt me-2"></i>Mobiles
                 </button>
-                <button type="button" class="spec-cat-pill" data-cat="Laptops" onclick="switchSpecCategory('Laptops', this)">
+                <button type="button" class="spec-cat-pill" data-cat="Laptops" onclick="switchSpecCategory('Laptops', this); window.userExplicitlyClickedCategory = true;">
                     <i class="fas fa-laptop me-2"></i>Laptops
                 </button>
-                <button type="button" class="spec-cat-pill" data-cat="Headphones" onclick="switchSpecCategory('Headphones', this)">
+                <button type="button" class="spec-cat-pill" data-cat="Headphones" onclick="switchSpecCategory('Headphones', this); window.userExplicitlyClickedCategory = true;">
                     <i class="fas fa-headphones me-2"></i>Headphones
                 </button>
-                <button type="button" class="spec-cat-pill" data-cat="Smartwatches" onclick="switchSpecCategory('Smartwatches', this)">
+                <button type="button" class="spec-cat-pill" data-cat="Smartwatches" onclick="switchSpecCategory('Smartwatches', this); window.userExplicitlyClickedCategory = true;">
                     <i class="fas fa-clock me-2"></i>Smartwatches
                 </button>
-                <button type="button" class="spec-cat-pill" data-cat="Home Appliances" onclick="switchSpecCategory('Home Appliances', this)">
+                <button type="button" class="spec-cat-pill" data-cat="Home Appliances" onclick="switchSpecCategory('Home Appliances', this); window.userExplicitlyClickedCategory = true;">
                     <i class="fas fa-tv me-2"></i>Home Appliances
-                </button>
-                <button type="button" class="spec-cat-pill" data-cat="Clothes" onclick="switchSpecCategory('Clothes', this)">
-                    <i class="fas fa-tshirt me-2"></i>Clothes & Fashion
                 </button>
             </div>
 
             <!-- Form -->
-            <form action="/search" method="GET" id="mainSearchForm" onsubmit="showLoading()">
-                <input type="hidden" name="category" id="specCategoryInput" value="Mobiles">
+            <form action="/search" method="GET" id="mainSearchForm">
+                <input type="hidden" name="category" id="specCategoryInput" value="">
 
                 <!-- 3x3 Specifications Grid -->
                 <div class="row g-3 mb-4" id="specFieldsGrid">
@@ -567,14 +639,14 @@
                 <div class="how-step">
                     <div class="how-step-number">2</div>
                     <h6 class="fw-bold">Live Scraping</h6>
-                    <p class="text-muted small mb-0">Amazon, Flipkart & Meesho searched simultaneously</p>
+                    <p class="text-muted small mb-0">Amazon, Flipkart &amp; Meesho searched simultaneously</p>
                 </div>
             </div>
             <div class="col-6 col-md-3">
                 <div class="how-step">
                     <div class="how-step-number">3</div>
                     <h6 class="fw-bold">Smart Ranking</h6>
-                    <p class="text-muted small mb-0">RapidFuzz matching, deduplication & scoring</p>
+                    <p class="text-muted small mb-0">RapidFuzz matching, deduplication &amp; scoring</p>
                 </div>
             </div>
             <div class="col-6 col-md-3">
@@ -594,7 +666,7 @@
                 <p class="text-muted small mb-0">Platforms</p>
             </div>
             <div class="col-4">
-                <div class="stat-number">∞</div>
+                <div class="stat-number">&#8734;</div>
                 <p class="text-muted small mb-0">Products</p>
             </div>
             <div class="col-4">
@@ -613,7 +685,7 @@
             <span class="visually-hidden">Loading...</span>
         </div>
         <h4 class="fw-bold mb-2"><i class="fas fa-sliders-h text-primary me-2"></i>Searching Products Live</h4>
-        <p class="opacity-75 small mb-3">Searching products using your selected specifications across Amazon, Flipkart & Meesho...</p>
+        <p class="opacity-75 small mb-3">Searching products using your selected specifications across Amazon, Flipkart &amp; Meesho...</p>
         <div class="platform-searching">
             <div class="platform-dot dot-amazon"></div>
             <span style="color:#FF9900; font-weight:600;">Amazon.in</span>
@@ -762,7 +834,7 @@
                 </ul>
             </div>
             <div class="col-sm-6 col-md-3">
-                <h6 class="fw-bold mb-3 text-dark">Legal & Contact</h6>
+                <h6 class="fw-bold mb-3 text-dark">Legal &amp; Contact</h6>
                 <ul class="list-unstyled">
                     <li class="mb-2"><a class="footer-link small" href="#" onclick="alert('Privacy Policy (Simulated)');">Privacy Policy</a></li>
                     <li class="mb-2"><a class="footer-link small" href="#" onclick="alert('Contact: support@smartbuy.com');">Contact Support</a></li>
@@ -771,15 +843,42 @@
         </div>
         <hr class="my-4 opacity-25">
         <div class="d-flex justify-content-between align-items-center flex-wrap">
-            <span class="small text-muted">© 2026 Smart-Buy: Multiplatform Price Review Comparison System. All rights reserved.</span>
-            <span class="small text-muted">Developed for Production Multiplatform Price & Review Comparison.</span>
+            <span class="small text-muted">&copy; 2026 Smart-Buy: Multiplatform Price Review Comparison System. All rights reserved.</span>
+            <span class="small text-muted">Developed for Production Multiplatform Price &amp; Review Comparison.</span>
         </div>
     </div>
 </footer>
 
+<!-- Loading Overlay with Marketplace Status Animation -->
+<div id="loadingOverlay" class="d-none position-fixed top-0 start-0 w-100 h-100 d-flex flex-column align-items-center justify-content-center"
+     style="background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(8px); z-index: 9999; color: white;">
+    <div class="card border-0 shadow-lg rounded-4 p-4 text-center" style="background: rgba(30, 41, 59, 0.95); max-width: 420px; width: 90%;">
+        <div class="spinner-border text-primary mb-3 mx-auto" style="width: 3rem; height: 3rem;" role="status"></div>
+        <h4 class="fw-bold mb-1 text-white">Searching Marketplaces</h4>
+        <p class="text-muted small mb-4">Querying live product offers across platforms simultaneously...</p>
+
+        <div class="text-start d-flex flex-column gap-2 mb-2">
+            <div class="p-2 rounded-3 bg-dark border border-secondary-subtle d-flex align-items-center justify-content-between text-white small">
+                <span><i class="fab fa-amazon text-warning me-2"></i>Searching Amazon...</span>
+                <span class="spinner-grow spinner-grow-sm text-warning"></span>
+            </div>
+            <div class="p-2 rounded-3 bg-dark border border-secondary-subtle d-flex align-items-center justify-content-between text-white small">
+                <span><i class="fas fa-store text-primary me-2"></i>Searching Flipkart...</span>
+                <span class="spinner-grow spinner-grow-sm text-primary"></span>
+            </div>
+            <div class="p-2 rounded-3 bg-dark border border-secondary-subtle d-flex align-items-center justify-content-between text-white small">
+                <span><i class="fas fa-tags text-danger me-2"></i>Searching Meesho...</span>
+                <span class="spinner-grow spinner-grow-sm text-danger"></span>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 <script>
+window.userExplicitlyClickedCategory = false;
+
 function showLoading() {
     const overlay = document.getElementById('loadingOverlay');
     if (overlay) {
@@ -814,7 +913,20 @@ document.addEventListener('DOMContentLoaded', function() {
     if (typeof switchSpecCategory === 'function') {
         switchSpecCategory('Mobiles');
     }
+    const form = document.getElementById('mainSearchForm');
+    if (form) {
+        form.addEventListener('submit', function() {
+            const qInput = document.getElementById('specSearchInput');
+            const catInput = document.getElementById('specCategoryInput');
+            if (qInput && qInput.value.trim() && catInput && !window.userExplicitlyClickedCategory) {
+                catInput.value = '';
+            }
+            showLoading();
+        });
+    }
 });
 </script>
+<script src="{{ url_for('static', filename='js/url_search.js') }}"></script>
 </body>
 </html>
+

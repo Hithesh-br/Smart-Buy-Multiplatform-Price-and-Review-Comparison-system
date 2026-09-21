@@ -14,16 +14,27 @@ Flask API Blueprint & Route Handlers:
 import json
 import time
 import re
+import os
 import logging
+import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timezone
 from functools import wraps
 from flask import Blueprint, render_template, request, redirect, jsonify, session, flash, url_for, Response, stream_with_context
 from werkzeug.security import generate_password_hash, check_password_hash
-from search_engine import fetch_all_products_parallel, process_results, stream_platform_results
+from search_engine import fetch_all_products_parallel, fetch_all_products_with_fallbacks, process_results
 from cache import get_cached_search, set_cached_search
+from url_detector import validate_and_detect_url, detect_search_type
+from comparison_engine import compare_by_product_url, compare_by_product_url_stream
+from search.search_router import route_search
+
 from database import (
     log_search_query, get_trending_queries, get_query_count,
     create_user, get_user_by_email, get_user_by_id, update_user_name,
-    update_user_password, log_user_search, get_user_search_history,
+    update_user_password, update_user_password_by_email,
+    log_user_search, get_user_search_history,
     create_user_feedback, get_user_feedback_list, get_feedback_by_id,
     update_user_feedback, delete_user_feedback, get_user_stats,
     create_inbox_message, get_user_inbox_messages, get_user_unread_inbox_count,
@@ -33,7 +44,8 @@ from database import (
     update_user_last_login, create_admin_inbox_notification,
     get_admin_inbox_notifications, get_admin_unread_count,
     mark_admin_notification_read, delete_admin_notification,
-    get_all_users_for_admin, get_user_full_details_for_admin
+    get_all_users_for_admin, get_user_full_details_for_admin,
+    store_otp, verify_otp_code, check_otp_resend_cooldown, get_otp_expiry_minutes
 )
 from autocomplete_engine import build_trie_from_history, get_autocomplete_suggestions
 from search.normalizer import normalize_query, build_search_query
@@ -42,6 +54,43 @@ from utils import clean_text
 
 logger = logging.getLogger("smartbuy.api")
 api_bp = Blueprint("api", __name__)
+
+
+def send_email(to_email: str, subject: str, body_text: str) -> bool:
+    """
+    Send a plain-text email via SMTP using credentials from .env
+    (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_NAME).
+
+    Returns True on success, False on any failure — never raises, so a
+    flaky SMTP connection degrades to "couldn't send the email" for the
+    caller to handle, rather than crashing the request.
+    """
+    smtp_host = os.environ.get('SMTP_HOST')
+    smtp_port = int(os.environ.get('SMTP_PORT', 587))
+    smtp_user = os.environ.get('SMTP_USER')
+    smtp_password = os.environ.get('SMTP_PASSWORD')
+    from_name = os.environ.get('SMTP_FROM_NAME', 'SmartBuy')
+
+    if not smtp_host or not smtp_user or not smtp_password:
+        logger.warning(f"[Email] SMTP not configured — cannot send '{subject}' to {to_email}.")
+        return False
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = f"{from_name} <{smtp_user}>"
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body_text, 'plain'))
+
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_user, [to_email], msg.as_string())
+        logger.info(f"[Email] Sent '{subject}' to {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"[Email] Failed to send '{subject}' to {to_email}: {e}")
+        return False
 
 
 def login_required(f):
@@ -316,6 +365,179 @@ def signup():
             return jsonify({"success": False, "message": msg}), status_code or 500
         return render_template('signup.html', errors=[msg], name=name, email=email), status_code or 500
 
+
+# ════════════════════ FORGOT / RESET PASSWORD ════════════════════
+# 4-step flow: forgot_password.html (enter email) -> /send-reset-otp ->
+# enter OTP -> /verify-reset-otp -> /reset-password?email=... (set new
+# password) -> /reset-password POST -> back to /signin.
+# None of these routes existed before — "Forgot Password?" had nowhere
+# real to go. Reuses store_otp/verify_otp_code/update_user_password_by_email
+# from database.py, which already existed but were unused for this purpose.
+
+@api_bp.route('/forgot-password', methods=['GET'])
+def forgot_password():
+    """Step 1 page: enter registered email to receive a reset OTP."""
+    email = request.args.get('email', '').strip()
+    return render_template('forgot_password.html', email=email)
+
+
+@api_bp.route('/send-reset-otp', methods=['POST'])
+def send_reset_otp():
+    """Generate a 6-digit OTP, store it (purpose='password_reset'), and
+    email it to the user. Matches forgot_password.html's sendOtpForm."""
+    data = request.get_json(silent=True) or {}
+    email = str(data.get('email', '')).strip().lower()
+
+    if not email or '@' not in email or '.' not in email:
+        return jsonify({"success": False, "message": "Please enter a valid email address."}), 400
+
+    user = get_user_by_email(email)
+    if not user:
+        # Don't reveal whether an email is registered (avoids account
+        # enumeration) — respond the same way whether or not it exists,
+        # but only actually generate/send an OTP when it does.
+        logger.info(f"[Password Reset] OTP requested for unregistered email: {email}")
+        return jsonify({"success": True, "message": f"If {email} is registered, an OTP has been sent."}), 200
+
+    allowed, cooldown_msg = check_otp_resend_cooldown(email, cooldown_seconds=60)
+    if not allowed:
+        return jsonify({"success": False, "message": cooldown_msg}), 429
+
+    otp_code = f"{secrets.randbelow(1_000_000):06d}"
+    expiry_minutes = get_otp_expiry_minutes()
+
+    if not store_otp(email, otp_code, channel='email', purpose='password_reset', ttl_minutes=expiry_minutes):
+        return jsonify({"success": False, "message": "Unable to generate OTP right now. Please try again."}), 500
+
+    sent = send_email(
+        to_email=email,
+        subject="Your SmartBuy Password Reset Code",
+        body_text=(
+            f"Your SmartBuy password reset code is: {otp_code}\n\n"
+            f"This code expires in {expiry_minutes} minutes.\n\n"
+            f"If you didn't request this, you can safely ignore this email."
+        ),
+    )
+    if not sent:
+        return jsonify({"success": False, "message": "Unable to send the OTP email right now. Please try again shortly."}), 500
+
+    return jsonify({"success": True, "message": f"OTP sent to {email}."}), 200
+
+
+@api_bp.route('/verify-reset-otp', methods=['POST'])
+def verify_reset_otp():
+    """Verify the submitted OTP. Matches forgot_password.html's verifyOtpForm."""
+    data = request.get_json(silent=True) or {}
+    email = str(data.get('email', '')).strip().lower()
+    otp = str(data.get('otp', '')).strip()
+
+    if not email or not otp:
+        return jsonify({"success": False, "message": "Email and OTP are required."}), 400
+
+    ok, msg = verify_otp_code(email, otp, channel='email', purpose='password_reset')
+    if not ok:
+        return jsonify({"success": False, "message": msg}), 400
+
+    # Single-purpose, short-lived session flag proving this email actually
+    # completed OTP verification — required by /reset-password below so
+    # nobody can jump straight to /reset-password?email=someone-else and
+    # set their password without ever proving ownership of that inbox.
+    session['reset_password_email'] = email
+    session['reset_password_verified_at'] = datetime.now(timezone.utc).isoformat()
+
+    return jsonify({"success": True, "message": "OTP verified successfully."}), 200
+
+
+@api_bp.route('/reset-password', methods=['GET'])
+def reset_password_page():
+    """Step 3 page: set a new password. Requires a prior verified OTP for
+    this exact email in the current session (set by /verify-reset-otp)."""
+    email = request.args.get('email', '').strip().lower()
+    if not email or session.get('reset_password_email') != email:
+        # BUG-AVOIDANCE: forgot_password.html reads `error`/`message` as
+        # template variables passed directly by render_template — it does
+        # NOT render Flask's flash() messages (no get_flashed_messages
+        # block in that template). flash()-then-redirect here would have
+        # silently discarded this message.
+        return render_template(
+            'forgot_password.html', email=email,
+            error="Please verify your email with an OTP before resetting your password."
+        )
+    return render_template('reset_password.html', email=email)
+
+
+@api_bp.route('/reset-password', methods=['POST'])
+def reset_password_submit():
+    """Final step: hash and save the new password, then send the user to sign in."""
+    is_json_req = request.is_json or 'application/json' in request.headers.get('Accept', '')
+
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+    else:
+        data = request.form
+
+    # reset_password.html's JS never sends "email" in its fetch body — only
+    # new_password/confirm_new_password. The authoritative email is whatever
+    # was verified via OTP in /verify-reset-otp and stored in the session;
+    # we never trust a client-supplied email for this step, which also
+    # closes off any possibility of resetting a different account's password
+    # by tampering with a form field.
+    email = session.get('reset_password_email', '')
+    password = str(data.get('new_password', ''))
+    confirm_password = str(data.get('confirm_new_password', ''))
+
+    if not email:
+        msg = "Your verification session expired. Please request a new OTP."
+        if is_json_req:
+            return jsonify({"success": False, "message": msg}), 401
+        flash(msg, "danger")
+        return redirect(url_for('api.forgot_password'))
+
+    # Matches the exact rules reset_password.html's own JS already shows the
+    # user live feedback on (8+ chars, starts uppercase, has a number, has a
+    # special char) — enforced server-side too, since client-only validation
+    # can always be bypassed by calling the API directly.
+    if len(password) < 8:
+        msg = "Password must be at least 8 characters long."
+        if is_json_req:
+            return jsonify({"success": False, "message": msg}), 400
+        return render_template('reset_password.html', email=email, errors=[msg]), 400
+    if not re.match(r'^[A-Z]', password):
+        msg = "Password must start with an uppercase English letter (A-Z)."
+        if is_json_req:
+            return jsonify({"success": False, "message": msg}), 400
+        return render_template('reset_password.html', email=email, errors=[msg]), 400
+    if not re.search(r'[0-9]', password):
+        msg = "Password must contain at least one number (0-9)."
+        if is_json_req:
+            return jsonify({"success": False, "message": msg}), 400
+        return render_template('reset_password.html', email=email, errors=[msg]), 400
+    if not re.search(r'[^A-Za-z0-9]', password):
+        msg = "Password must contain at least one special character (e.g. @ ! # $ % ^ & *)."
+        if is_json_req:
+            return jsonify({"success": False, "message": msg}), 400
+        return render_template('reset_password.html', email=email, errors=[msg]), 400
+
+    if password != confirm_password:
+        msg = "Confirm Password must exactly match New Password."
+        if is_json_req:
+            return jsonify({"success": False, "message": msg}), 400
+        return render_template('reset_password.html', email=email, errors=[msg]), 400
+
+    pwd_hash = generate_password_hash(password)
+    if not update_user_password_by_email(email, pwd_hash):
+        msg = "Unable to reset password right now. Please try again."
+        if is_json_req:
+            return jsonify({"success": False, "message": msg}), 500
+        return render_template('reset_password.html', email=email, errors=[msg]), 500
+
+    session.pop('reset_password_email', None)
+    session.pop('reset_password_verified_at', None)
+
+    if is_json_req:
+        return jsonify({"success": True, "message": "Password reset successfully.", "next": url_for('api.signin')}), 200
+    flash("Password reset successfully. Please sign in with your new password.", "success")
+    return redirect(url_for('api.signin'))
 
 
 @api_bp.route('/signin', methods=['GET', 'POST'])
@@ -661,15 +883,130 @@ def profile_change_password():
 @api_bp.route('/search/results', methods=['GET'])
 def search():
     """Main search route for side-by-side multi-platform comparison."""
+    url_param = request.args.get('url', '').strip()
+    raw_q = request.args.get('q', '').strip()
+
+    # Automatically detect whether user entered a product URL in 'q' or 'url'
+    if not url_param and raw_q:
+        detected = detect_search_type(raw_q)
+        if detected.get('type') == 'product_url':
+            url_param = detected.get('url') or raw_q
+
+    if url_param:
+        fresh = request.args.get('fresh', '0').lower() in ('1', 'true', 'yes')
+        comp_result = compare_by_product_url(url_param, fresh=fresh)
+        if not comp_result.get('success'):
+            flash(comp_result.get('error', 'Unable to retrieve or compare product from the provided URL.'), 'danger')
+            return redirect('/')
+
+        src_prod = comp_result.get('source_product') or {}
+        p_name = src_prod.get('title') or src_prod.get('product_name') or 'Product'
+
+        log_search_query(p_name)
+        user_id = session.get('user_id')
+        if user_id:
+            try:
+                log_user_search(user_id, p_name, src_prod.get('category', 'General'), num_results=3, platforms_found="Amazon, Flipkart, Meesho")
+            except Exception:
+                pass
+
+        matches = comp_result.get('matches', {})
+        matched_list = [p for p in matches.values() if p]
+
+        platforms_payload = {
+            "amazon": {
+                "status": comp_result.get('platform_status', {}).get('Amazon', {}).get('status', 'success'),
+                "products": [matches['amazon']] if matches.get('amazon') else []
+            },
+            "flipkart": {
+                "status": comp_result.get('platform_status', {}).get('Flipkart', {}).get('status', 'success'),
+                "products": [matches['flipkart']] if matches.get('flipkart') else []
+            },
+            "meesho": {
+                "status": comp_result.get('platform_status', {}).get('Meesho', {}).get('status', 'success'),
+                "products": [matches['meesho']] if matches.get('meesho') else []
+            }
+        }
+
+        comparison = {
+            "query": p_name,
+            "matched_products": matched_list,
+            "specifications": comp_result.get('specifications_matrix', []),
+            "best_deal": comp_result.get('best_deal'),
+            "specification_table": {
+                "has_match": bool(len(matched_list) >= 2),
+                "rows": comp_result.get('specifications_matrix', []),
+                "columns": ["specification", "amazon", "flipkart", "meesho"]
+            },
+            "amazon": matches.get('amazon'),
+            "flipkart": matches.get('flipkart'),
+            "meesho": matches.get('meesho'),
+            "products": {
+                "amazon": [matches['amazon']] if matches.get('amazon') else [],
+                "flipkart": [matches['flipkart']] if matches.get('flipkart') else [],
+                "meesho": [matches['meesho']] if matches.get('meesho') else []
+            }
+        }
+
+        best_per_plat = {
+            "Amazon": matches.get('amazon'),
+            "Flipkart": matches.get('flipkart'),
+            "Meesho": matches.get('meesho'),
+        }
+
+        top_verified_offers = comp_result.get('top_verified_offers', {})
+        val_prods = comp_result.get('validated_products') or matched_list
+
+        from search.specs_extractor import compute_marketplace_statuses
+        url_mp_status = compute_marketplace_statuses(matches, comp_result.get('platform_status', {}))
+
+        return render_template(
+            'results.html',
+            is_url_search=True,
+            searched_url=url_param,
+            source_platform=comp_result.get('source_platform'),
+            source_platform_name=comp_result.get('source_platform_name'),
+            source_product=src_prod,
+            query=p_name,
+            sort_by='best_match',
+            results_for_view=val_prods,
+            all_results=val_prods,
+            validated_products=val_prods,
+            total=len(val_prods),
+            platforms=platforms_payload,
+            platform_results={"Amazon": [matches['amazon']] if matches.get('amazon') else [], "Flipkart": [matches['flipkart']] if matches.get('flipkart') else [], "Meesho": [matches['meesho']] if matches.get('meesho') else []},
+            platform_status=comp_result.get('platform_status', {}),
+            marketplace_status=url_mp_status,
+            comparison_data=comparison,
+            specifications_matrix=comp_result.get('specifications_matrix', []),
+            best_deal=comp_result.get('best_deal'),
+            best_overall_deal=comp_result.get('best_deal'),
+            best_per_platform=best_per_plat,
+            overall_best=comp_result.get('best_deal'),
+            ai_summary="",
+            top_verified_offers=top_verified_offers,
+            top_prices_data=top_verified_offers,
+            top_prices=top_verified_offers,
+            savings_info=comp_result.get('savings_info', {}),
+            detected_category=src_prod.get('category', 'General'),
+            matching=comp_result.get('matching', {}),
+            match_pairs=comp_result.get('match_pairs', {}),
+            no_deal_message=comp_result.get('no_deal_message'),
+            has_cross_platform_match=comp_result.get('has_cross_platform_match', False),
+            similar_products=comp_result.get('similar_products', {}),
+            scraped_at=comp_result.get('scraped_at'),
+            sort_views={'best_match': val_prods},
+            dynamic_filters={},
+            filter_params={}
+        )
+
     raw_q = request.args.get('q', '')
     query = clean_text(raw_q)[:100]
+
 
     price_range = request.args.get('price_range', '').strip()
     min_rating = request.args.get('min_rating', '').strip()
     sort_by = request.args.get('sort', 'best_match').strip()
-
-    from search.normalizer import build_search_query_chain
-    from search_engine import fetch_all_products_with_fallbacks
 
     category_val = request.args.get('category', '').strip()
     specs_list = []
@@ -677,6 +1014,9 @@ def search():
         if request.args.get(k):
             specs_list.append(f"{k.capitalize()}: {request.args.get(k)}")
     specs_str = ", ".join(specs_list)
+
+    from search.normalizer import build_search_query_chain
+    from search_engine import fetch_all_products_with_fallbacks
 
     query_chain = build_search_query_chain(
         brand=request.args.get('brand', ''),
@@ -702,15 +1042,16 @@ def search():
         session['pending_search_url'] = request.full_path
 
     filter_params = parse_filter_params(request.args)
+    fresh = request.args.get('fresh', '0').lower() in ('1', 'true', 'yes')
     cache_key = f"{normalize_query(query)}|{json.dumps(filter_params, sort_keys=True)}"
 
-    # Check cache
-    cached_data = get_cached_search(cache_key)
+    # Check cache unless fresh=1 is specified
+    cached_data = get_cached_search(cache_key, bypass_fresh=fresh)
     if cached_data:
         processed = cached_data
     else:
         # Execute parallel search with fallback loop
-        raw_results, platform_status = fetch_all_products_with_fallbacks(query_chain)
+        raw_results, platform_status = fetch_all_products_with_fallbacks(query_chain, bypass_fresh=fresh)
         processed = process_results(query, raw_results, filter_params, platform_status)
         set_cached_search(cache_key, processed)
 
@@ -762,118 +1103,191 @@ def search():
         **processed
     }
 
-    sort_views = processed.get('sort_views', {})
-    results_for_view = sort_views.get(sort_by, sort_views.get('best_match', []))
+    results_for_view = processed['sort_views'].get(sort_by, processed['sort_views']['best_match'])
     return render_template('results.html', sort_by=sort_by,
                            results_for_view=results_for_view, **render_data)
 
 
-@api_bp.route('/api/search/stream', methods=['GET'])
-def api_search_stream():
-    """
-    Server-Sent Events (SSE) streaming endpoint (Req 3).
-    Streams results to frontend progressively as each scraper completes:
-      Amazon results received -> Display Amazon
-      Flipkart results received -> Display Flipkart
-      Meesho results received -> Display Meesho
-    """
-    raw_q = request.args.get('q', '')
-    query = clean_text(raw_q)[:100]
-
-    category_val = request.args.get('category', '').strip()
-    filter_params = parse_filter_params(request.args)
-    cache_key = f"{normalize_query(query)}|cat:{category_val}|{json.dumps(filter_params, sort_keys=True)}"
-
-    def generate_events():
-        if not query:
-            yield f"event: error\ndata: {json.dumps({'error': 'Query parameter q is required'})}\n\n"
-            return
-
-        # 1. Check Short-Term Cache (60s TTL)
-        cached_data = get_cached_search(cache_key, ttl_seconds=60)
-        if cached_data:
-            logger.info(f"SSE: Yielding instant cached results for '{query}'")
-            yield f"event: cached_result\ndata: {json.dumps(cached_data)}\n\n"
-            return
-
-        # Log query
-        log_search_query(query)
-
-        # 2. Yield Initial Status Event
-        platform_status = {
-            "Amazon": {"available": False, "searching": True, "count": 0},
-            "Flipkart": {"available": False, "searching": True, "count": 0},
-            "Meesho": {"available": False, "searching": True, "count": 0},
-        }
-        yield f"event: status\ndata: {json.dumps({'platform_status': platform_status, 'query': query})}\n\n"
-
-        # 3. Stream platform scrapers concurrently
-        raw_results = {"Amazon": [], "Flipkart": [], "Meesho": []}
-        t_start = time.time()
-
-        for platform, items, dt, status in stream_platform_results(query):
-            raw_results[platform] = items
-            platform_status[platform] = status
-
-            # Process single platform items for immediate rendering
-            single_raw = {platform: items}
-            single_processed = process_results(query, single_raw, filter_params, {platform: status})
-            plat_items = single_processed.get("platform_results", {}).get(platform, [])
-
-            event_payload = {
-                "platform": platform,
-                "items": plat_items,
-                "status": status,
-                "duration": dt
-            }
-            yield f"event: platform_result\ndata: {json.dumps(event_payload)}\n\n"
-
-        # 4. All scrapers completed — compute overall comparison & badges
-        processed = process_results(query, raw_results, filter_params, platform_status)
-
-        # Store in 60s cache
-        set_cached_search(cache_key, processed)
-
-        total_dt = round(time.time() - t_start, 2)
-        processed["total_duration"] = total_dt
-        logger.info(f"SSE Search Completed for '{query}' in {total_dt:.2f}s")
-
-        yield f"event: complete\ndata: {json.dumps(processed)}\n\n"
-
-    return Response(stream_with_context(generate_events()), mimetype='text/event-stream')
-
-
-@api_bp.route('/api/search', methods=['GET'])
+@api_bp.route('/api/search', methods=['GET', 'POST'])
 def api_search():
-    """JSON API endpoint returning raw & processed multi-platform search data."""
-    raw_q = request.args.get('q', '')
+    """
+    Unified JSON API endpoint supporting both product name and product URL searches.
+    POST /api/search accepts JSON payload: {"query": "..."}
+    GET /api/search accepts query parameter: ?q=... or ?url=...
+    """
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        query_input = data.get('query') or data.get('q') or data.get('url') or ''
+        if not query_input:
+            query_input = request.form.get('query', '') or request.form.get('q', '') or request.form.get('url', '')
+        query_input = str(query_input).strip()
+        if not query_input:
+            return jsonify({"error": "Field 'query' is required", "status": "error"}), 400
+
+        fresh = bool(data.get('fresh', False)) or request.args.get('fresh', '0').lower() in ('1', 'true', 'yes')
+        filters = data.get('filters')
+        routed = route_search(query_input, bypass_fresh=fresh, filters=filters)
+        return jsonify(routed), (200 if routed.get('success', True) else 400)
+
+    raw_q = request.args.get('q', '').strip()
+    raw_url = request.args.get('url', '').strip()
+    target = raw_url or raw_q
+
+    if not target:
+        return jsonify({"error": "Query parameter 'q' or 'url' is required", "status": "error"}), 400
+
+    detection = detect_search_type(target)
+    if detection.get('type') == 'product_url':
+        fresh = request.args.get('fresh', '0').lower() in ('1', 'true', 'yes')
+        routed = route_search(detection.get('url') or target, bypass_fresh=fresh)
+        return jsonify(routed), (200 if routed.get('success', True) else 400)
+
     query = clean_text(raw_q)[:100]
 
-    if not query:
-        return jsonify({"error": "Query parameter 'q' is required", "status": "error"}), 400
-
-    raw_results, platform_status = fetch_all_products_parallel(query)
+    fresh = request.args.get('fresh', '0').lower() in ('1', 'true', 'yes')
+    raw_results, platform_status = fetch_all_products_parallel(query, bypass_fresh=fresh)
     processed = process_results(query, raw_results, platform_status=platform_status)
+    comp = processed.get("comparison_data", {})
 
     return jsonify({
         "status": "success",
         "query": query,
+        "amazon": {
+            "source": platform_status.get("Amazon", {}).get("source", "live"),
+            "status": platform_status.get("Amazon", {}).get("status", "success"),
+            "count": platform_status.get("Amazon", {}).get("count", len(processed["platform_results"].get("Amazon", []))),
+            "duration": platform_status.get("Amazon", {}).get("duration", 0.0),
+            "error": platform_status.get("Amazon", {}).get("error"),
+            "products": processed["platform_results"].get("Amazon", [])
+        },
+        "flipkart": {
+            "source": platform_status.get("Flipkart", {}).get("source", "live"),
+            "status": platform_status.get("Flipkart", {}).get("status", "success"),
+            "count": platform_status.get("Flipkart", {}).get("count", len(processed["platform_results"].get("Flipkart", []))),
+            "duration": platform_status.get("Flipkart", {}).get("duration", 0.0),
+            "error": platform_status.get("Flipkart", {}).get("error"),
+            "products": processed["platform_results"].get("Flipkart", [])
+        },
+        "meesho": {
+            "source": platform_status.get("Meesho", {}).get("source", "live"),
+            "status": platform_status.get("Meesho", {}).get("status", "success"),
+            "count": platform_status.get("Meesho", {}).get("count", len(processed["platform_results"].get("Meesho", []))),
+            "duration": platform_status.get("Meesho", {}).get("duration", 0.0),
+            "error": platform_status.get("Meesho", {}).get("error"),
+            "products": processed["platform_results"].get("Meesho", [])
+        },
+        "platforms": processed.get("platforms", {}),
+        "comparison": processed.get("comparison", comp),
+        "specification_table": comp.get("specification_table") or processed.get("specification_table", {}),
+        "best_deal": comp.get("best_deal"),
+        "match_pairs": comp.get("match_pairs", {}),
+        "marketplace_status": processed.get("marketplace_status", {}),
+        # Legacy compatibility keys
         "platform_status": platform_status,
-        "results": processed.get("platform_results", {}),
-        "all_results": processed.get("all_results", []),
-        "best_per_platform": processed.get("best_per_platform", {}),
-        "overall_best": processed.get("overall_best"),
-        "ai_summary": processed.get("ai_summary"),
+        "results": processed["platform_results"],
+        "all_results": processed["all_results"],
+        "best_per_platform": processed["best_per_platform"],
+        "overall_best": processed["overall_best"],
+        "ai_summary": processed["ai_summary"],
         "top_prices_data": processed.get("top_prices_data"),
         "top_prices": processed.get("top_prices"),
         "best_overall_deal": processed.get("best_overall_deal"),
         "savings_info": processed.get("savings_info"),
-        "exact_matching_data": processed.get("exact_matching_data"),
-        "similar_products": processed.get("similar_products"),
+    })
+
+
+@api_bp.route('/api/compare-url', methods=['POST'])
+def api_compare_url():
+    """
+    JSON API endpoint for Search by Product URL:
+    Request: {"url": "USER_PRODUCT_URL"}
+    Response schema required:
+    {
+      "source_platform": "...",
+      "source_product": {...},
+      "matches": {
+        "amazon": {...},
+        "flipkart": {...},
+        "meesho": {...}
+      },
+      "matching": {...},
+      "best_deal": {...},
+      "scraped_at": "..."
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    url = (data.get('url') or request.form.get('url', '')).strip()
+
+    if not url:
+        return jsonify({"status": "error", "message": "Product URL is required"}), 400
+
+    fresh = request.args.get('fresh', '0').lower() in ('1', 'true', 'yes') or bool(data.get('fresh', False))
+    result = compare_by_product_url(url, fresh=fresh)
+
+    if not result.get("success"):
+        return jsonify({
+            "status": "error",
+            "message": result.get("error", "Unable to retrieve or compare product from the provided URL")
+        }), 400
+
+    return jsonify({
+        "status": "success",
+        "source_platform": result["source_platform"],
+        "source_platform_name": result["source_platform_name"],
+        "source_url": result["source_url"],
+        "source_product": result["source_product"],
+        "matches": result["matches"],
+        "similar_products": result.get("similar_products", {}),
+        "matching": result["matching"],
+        "best_deal": result["best_deal"],
+        "platform_status": result.get("platform_status", {}),
+        "specifications_matrix": result.get("specifications_matrix", []),
+        "scraped_at": result["scraped_at"]
+    }), 200
+
+
+@api_bp.route('/api/compare-url/stream', methods=['GET'])
+def api_compare_url_stream():
+    """
+    Server-Sent Events (SSE) stream for live step-by-step progress:
+    Emits actual progress:
+    - URL detected
+    - Source product extracted
+    - Amazon checked
+    - Flipkart checked
+    - Meesho checked
+    - Products matched
+    - Best deal calculated
+    """
+    url = request.args.get('url', '').strip()
+    if not url:
+        return jsonify({"status": "error", "message": "Query parameter 'url' is required"}), 400
+
+    fresh = request.args.get('fresh', '0').lower() in ('1', 'true', 'yes')
+
+    def generate():
+        gen = compare_by_product_url_stream(url, fresh=fresh)
+        final_res = None
+        try:
+            for event in gen:
+                yield f"data: {json.dumps(event)}\n\n"
+        except StopIteration as e:
+            final_res = e.value
+        except Exception as exc:
+            yield f"data: {json.dumps({'status': 'error', 'message': str(exc)})}\n\n"
+            return
+
+        if final_res:
+            yield f"data: {json.dumps({'step_id': 'complete', 'result': final_res})}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
     })
 
 
 @api_bp.route('/api/search-suggestions', methods=['GET'])
+
 @api_bp.route('/autocomplete', methods=['GET'])
 @api_bp.route('/api/autocomplete', methods=['GET'])
 def search_suggestions():
@@ -898,14 +1312,85 @@ def search_suggestions():
 
 
 
+@api_bp.route('/health', methods=['GET'])
 @api_bp.route('/api/health', methods=['GET'])
 def health_check():
-    """System health check endpoint."""
+    """System and provider health check endpoint."""
+    from scrapers.meesho.meesho_provider import MeeshoProvider
+    from scrapers.amazon import AmazonProvider
+    from scrapers.flipkart import FlipkartProvider
+
+    try:
+        mee_health = MeeshoProvider().health_check()
+    except Exception as e:
+        mee_health = {"platform": "meesho", "status": "unavailable", "error": str(e)}
+
+    try:
+        amz_health = AmazonProvider().health_check()
+    except Exception as e:
+        amz_health = {"platform": "amazon", "status": "unavailable", "error": str(e)}
+
+    try:
+        fk_health = FlipkartProvider().health_check()
+    except Exception as e:
+        fk_health = {"platform": "flipkart", "status": "unavailable", "error": str(e)}
+
     return jsonify({
         "status": "online",
         "system": "Smart-Buy: Multiplatform Price Review Comparison System",
         "timestamp": time.time(),
         "database_queries_logged": get_query_count(),
+        "providers": {
+            "amazon": amz_health,
+            "flipkart": fk_health,
+            "meesho": mee_health
+        }
+    })
+
+
+@api_bp.route('/api/debug/scrapers', methods=['GET'])
+def debug_scrapers():
+    """Mandatory debug endpoint: validates API, network, scraper, parser, and matching."""
+    raw_q = request.args.get('query', '') or request.args.get('q', 'pilgrim face wash')
+    query = clean_text(raw_q)[:100]
+
+    from scrapers.meesho.meesho_provider import MeeshoProvider
+    from scrapers.amazon import AmazonProvider
+    from scrapers.flipkart import FlipkartProvider
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    start = time.time()
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        f_mee = executor.submit(MeeshoProvider().search_products, query)
+        f_amz = executor.submit(AmazonProvider().search_products, query)
+        f_fk = executor.submit(FlipkartProvider().search_products, query)
+
+        mee_res = f_mee.result()
+        amz_res = f_amz.result()
+        fk_res = f_fk.result()
+
+    return jsonify({
+        "query": query,
+        "duration": round(time.time() - start, 2),
+        "amazon": {
+            "status": amz_res.get("status"),
+            "count": len(amz_res.get("products", [])),
+            "error": amz_res.get("error"),
+            "sample_products": [p.get("title") for p in amz_res.get("products", [])[:3]]
+        },
+        "flipkart": {
+            "status": fk_res.get("status"),
+            "count": len(fk_res.get("products", [])),
+            "error": fk_res.get("error"),
+            "sample_products": [p.get("title") for p in fk_res.get("products", [])[:3]]
+        },
+        "meesho": {
+            "status": mee_res.get("status"),
+            "count": len(mee_res.get("products", [])),
+            "error": mee_res.get("error"),
+            "sample_products": [p.get("title") for p in mee_res.get("products", [])[:3]]
+        }
     })
 
 
@@ -997,4 +1482,3 @@ def admin_user_detail(user_id):
         flash("User not found.", "danger")
         return redirect(url_for('api.admin_dashboard'))
     return render_template('admin_user_detail.html', user_detail=user_detail)
-

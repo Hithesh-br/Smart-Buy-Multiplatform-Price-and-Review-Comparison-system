@@ -10,9 +10,11 @@ GEMINI_API_URL = (
 
 
 def _parse_price(price_str):
-    if not price_str or price_str == "N/A":
+    if price_str is None or price_str == "N/A":
         return None
-    digits = "".join(c for c in price_str if c.isdigit())
+    if isinstance(price_str, (int, float)):
+        return int(price_str)
+    digits = "".join(c for c in str(price_str) if c.isdigit())
     return int(digits) if digits else None
 
 

@@ -117,16 +117,23 @@
         <div class="inbox-item {% if not n.is_read %}unread{% endif %}">
             <div class="d-flex align-items-start justify-content-between flex-wrap gap-2 mb-2">
                 <div class="d-flex align-items-center gap-2">
-                    <span class="badge-type bg-{{ n.notification_type }}">
-                        {% if n.notification_type == 'new_user' %}
-                        <i class="fas fa-user-plus me-1"></i>New User Registered
-                        {% elif n.notification_type == 'product_selected' %}
-                        <i class="fas fa-shopping-cart me-1"></i>Product Selected
+                    <span class="badge-type bg-{{ (n.event_type or n.type or 'new_user') | lower }}">
+                        {% if n.event_type == 'SIGNUP_VERIFIED' or n.type == 'new_user' %}
+                        <i class="fas fa-user-check me-1 text-success"></i>Signup (Verified)
+                        {% elif n.event_type == 'USER_LOGIN' %}
+                        <i class="fas fa-sign-in-alt me-1 text-info"></i>User Signin
+                        {% elif n.event_type == 'PRODUCT_SEARCH' %}
+                        <i class="fas fa-search me-1 text-primary"></i>Product Search
+                        {% elif n.event_type == 'BUY_CLICK' or n.event_type == 'PRODUCT_SELECTED' or n.type == 'product_selected' %}
+                        <i class="fas fa-shopping-cart me-1 text-warning"></i>Deal Click / Selected
+                        {% elif n.event_type == 'FEEDBACK_SUBMITTED' or n.type == 'feedback' %}
+                        <i class="fas fa-comment-alt me-1 text-purple"></i>User Feedback & Rating
                         {% else %}
-                        <i class="fas fa-comment-alt me-1"></i>User Feedback
+                        <i class="fas fa-bell me-1 text-secondary"></i>User Activity
                         {% endif %}
                     </span>
                     <h5 class="fw-bold mb-0 text-white">{{ n.title }}</h5>
+
                 </div>
                 <span class="text-secondary small"><i class="far fa-clock me-1"></i>{{ n.created_at }}</span>
             </div>

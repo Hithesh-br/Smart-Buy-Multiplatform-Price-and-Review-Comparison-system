@@ -13,7 +13,6 @@ Algorithm:
 
 import re
 from rapidfuzz import fuzz
-from search.identity_matcher import is_exact_product
 from search.normalizer import (
     normalize_title,
     normalize_query,
@@ -25,7 +24,6 @@ from search.normalizer import (
 
 ACCESSORY_KEYWORDS = {'case', 'cover', 'protector', 'skin', 'guard', 'cable', 
                       'charger', 'strap', 'band', 'glass', 'sleeve', 'backcover'}
-
 
 
 # ---------------------------------------------------------------------------
@@ -168,3 +166,7 @@ def cross_platform_deduplicate(products: list, similarity_threshold: float = 90.
         if not is_dup:
             result.append(item)
     return result
+
+
+from search.matching_service import calculate_product_match_score, are_exact_matches
+

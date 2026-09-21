@@ -5,8 +5,9 @@ Smart-Buy: Multiplatform Price Review Comparison System
 ======================================================
 Core Search Engine Orchestrator:
 - Parallel fetching across Amazon, Flipkart, and Meesho via ThreadPoolExecutor
-- Per-platform status tracking & failure isolation (returns 'temporarily unavailable' on failure)
-- Processing pipeline: Similarity matching (RapidFuzz 90%), Spec Extraction, Ranking, Filtering
+- Per-platform status tracking & failure isolation
+- Platform-isolated caching with ?fresh=1 bypass
+- Processing pipeline: Relevance filtering, Canonical matching, Specification matrix, Best Deal
 """
 
 import time
@@ -14,9 +15,9 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ── Scrapers ──────────────────────────────────────────────────────────────
-from amazon_scraper import get_amazon_products
-from flipkart_scraper import get_flipkart_products
-from meesho_scraper import get_meesho_products
+from scrapers.amazon_scraper import AmazonScraper
+from scrapers.flipkart_scraper import FlipkartScraper
+from scrapers.meesho_scraper import MeeshoScraper
 
 # ── Processing Package ───────────────────────────────────────────────────
 from search.normalizer import normalize_query, detect_query_type
@@ -29,114 +30,135 @@ from search.matching import (
 from search.ranking import rank_products, annotate_badges, generate_sort_views
 from search.filters import extract_filters_from_results, apply_filters
 from search.specs_extractor import extract_specs
-from search.identity_matcher import (
-    group_exact_and_similar_products,
-    extract_product_identity,
-    is_exact_product,
-)
 from ai_compare import get_ai_comparison, get_best_deals
+from cache import get_platform_cached_results, set_platform_cached_results
+
+from scrapers.scraper_logger import log_scraper_event
 
 logger = logging.getLogger("smartbuy.search_engine")
 logging.basicConfig(level=logging.INFO)
 
+_scrapers_instances = {
+    "Amazon": AmazonScraper(),
+    "Flipkart": FlipkartScraper(),
+    "Meesho": MeeshoScraper(),
+}
 
-def stream_platform_results(query: str):
-    """
-    Generator yielding individual platform results as soon as each completes (Req 1 & 3).
-    Yields tuple: (platform_name, raw_items, duration_sec, platform_status_dict)
-    """
-    t_start = time.time()
-    logger.info(f"[Search Engine] Starting concurrent stream for '{query}'...")
 
-    scrapers = {
-        "Amazon": get_amazon_products,
-        "Flipkart": get_flipkart_products,
-        "Meesho": get_meesho_products,
+def fetch_all_products_parallel(query: str, bypass_fresh: bool = False) -> tuple[dict, dict]:
+    """
+    Fetch products from Amazon, Flipkart, and Meesho in parallel.
+    Platform failures are completely isolated — if one fails, others continue.
+    Uses platform-isolated caching when bypass_fresh is False.
+    """
+    logger.info(f"[SEARCH] Starting parallel multi-platform search for '{query}' (fresh={bypass_fresh})...")
+
+    raw_results = {name: [] for name in _scrapers_instances}
+    platform_status = {
+        name: {
+            "status": "unavailable",
+            "available": False,
+            "error": None,
+            "count": 0,
+            "duration": 0.0,
+            "source": "live"
+        } for name in _scrapers_instances
     }
+
+    platforms_to_scrape = {}
+
+    # 1. Check Platform-Isolated Cache
+    for name in _scrapers_instances:
+        if not bypass_fresh:
+            cached_entry = get_platform_cached_results(name, query, bypass_fresh=False)
+            if cached_entry and cached_entry.get("results"):
+                items = cached_entry["results"]
+                raw_results[name] = items
+                platform_status[name]["available"] = True
+                platform_status[name]["count"] = len(items)
+                platform_status[name]["status"] = cached_entry.get("scrape_status", "success")
+                platform_status[name]["source"] = "cache"
+                logger.info(f"[{name.upper()}] Loaded {len(items)} items from platform cache")
+                continue
+
+        platforms_to_scrape[name] = _scrapers_instances[name]
+
+    if not platforms_to_scrape:
+        return raw_results, platform_status
+
+    def _execute_scraper(name, scraper_obj, q):
+        start = time.time()
+        try:
+            items, status, err_msg = scraper_obj.search_products(q)
+            dur = round(time.time() - start, 2)
+            stat_val = status.value if hasattr(status, "value") else str(status)
+            return name, items, stat_val, err_msg, "live", dur
+        except Exception as err:
+            dur = round(time.time() - start, 2)
+            logger.exception(f"[{name}] Scraper execution exception: {err}")
+            return name, [], "scraper_error", str(err), "live", dur
 
     with ThreadPoolExecutor(max_workers=3) as executor:
         future_to_platform = {
-            executor.submit(fn, query): (name, time.time()) for name, fn in scrapers.items()
+            executor.submit(_execute_scraper, name, obj, query): name
+            for name, obj in platforms_to_scrape.items()
         }
 
         for future in as_completed(future_to_platform):
-            platform, t0 = future_to_platform[future]
-            dt = round(time.time() - t0, 2)
+            platform = future_to_platform[future]
             try:
-                data = future.result(timeout=8)
-                if data:
-                    logger.info(f"[{platform}] Scraped {len(data)} items in {dt:.2f}s")
-                    status = {"available": True, "error": None, "count": len(data), "duration": dt}
-                    yield platform, data, dt, status
-                else:
-                    logger.warning(f"[{platform}] Returned 0 items in {dt:.2f}s")
-                    status = {"available": False, "error": f"{platform} temporarily unavailable", "count": 0, "duration": dt}
-                    yield platform, [], dt, status
+                p_name, items, status_code, err_msg, src, dur = future.result(timeout=45)
+                raw_results[p_name] = items or []
+                platform_status[p_name]["count"] = len(items or [])
+                platform_status[p_name]["available"] = bool(items)
+                platform_status[p_name]["status"] = status_code
+                platform_status[p_name]["error"] = err_msg
+                platform_status[p_name]["duration"] = dur
+                platform_status[p_name]["source"] = src
+
+                # Store in isolated platform cache if items were found
+                if items:
+                    set_platform_cached_results(p_name, query, items, status_code)
+
+                log_scraper_event(p_name, query, status_code, retry=0, products_count=len(items or []), duration=dur)
+                logger.info(f"[{p_name.upper()}] source={src} status={status_code} products={len(items or [])} duration={dur}s")
             except TimeoutError:
-                logger.error(f"[{platform}] Timed out after 8s.")
-                status = {"available": False, "error": f"{platform} temporarily unavailable", "count": 0, "duration": 8.0}
-                yield platform, [], 8.0, status
+                logger.error(f"[{platform.upper()}] Scraper timed out after 45s.")
+                raw_results[platform] = []
+                platform_status[platform]["status"] = "timeout"
+                platform_status[platform]["available"] = False
+                platform_status[platform]["error"] = f"{platform} request timed out"
+                log_scraper_event(platform, query, "timeout", retry=0, products_count=0, error=f"{platform} request timed out")
             except Exception as e:
-                logger.error(f"[{platform}] Exception: {e}")
-                status = {"available": False, "error": f"{platform} temporarily unavailable", "count": 0, "duration": dt}
-                yield platform, [], dt, status
-
-
-def fetch_all_products_parallel(query: str) -> tuple[dict, dict]:
-    """
-    Fetch products from Amazon, Flipkart, and Meesho in parallel.
-    Collects timing metrics for performance logging (Req 15).
-
-    Returns:
-        tuple (raw_results, platform_status)
-    """
-    t_start = time.time()
-    logger.info(f"Search started: '{query}'")
-
-    raw_results = {"Amazon": [], "Flipkart": [], "Meesho": []}
-    platform_status = {
-        name: {"available": False, "error": None, "count": 0, "duration": 0.0}
-        for name in raw_results
-    }
-    timing_metrics = {}
-
-    for platform, items, dt, status in stream_platform_results(query):
-        raw_results[platform] = items
-        platform_status[platform] = status
-        timing_metrics[platform] = f"{dt:.2f}s"
-        logger.info(f"{platform}: {dt:.2f} sec")
-
-    total_time = round(time.time() - t_start, 2)
-    logger.info(f"Processing: 0.05 sec")
-    logger.info(f"Comparison: 0.02 sec")
-    logger.info(f"Total: {total_time:.2f} sec")
-    platform_status["timing_metrics"] = {**timing_metrics, "Total": f"{total_time:.2f}s"}
+                logger.error(f"[{platform.upper()}] Scraper execution exception: {e}")
+                raw_results[platform] = []
+                platform_status[platform]["status"] = "scraper_error"
+                platform_status[platform]["available"] = False
+                platform_status[platform]["error"] = str(e)
+                log_scraper_event(platform, query, "scraper_error", retry=0, products_count=0, error=str(e))
 
     return raw_results, platform_status
 
 
-def fetch_all_products_with_fallbacks(query_chain: list[str]) -> tuple[dict, dict]:
+def fetch_all_products_with_fallbacks(query_chain: list[str], bypass_fresh: bool = False) -> tuple[dict, dict]:
     """
-    Execute scraper search with automatic fallback loop (Step 6):
+    Execute scraper search with automatic fallback loop:
     Try query_chain[0] broad query across Amazon, Flipkart, Meesho.
-    If total items scraped across all 3 platforms is < 3, try fallback query_chain[1],
-    query_chain[2], etc.
-    Collect and deduplicate raw products from all successful attempts.
     """
     combined_raw = {"Amazon": [], "Flipkart": [], "Meesho": []}
     combined_status = {
-        "Amazon": {"available": False, "error": None, "count": 0},
-        "Flipkart": {"available": False, "error": None, "count": 0},
-        "Meesho": {"available": False, "error": None, "count": 0},
+        "Amazon": {"available": False, "error": None, "count": 0, "status": "unavailable"},
+        "Flipkart": {"available": False, "error": None, "count": 0, "status": "unavailable"},
+        "Meesho": {"available": False, "error": None, "count": 0, "status": "unavailable"},
     }
 
     if not query_chain:
         query_chain = ['Products']
 
     for idx, q in enumerate(query_chain):
-        logger.info(f"Fallback Search Stage {idx+1}/{len(query_chain)} using query: '{q}'")
-        raw_res, status = fetch_all_products_parallel(q)
-        
+        logger.info(f"Search Stage {idx+1}/{len(query_chain)} using query: '{q}'")
+        raw_res, status = fetch_all_products_parallel(q, bypass_fresh=bypass_fresh)
+
         total_items = sum(len(items) for items in raw_res.values())
 
         for platform, items in raw_res.items():
@@ -144,8 +166,11 @@ def fetch_all_products_with_fallbacks(query_chain: list[str]) -> tuple[dict, dic
                 combined_raw[platform].extend(items)
                 combined_status[platform]["available"] = True
                 combined_status[platform]["count"] = len(combined_raw[platform])
+                combined_status[platform]["status"] = status.get(platform, {}).get("status", "success")
+            else:
+                combined_status[platform]["status"] = status.get(platform, {}).get("status", "unavailable")
+                combined_status[platform]["error"] = status.get(platform, {}).get("error")
 
-        # If we found items (or if it's the last fallback query), break loop
         if total_items >= 3 or idx == len(query_chain) - 1:
             break
 
@@ -161,46 +186,34 @@ def process_results(query: str, raw_results: dict,
     """
     if platform_status is None:
         platform_status = {
-            p: {"available": bool(items), "error": None, "count": len(items)}
+            p: {"available": bool(items), "error": None, "count": len(items), "status": "success" if items else "no_products_found"}
             for p, items in raw_results.items()
         }
 
-    threshold = get_adaptive_threshold(query)
-    logger.info(f"Applying similarity threshold: {threshold} for query: '{query}'")
+    from search.category_detector import detect_category
+    from search.pipeline import run_comparison_pipeline
 
-    platform_results: dict = {}
-    all_matched: list = []
+    detected_cat = detect_category(query=query)
+    logger.info(f"[PIPELINE] Executing Single Source of Truth pipeline for query: '{query}' | Category: '{detected_cat}'")
 
-    for platform, raw_items in raw_results.items():
-        matched = []
+    pipeline_data = run_comparison_pipeline(
+        query=query,
+        raw_platform_results=raw_results,
+        platform_status=platform_status
+    )
 
-        for item in raw_items:
-            title = item.get('title', '')
-            if not title or len(title.strip()) < 4:
-                continue
+    platform_results = pipeline_data["validated_by_platform"]
+    all_matched = pipeline_data["validated_products"]
 
-            price_num = item.get('price_num')
+    # Upsert validated products to database
+    try:
+        from database import upsert_normalized_product
+        for it in all_matched:
+            upsert_normalized_product(it, query=query)
+    except Exception:
+        pass
 
-            # Similarity match against RapidFuzz threshold + anti-pattern guards
-            relevant, score = is_relevant(query, title, threshold)
-            item['similarity_score'] = score
-
-            # Specs enrichment
-            item['specs'] = extract_specs(item, query)
-
-            # STRICT EXACT PRODUCT FILTERING
-            exact_valid = is_exact_product(query, item)
-            item['is_exact_match'] = exact_valid
-
-            if relevant and exact_valid:
-                matched.append(item)
-
-        # Deduplicate and rank per platform
-        deduped = deduplicate_products(matched)
-        platform_results[platform] = deduped
-        all_matched.extend(deduped)
-
-    # Apply Match Scoring system across all products
+    # Apply Match Scoring & Ranking if filters provided
     if filter_params:
         from search.filters import score_and_rank_products
         for platform in platform_results:
@@ -214,46 +227,90 @@ def process_results(query: str, raw_results: dict,
             platform_results[platform] = rank_products(platform_results[platform])
         all_matched = rank_products(all_matched)
 
-    # Annotate badges (Lowest price, best rated, best discount)
+    # Badges & Views
     annotate_badges(platform_results)
-
-    # Generate summary badges across all platforms
     from search.ranking import get_summary_badges
     summary_badges = get_summary_badges(all_matched)
-
-    # Generate sort views
     sort_views = generate_sort_views(all_matched)
 
-    # Dynamic filters from scraped items
     all_raw_for_filters = [item for items in raw_results.values() for item in items]
     dynamic_filters = extract_filters_from_results(all_raw_for_filters)
 
-    # Best deals & AI summary
-    best_per_platform, overall_best = get_best_deals(platform_results)
-    ai_summary = get_ai_comparison(query, platform_results)
+    top_verified_offers = pipeline_data["top_verified_offers"]
+    specifications_matrix = pipeline_data["specifications_matrix"]
+    best_deal = pipeline_data["best_deal"]
+    overall_best = best_deal
+    savings_info = pipeline_data["savings_info"]
+    match_pairs = pipeline_data["match_pairs"]
+    marketplace_status = pipeline_data.get("marketplace_status", {})
 
-    # Compute Exact Product Match grouping & Side-by-Side comparison
-    exact_matching_data = group_exact_and_similar_products(query, platform_results)
-
-    # Compute Top Best Prices Across Websites & Savings Info
-    from search.ranking import get_top_best_prices_data
-    top_prices_data = get_top_best_prices_data(platform_results)
-
-    return {
-        "platform_results":  platform_results,
-        "platform_status":   platform_status,
-        "all_results":       all_matched,
-        "sort_views":        sort_views,
-        "summary_badges":    summary_badges,
-        "dynamic_filters":   dynamic_filters,
-        "best_per_platform": best_per_platform,
-        "overall_best":      overall_best,
-        "ai_summary":        ai_summary,
-        "top_prices_data":   top_prices_data,
-        "top_prices":        top_prices_data.get("top_prices", {}),
-        "best_overall_deal": top_prices_data.get("best_overall"),
-        "savings_info":      exact_matching_data.get("savings_info") or top_prices_data.get("savings_info"),
-        "exact_matching_data": exact_matching_data,
-        "similar_products":  exact_matching_data.get("similar_products", []),
+    best_match_per_platform = pipeline_data["best_match_per_platform"]
+    best_per_platform = {
+        "Amazon": best_match_per_platform.get("Amazon"),
+        "Flipkart": best_match_per_platform.get("Flipkart"),
+        "Meesho": best_match_per_platform.get("Meesho"),
     }
 
+    ai_summary = get_ai_comparison(query, platform_results)
+
+    platforms_payload = {
+        "amazon": {
+            "status": platform_status.get("Amazon", {}).get("status", "success"),
+            "products": platform_results.get("Amazon", [])
+        },
+        "flipkart": {
+            "status": platform_status.get("Flipkart", {}).get("status", "success"),
+            "products": platform_results.get("Flipkart", [])
+        },
+        "meesho": {
+            "status": platform_status.get("Meesho", {}).get("status", "success"),
+            "products": platform_results.get("Meesho", [])
+        }
+    }
+
+    comparison = {
+        "query": query,
+        "matched_products": [p for p in best_match_per_platform.values() if p],
+        "specifications": specifications_matrix,
+        "best_deal": best_deal,
+        "specification_table": {
+            "has_match": pipeline_data["has_cross_platform_match"],
+            "rows": specifications_matrix,
+            "columns": ["specification", "amazon", "flipkart", "meesho"]
+        },
+        "match_pairs": match_pairs,
+        "products": {
+            "amazon": platform_results.get("Amazon", []),
+            "flipkart": platform_results.get("Flipkart", []),
+            "meesho": platform_results.get("Meesho", [])
+        }
+    }
+
+    return {
+        "query":                 query,
+        "platforms":             platforms_payload,
+        "comparison":            comparison,
+        "platform_results":      platform_results,
+        "platform_status":       platform_status,
+        "all_results":           all_matched,
+        "validated_products":    all_matched,
+        "sort_views":            sort_views,
+        "summary_badges":        summary_badges,
+        "dynamic_filters":       dynamic_filters,
+        "best_per_platform":     best_per_platform,
+        "overall_best":          overall_best,
+        "ai_summary":            ai_summary,
+        "top_verified_offers":   top_verified_offers,
+        "top_prices_data":       top_verified_offers,
+        "top_prices":            top_verified_offers,
+        "best_overall_deal":     overall_best,
+        "savings_info":          savings_info,
+        "comparison_data":       comparison,
+        "specification_table":   comparison.get("specification_table", {}),
+        "specifications_matrix": specifications_matrix,
+        "marketplace_status":    marketplace_status,
+        "best_deal":             best_deal,
+        "match_pairs":           match_pairs,
+        "no_deal_message":       pipeline_data.get("no_deal_message"),
+        "has_cross_platform_match": pipeline_data.get("has_cross_platform_match", False)
+    }

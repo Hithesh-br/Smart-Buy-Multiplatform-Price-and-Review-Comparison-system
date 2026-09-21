@@ -11,7 +11,7 @@ MongoDB database layer for SmartBuy:
 
 import os
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 # pyrefly: ignore [missing-import]
 from pymongo import MongoClient, ASCENDING, DESCENDING
 # pyrefly: ignore [missing-import]
@@ -20,7 +20,7 @@ from pymongo.errors import PyMongoError
 from bson import ObjectId
 
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-DB_NAME = "smartbuy_db"
+DB_NAME = os.getenv("DB_NAME", os.getenv("MONGO_DB", "smartbuy"))
 
 logger = logging.getLogger("smartbuy.database")
 
@@ -30,7 +30,7 @@ client = MongoClient(
     serverSelectionTimeoutMS=5000
 )
 
-db = None
+db = None  # type: ignore
 
 
 def to_object_id(val):
@@ -83,7 +83,7 @@ def init_db(app=None):
         collections = [
             "users", "search_history", "selected_products",
             "feedback", "admin_inbox", "search_queries", "inbox_messages",
-            "product_cache"
+            "signup_otp", "otp_codes"
         ]
         existing = db.list_collection_names()
         for col in collections:
@@ -98,8 +98,11 @@ def init_db(app=None):
         db.admin_inbox.create_index([("created_at", DESCENDING)])
         db.search_queries.create_index([("query", ASCENDING)], unique=True)
         db.inbox_messages.create_index([("user_id", ASCENDING), ("created_at", DESCENDING)])
-        db.product_cache.create_index([("cache_key", ASCENDING), ("scraped_at", DESCENDING)])
-        db.product_cache.create_index([("scraped_at", ASCENDING)], expireAfterSeconds=600)
+        db.signup_otp.create_index([("created_at", ASCENDING)], expireAfterSeconds=600)
+        db.signup_otp.create_index([("email", ASCENDING)], unique=True)
+        db.otp_codes.create_index([("created_at", ASCENDING)], expireAfterSeconds=600)
+        db.otp_codes.create_index([("identifier", ASCENDING), ("channel", ASCENDING)], unique=True)
+
 
         # Ensure default administrator account exists
         admin_email = "admin@smartbuy.com"
@@ -128,7 +131,7 @@ def init_db(app=None):
 
 # ════════════════════ USER AUTHENTICATION ════════════════════
 
-def create_user(name: str, email: str, password_hash: str):
+def create_user(name: str, email: str, password_hash: str, phone: str = "", is_verified: bool = True):
     """
     Create a new user account in MongoDB (smartbuy_db.users).
     Returns tuple: (user_id_str, status_code, message)
@@ -138,6 +141,7 @@ def create_user(name: str, email: str, password_hash: str):
 
     email_clean = email.strip().lower()
     name_clean = name.strip()
+    phone_clean = phone.strip() if phone else ""
 
     if db is None:
         return None, 500, "MongoDB service is currently unavailable"
@@ -151,25 +155,35 @@ def create_user(name: str, email: str, password_hash: str):
         user_doc = {
             "name": name_clean,
             "email": email_clean,
+            "phone": phone_clean,
+            "hashed_password": password_hash,
             "password_hash": password_hash,
+            "passwordHash": password_hash,
+            "is_email_verified": is_verified,
+            "email_verified": is_verified,
+            "emailVerified": is_verified,
+            "is_phone_verified": is_verified,
             "is_admin": False,
             "created_at": datetime.now(timezone.utc),
-            "last_login": None
+            "createdAt": datetime.now(timezone.utc),
+            "last_login": None,
+            "lastLogin": None
         }
+
 
         res = db.users.insert_one(user_doc)
         user_id_obj = res.inserted_id
         user_id_str = str(user_id_obj)
 
-        # Create Admin Inbox Notification (NEW_USER)
+        # Create Admin Inbox Notification (SIGNUP_VERIFIED)
         try:
             create_admin_inbox_notification(
                 user_id=user_id_obj,
                 user_name=name_clean,
                 email=email_clean,
-                event_type="NEW_USER",
-                title="New SmartBuy User",
-                message=f"A new user registered on SmartBuy: {name_clean} ({email_clean})"
+                event_type="SIGNUP_VERIFIED",
+                title="New SmartBuy User Registered",
+                message=f"New user registered: {name_clean} ({email_clean}). Email OTP Verification Status: True."
             )
         except Exception as e_admin:
             logger.warning(f"Admin notification failure: {e_admin}")
@@ -273,7 +287,7 @@ def update_user_name(user_id, name: str) -> bool:
 
 
 def update_user_password(user_id, password_hash: str) -> bool:
-    """Update user's password hash in smartbuy_db.users."""
+    """Update user's password hash in smartbuy_db.users by ObjectId."""
     if not user_id or not password_hash or db is None:
         return False
     oid = to_object_id(user_id)
@@ -281,11 +295,47 @@ def update_user_password(user_id, password_hash: str) -> bool:
         return False
 
     try:
-        res = db.users.update_one({"_id": oid}, {"$set": {"password_hash": password_hash}})
+        res = db.users.update_one(
+            {"_id": oid},
+            {"$set": {"hashed_password": password_hash, "password_hash": password_hash, "passwordHash": password_hash}}
+        )
         return res.matched_count > 0
     except Exception as e:
         logger.error(f"Error updating user password: {e}")
         return False
+
+
+def update_user_password_by_email(email: str, password_hash: str) -> bool:
+    """Update user's password hash in smartbuy_db.users by email."""
+    if not email or not password_hash or db is None:
+        return False
+    email_clean = email.strip().lower()
+
+    try:
+        res = db.users.update_one(
+            {"email": email_clean},
+            {"$set": {"hashed_password": password_hash, "password_hash": password_hash, "passwordHash": password_hash}}
+        )
+        return res.matched_count > 0
+    except Exception as e:
+        logger.error(f"Error updating password by email for {email_clean}: {e}")
+        return False
+
+
+def delete_otp(identifier: str, channel: str = "email") -> bool:
+    """Remove/invalidate temporary OTP records after successful verification or password reset."""
+    if not identifier or db is None:
+        return False
+    clean_id = identifier.strip().lower() if channel.lower() == "email" else identifier.strip()
+    try:
+        db.otp_verifications.delete_many({"email": clean_id, "channel": channel.lower()})
+        db.otp_codes.delete_many({"identifier": clean_id, "channel": channel.lower()})
+        db.signup_otp.delete_many({"email": clean_id})
+        return True
+    except Exception as e:
+        logger.error(f"Error deleting OTP for {clean_id}: {e}")
+        return False
+
 
 
 # ════════════════════ PRODUCT SEARCH HISTORY ════════════════════
@@ -309,10 +359,71 @@ def log_search_query(query: str) -> None:
         logger.error(f"Error logging search query: {e}")
 
 
-def log_user_search(user_id, product_name: str, category: str = "", specifications=None, search_query: str = "", num_results: int = 0, platforms_found: str = "", best_platform: str = "", best_price=None, platforms=None) -> str | None:
+def _sanitize_best_platform_and_price(doc: dict) -> dict:
+    """
+    Sanitize and normalize search_history documents.
+    The database layer NEVER recalculates pricing.
+    It reads the stored values, validates platform against (Amazon, Flipkart, Meesho, Not Available),
+    normalizes price to integer, and returns the stored values directly.
+    """
+    if not isinstance(doc, dict):
+        return doc
+
+    # 1. Read stored best_platform
+    raw_plat = str(doc.get("best_platform") or "").strip()
+
+    # Check if best_deal subdocument exists
+    best_deal = doc.get("best_deal")
+    if isinstance(best_deal, dict) and best_deal.get("platform"):
+        deal_plat = str(best_deal.get("platform")).strip()
+        if deal_plat in ("Amazon", "Flipkart", "Meesho", "Not Available"):
+            raw_plat = deal_plat
+
+    # 2. Validate against: Amazon, Flipkart, Meesho, Not Available
+    p_low = raw_plat.lower()
+    if p_low in ("amazon", "amz"):
+        doc["best_platform"] = "Amazon"
+    elif p_low in ("flipkart", "fk"):
+        doc["best_platform"] = "Flipkart"
+    elif p_low in ("meesho", "msh"):
+        doc["best_platform"] = "Meesho"
+    elif raw_plat in ("Amazon", "Flipkart", "Meesho", "Not Available"):
+        doc["best_platform"] = raw_plat
+    else:
+        doc["best_platform"] = "Not Available"
+
+    # 3 & 4. Read stored best_price and normalize to an integer
+    raw_price = doc.get("best_price")
+    if raw_price is None and isinstance(best_deal, dict) and best_deal.get("price") is not None:
+        raw_price = best_deal.get("price")
+
+    b_price_int = None
+    if raw_price is not None:
+        try:
+            cleaned_str = str(raw_price).replace(",", "").replace("₹", "").strip()
+            if cleaned_str and cleaned_str not in ("Best", "N/A", "None", "0", "null"):
+                parsed = int(float(cleaned_str))
+                if parsed > 0:
+                    b_price_int = parsed
+        except (ValueError, TypeError):
+            b_price_int = None
+
+    doc["best_price"] = b_price_int
+
+    return doc
+
+
+def log_user_search(user_id, product_name: str, category: str = "", specifications=None,
+                    search_query: str = "", num_results: int = 0, platforms_found: str = "",
+                    best_platform: str = "", best_price=None, best_product_title: str = "",
+                    best_product_url: str = "", platform_results=None, platforms=None,
+                    amazon_result_count: int = 0, flipkart_result_count: int = 0,
+                    meesho_result_count: int = 0,
+                    canonical_product_identity=None, exact_matches=None, best_deal=None,
+                    normalized_query: str = "", verification_status: bool = True) -> str | None:
     """
     Log a specific authenticated user search to smartbuy_db.search_history.
-    Every search is connected to currently logged-in user.
+    Stores canonical product identity, exact matches, best deal, exact query, category, and marketplace results.
     """
     if not user_id or not product_name or db is None:
         return None
@@ -322,7 +433,10 @@ def log_user_search(user_id, product_name: str, category: str = "", specificatio
         return None
 
     p_name = product_name.strip()
-    cat = (category or "General").strip()
+    s_query = (search_query or p_name).strip()
+    
+    from search.normalizer import detect_category
+    cat = detect_category(s_query, category)
 
     if isinstance(specifications, dict):
         selected_specs = specifications
@@ -331,22 +445,49 @@ def log_user_search(user_id, product_name: str, category: str = "", specificatio
     else:
         selected_specs = {}
 
-    s_query = (search_query or p_name).strip()
     plat_list = platforms if isinstance(platforms, list) else ["Amazon", "Flipkart", "Meesho"]
     plat_str = platforms_found or ", ".join(plat_list)
+
+    # Sanitize best_platform to marketplace name or 'Not Available'
+    b_plat_clean = str(best_platform or "").strip().capitalize()
+    if b_plat_clean not in ("Amazon", "Flipkart", "Meesho"):
+        b_plat_clean = "Not Available"
+
+    # Sanitize numeric best_price
+    b_price_val = None
+    if best_price is not None:
+        try:
+            p_int = int(float(str(best_price).replace(",", "").replace("₹", "").strip()))
+            if p_int > 0:
+                b_price_val = p_int
+        except (ValueError, TypeError):
+            b_price_val = None
 
     try:
         search_doc = {
             "user_id": oid,
             "product_name": p_name,
+            "search_query": s_query,
+            "query": s_query,
+            "normalized_query": normalized_query or s_query,
             "category": cat,
             "selected_specifications": selected_specs,
-            "search_query": s_query,
             "num_results": num_results,
             "platforms_found": plat_str,
             "platforms": plat_list,
-            "best_platform": best_platform or "SmartBuy",
-            "best_price": best_price or 0,
+            "canonical_product": canonical_product_identity if isinstance(canonical_product_identity, dict) else {},
+            "canonical_product_identity": canonical_product_identity if isinstance(canonical_product_identity, dict) else {},
+            "exact_matches": exact_matches if isinstance(exact_matches, dict) else {},
+            "best_deal": best_deal if isinstance(best_deal, dict) else {},
+            "best_platform": b_plat_clean,
+            "best_price": b_price_val,
+            "best_product_title": str(best_product_title or "").strip(),
+            "best_product_url": str(best_product_url or "").strip(),
+            "amazon_result_count": amazon_result_count,
+            "flipkart_result_count": flipkart_result_count,
+            "meesho_result_count": meesho_result_count,
+            "platform_results": platform_results if isinstance(platform_results, dict) else {},
+            "verification_status": verification_status,
             "searched_at": datetime.now(timezone.utc)
         }
 
@@ -387,7 +528,7 @@ def get_user_search_history(user_id, limit: int = 50) -> list:
 
     try:
         cursor = db.search_history.find({"user_id": current_user_id}).sort("searched_at", DESCENDING).limit(limit)
-        return [format_doc(d) for d in cursor]
+        return [_sanitize_best_platform_and_price(format_doc(d)) for d in cursor]
     except Exception as e:
         logger.error(f"Error fetching user search history: {e}")
         return []
@@ -744,6 +885,125 @@ def get_user_saved_comparisons(user_id, limit: int = 50) -> list:
     return get_user_selected_products(user_id, limit)
 
 
+def upsert_normalized_product(product: dict, query: str = "") -> bool:
+    """
+    Store normalized product using platform + external_product_id as composite unique key (Req 21 & 27).
+    """
+    if not isinstance(product, dict):
+        return False
+    platform = str(product.get('platform', '')).lower()
+    ext_id = str(product.get('product_id') or '').strip()
+    if not platform or not ext_id:
+        return False
+
+    db = get_db()
+    if db is None:
+        return False
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "platform": platform,
+        "external_product_id": ext_id,
+        "query": query,
+        "product_name": product.get('product_name') or product.get('title'),
+        "brand": product.get('brand'),
+        "model": product.get('model'),
+        "price": product.get('price_num') or product.get('price'),
+        "original_price": product.get('mrp_num') or product.get('original_price'),
+        "discount": product.get('discount') or product.get('discount_percent'),
+        "rating": product.get('rating'),
+        "review_count": product.get('review_count'),
+        "image_url": product.get('image') or product.get('image_url'),
+        "product_url": product.get('url') or product.get('product_url'),
+        "availability": product.get('availability', 'In Stock'),
+        "category": product.get('category'),
+        "attributes": product.get('specifications') or product.get('attributes') or {},
+        "scraped_at": now_iso
+    }
+
+    try:
+        db.products.update_one(
+            {"platform": platform, "external_product_id": ext_id},
+            {"$set": doc},
+            upsert=True
+        )
+        return True
+    except Exception as e:
+        logger.debug(f"[Database] Product upsert failed: {e}")
+        return False
+
+
+def prepare_search_history_for_profile(history: list) -> list:
+    """
+    Backend normalization function for profile page search activity table (Req 18).
+    For every search history record, prepares:
+    - query: original user query string (e.g. "vivo t4 5g")
+    - category: confidently determined category (e.g. "Mobiles")
+    - best_platform: "Amazon", "Flipkart", "Meesho", or "Not Available"
+    - best_price: numeric int (e.g. 17890) or None
+    - searched_at: formatted string "YYYY-MM-DD HH:MM" from stored search timestamp
+    - search_id: record ID
+    """
+    prepared = []
+    from search.normalizer import detect_category
+
+    for doc in history:
+        if not isinstance(doc, dict):
+            continue
+
+        clean_doc = _sanitize_best_platform_and_price(dict(doc))
+        
+        # 1. Product / Query: exact search query string
+        q_str = str(clean_doc.get("search_query") or clean_doc.get("query") or clean_doc.get("product_name") or "").strip()
+        if not q_str or q_str.lower() in ("smartbuy", "general", "best product"):
+            q_str = str(clean_doc.get("product_name") or "").strip()
+
+        # 2. Category: confident category detection
+        cat_str = detect_category(q_str, clean_doc.get("category", ""))
+
+        # 3. Best Platform & 4. Best Price
+        b_plat = clean_doc.get("best_platform", "Not Available")
+        if b_plat not in ("Amazon", "Flipkart", "Meesho"):
+            b_plat = "Not Available"
+        
+        b_price = clean_doc.get("best_price")
+        if b_price is not None:
+            try:
+                b_price = int(b_price)
+                if b_price <= 0:
+                    b_price = None
+            except (ValueError, TypeError):
+                b_price = None
+
+        # 8. Searched At: timestamp formatting
+        raw_dt = clean_doc.get("searched_at")
+        if hasattr(raw_dt, "strftime"):
+            s_at = raw_dt.strftime("%Y-%m-%d %H:%M")
+        elif isinstance(raw_dt, str) and raw_dt.strip():
+            s_at = raw_dt[:16].replace("T", " ")
+        else:
+            s_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+        s_id = str(clean_doc.get("id") or clean_doc.get("_id") or "")
+
+        prepared.append({
+            "query": q_str,
+            "product_name": q_str,
+            "category": cat_str,
+            "best_platform": b_plat,
+            "best_price": b_price,
+            "best_product_title": clean_doc.get("best_product_title", ""),
+            "best_product_url": clean_doc.get("best_product_url", ""),
+            "searched_at": s_at,
+            "search_id": s_id,
+            "amazon_count": clean_doc.get("amazon_result_count", 0),
+            "flipkart_count": clean_doc.get("flipkart_result_count", 0),
+            "meesho_count": clean_doc.get("meesho_result_count", 0)
+        })
+
+    return prepared
+
+
 def get_user_stats(user_id) -> dict:
     """Retrieve user stats for profile page filtered by user_id = current_user_id."""
     stats = {
@@ -771,18 +1031,18 @@ def get_user_stats(user_id) -> dict:
     stats["last_login"] = user.get("last_login", None)
 
     searches = get_user_search_history(user_id, limit=50)
+    prepared_searches = prepare_search_history_for_profile(searches)
     feedbacks = get_user_feedback_list(user_id)
     deals = get_user_selected_products(user_id, limit=50)
-    inbox = get_user_inbox_messages(user_id, limit=50)
 
-    stats["total_searches"] = len(searches)
-    stats["recent_searches"] = searches
+    stats["total_searches"] = len(prepared_searches)
+    stats["recent_searches"] = prepared_searches
     stats["selected_products"] = deals
     stats["feedbacks"] = feedbacks
     stats["total_feedback"] = len(feedbacks)
     stats["total_selected_deals"] = len(deals)
     stats["total_saved_comparisons"] = len(deals)
-    stats["total_inbox_messages"] = len(inbox)
+    stats["total_inbox_messages"] = len(get_user_inbox_messages(user_id, limit=50))
     if feedbacks:
         stats["user_rating"] = feedbacks[0].get("rating", 5)
 
@@ -977,53 +1237,377 @@ def get_user_full_details_for_admin(user_id) -> dict | None:
         return user
 
 
-# ════════════════════ MONGODB PRODUCT CACHING ════════════════════
 
-def save_product_cache(cache_key: str, processed_data: dict) -> bool:
-    """
-    Store search comparison data in MongoDB smartbuy_db.product_cache collection.
-    Req 5: Stores cache_key, processed results, scraped_at timestamp.
-    """
-    if not cache_key or not processed_data or db is None:
+# ════════════════════ OTP VERIFICATION ════════════════════
+
+_IN_MEMORY_OTPS = {}
+
+
+def create_or_refresh_signup_otp(email: str, otp_code: str, ttl_minutes: int = 10) -> bool:
+    """Create or refresh a signup OTP record in signup_otp collection (expires after ttl_minutes)."""
+    if not email or not otp_code:
         return False
-    try:
-        doc = {
-            "cache_key": cache_key,
-            "data": processed_data,
-            "scraped_at": datetime.now(timezone.utc)
-        }
-        db.product_cache.update_one(
-            {"cache_key": cache_key},
-            {"$set": doc},
-            upsert=True
-        )
-        return True
-    except Exception as e:
-        logger.error(f"Error saving product_cache: {e}")
-        return False
+    email_clean = email.strip().lower()
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=ttl_minutes)
+
+    doc = {
+        "email": email_clean,
+        "otp": str(otp_code),
+        "created_at": now,
+        "expires_at": expires_at,
+        "is_verified": False
+    }
+
+    _IN_MEMORY_OTPS[email_clean] = doc
+
+    if db is not None:
+        try:
+            db.signup_otp.update_one(
+                {"email": email_clean},
+                {"$set": doc},
+                upsert=True
+            )
+            # Legacy fallback
+            db.otps.update_one(
+                {"email": email_clean},
+                {"$set": doc},
+                upsert=True
+            )
+        except Exception as e:
+            logger.error(f"MongoDB create_or_refresh_signup_otp error for {email_clean}: {e}")
+
+    return True
 
 
-def get_product_cache(cache_key: str, ttl_seconds: int = 60) -> dict | None:
-    """
-    Retrieve cached product data from MongoDB smartbuy_db.product_cache if within TTL window (default 60s).
-    """
-    if not cache_key or db is None:
+def get_signup_otp(email: str) -> dict | None:
+    """Retrieve signup OTP record by email."""
+    if not email:
         return None
-    try:
-        doc = db.product_cache.find_one({"cache_key": cache_key})
-        if not doc or "scraped_at" not in doc or "data" not in doc:
-            return None
+    email_clean = email.strip().lower()
 
-        scraped_at = doc["scraped_at"]
-        if isinstance(scraped_at, datetime):
-            age = (datetime.now(timezone.utc) - scraped_at).total_seconds()
-            if age <= ttl_seconds:
-                logger.info(f"MongoDB product_cache HIT for '{cache_key[:50]}' (age: {age:.1f}s)")
-                return doc["data"]
+    if db is not None:
+        try:
+            rec = db.signup_otp.find_one({"email": email_clean})
+            if not rec:
+                rec = db.otps.find_one({"email": email_clean})
+            if rec:
+                return format_doc(rec)
+        except Exception as e:
+            logger.error(f"MongoDB get_signup_otp error for {email_clean}: {e}")
+
+    return _IN_MEMORY_OTPS.get(email_clean)
+
+
+def mark_signup_otp_verified(email: str) -> bool:
+    """Mark signup OTP as verified."""
+    if not email:
+        return False
+    email_clean = email.strip().lower()
+
+    if email_clean in _IN_MEMORY_OTPS:
+        _IN_MEMORY_OTPS[email_clean]["is_verified"] = True
+
+    if db is not None:
+        try:
+            db.signup_otp.update_one(
+                {"email": email_clean},
+                {"$set": {"is_verified": True}}
+            )
+            db.otps.update_one(
+                {"email": email_clean},
+                {"$set": {"is_verified": True}}
+            )
+        except Exception as e:
+            logger.error(f"MongoDB mark_signup_otp_verified error for {email_clean}: {e}")
+
+    return True
+
+
+def delete_signup_otp(email: str) -> bool:
+    """Delete signup OTP record after successful registration."""
+    if not email:
+        return False
+    email_clean = email.strip().lower()
+
+    if email_clean in _IN_MEMORY_OTPS:
+        del _IN_MEMORY_OTPS[email_clean]
+
+    if db is not None:
+        try:
+            db.signup_otp.delete_one({"email": email_clean})
+            db.otps.delete_one({"email": email_clean})
+        except Exception as e:
+            logger.error(f"MongoDB delete_signup_otp error for {email_clean}: {e}")
+
+    return True
+
+
+# Backward-compatibility aliases
+def save_otp(email: str, otp_code: str, ttl_minutes: int = 10) -> bool:
+    """Save 6-digit OTP for email with expiration timestamp."""
+    return create_or_refresh_signup_otp(email, otp_code, ttl_minutes=ttl_minutes)
+
+
+def verify_otp(email: str, otp_code: str) -> tuple[bool, str]:
+    """Verify 6-digit OTP code against saved record."""
+    if not email or not otp_code:
+        return False, "Email and OTP code are required."
+    email_clean = email.strip().lower()
+    now = datetime.now(timezone.utc)
+
+    rec = get_signup_otp(email_clean)
+    if not rec:
+        return False, "No OTP sent to this email address."
+
+    exp = rec.get("expires_at")
+    if exp:
+        if isinstance(exp, str):
+            try:
+                exp = datetime.fromisoformat(exp)
+            except Exception:
+                exp = None
+        if isinstance(exp, datetime) and exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if isinstance(exp, datetime) and now > exp:
+            return False, "OTP has expired. Please request a new code."
+
+    if str(rec.get("otp", "")).strip() != str(otp_code).strip():
+        return False, "Invalid OTP code. Please try again."
+
+    mark_signup_otp_verified(email_clean)
+    return True, "Email verified successfully!"
+
+
+def is_email_verified(email: str) -> bool:
+    """Check if email address has completed OTP verification."""
+    if not email:
+        return False
+    clean = email.strip().lower()
+    if db is not None:
+        rec = db.otp_verifications.find_one({"email": clean, "verified": True})
+        if rec:
+            return True
+        rec_code = db.otp_codes.find_one({"identifier": clean, "verified": True})
+        if rec_code:
+            return True
+    rec_legacy = get_signup_otp(clean)
+    return bool(rec_legacy and rec_legacy.get("is_verified"))
+
+
+from otp_utils import hash_otp
+
+def get_otp_expiry_minutes() -> int:
+    """Read OTP_EXPIRY_MINUTES from environment (default 10)."""
+    try:
+        return int(os.getenv("OTP_EXPIRY_MINUTES", 10))
+    except (ValueError, TypeError):
+        return 10
+
+
+def get_otp_max_attempts() -> int:
+    """Read OTP_MAX_ATTEMPTS from environment (default 7)."""
+    try:
+        return int(os.getenv("OTP_MAX_ATTEMPTS", 7))
+    except (ValueError, TypeError):
+        return 7
+
+
+def store_otp(identifier: str, code: str, channel: str = "email", ttl_minutes: int = 10, purpose: str = "signup", **kwargs) -> bool:
+    """
+    Store or update a hashed OTP record in smartbuy_db.otp_verifications (and db.otp_codes).
+    Document structure:
+    {
+        "email": "user@example.com",
+        "otp_hash": "...",
+        "created_at": "<ISODate>",
+        "expires_at": "<ISODate>",
+        "attempts": 0,
+        "verified": false,
+        "last_sent_at": "<ISODate>"
+    }
+    """
+    if not identifier or not code:
+        return False
+    
+    clean_id = identifier.strip().lower() if channel.lower() == "email" else identifier.strip()
+    now = datetime.now(timezone.utc)
+    expiry_mins = get_otp_expiry_minutes()
+    expires_at = now + timedelta(minutes=expiry_mins)
+    code_hash = hash_otp(code)
+
+    otp_doc = {
+        "email": clean_id,
+        "identifier": clean_id,
+        "otp_hash": code_hash,
+        "code": str(code).strip(),
+        "channel": channel.lower(),
+        "purpose": purpose,
+        "attempts": 0,
+        "verified": False,
+        "created_at": now,
+        "expires_at": expires_at,
+        "last_sent_at": now
+    }
+
+    create_or_refresh_signup_otp(clean_id, str(code).strip(), ttl_minutes=expiry_mins)
+
+    if db is not None:
+        try:
+            # Store in otp_verifications collection
+            db.otp_verifications.update_one(
+                {"email": clean_id, "channel": channel.lower()},
+                {"$set": otp_doc},
+                upsert=True
+            )
+            # Sync with legacy otp_codes collection
+            db.otp_codes.update_one(
+                {"identifier": clean_id, "channel": channel.lower()},
+                {"$set": otp_doc},
+                upsert=True
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error in store_otp for {clean_id}: {e}")
+            return False
+    return False
+
+
+def verify_otp_code(identifier: str, code: str, channel: str = "email", purpose: str = "signup", **kwargs) -> tuple[bool, str]:
+    """
+    Verify submitted 6-digit OTP code against smartbuy_db.otp_verifications collection.
+    - Check expiration (OTP_EXPIRY_MINUTES)
+    - Check attempts limit (OTP_MAX_ATTEMPTS, default 7)
+    - Compare SHA-256 hash of submitted OTP
+    - Invalidate OTP if max attempts exceeded or code expired
+    """
+    if not identifier or not code:
+        return False, "Identifier and OTP code are required."
+
+    clean_id = identifier.strip().lower() if channel.lower() == "email" else identifier.strip()
+    clean_code = str(code).strip()
+    submitted_hash = hash_otp(clean_code)
+    channel_clean = channel.lower()
+    max_attempts = get_otp_max_attempts()
+
+    if db is None:
+        return verify_otp(clean_id, clean_code)
+
+    try:
+        # Search otp_verifications first, then fallback to otp_codes
+        rec = db.otp_verifications.find_one({"email": clean_id, "channel": channel_clean})
+        if not rec:
+            rec = db.otp_codes.find_one({"identifier": clean_id, "channel": channel_clean})
+
+        if not rec:
+            if channel_clean == "email":
+                v_ok, v_msg = verify_otp(clean_id, clean_code)
+                if v_ok:
+                    return True, "Email verified successfully"
+            return False, "OTP expired. Please request a new OTP."
+
+        # 1. Check Expiration
+        expires_at = rec.get("expires_at")
+        now = datetime.now(timezone.utc)
+        if expires_at:
+            if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if now > expires_at:
+                db.otp_verifications.delete_one({"_id": rec["_id"]})
+                db.otp_codes.delete_one({"identifier": clean_id})
+                return False, "OTP expired. Please request a new OTP."
+
+        # 2. Check Attempts Limit
+        current_attempts = int(rec.get("attempts", 0))
+        if current_attempts >= max_attempts:
+            db.otp_verifications.delete_one({"_id": rec["_id"]})
+            db.otp_codes.delete_one({"identifier": clean_id})
+            return False, "Maximum OTP attempts reached. Please request a new OTP."
+
+        # 3. Validate Hash / Code
+        stored_hash = rec.get("otp_hash")
+        stored_code = str(rec.get("code", "")).strip()
+
+        is_correct = (stored_hash and stored_hash == submitted_hash) or (stored_code and stored_code == clean_code)
+
+        if not is_correct:
+            new_attempts = current_attempts + 1
+            if new_attempts >= max_attempts:
+                db.otp_verifications.delete_one({"_id": rec["_id"]})
+                db.otp_codes.delete_one({"identifier": clean_id})
+                return False, "Maximum OTP attempts reached. Please request a new OTP."
             else:
-                logger.info(f"MongoDB product_cache EXPIRED for '{cache_key[:50]}' (age: {age:.1f}s > {ttl_seconds}s)")
-        return None
+                db.otp_verifications.update_one({"_id": rec["_id"]}, {"$set": {"attempts": new_attempts}})
+                db.otp_codes.update_one({"identifier": clean_id}, {"$set": {"attempts": new_attempts}})
+                return False, "Invalid OTP. Please try again."
+
+        # 4. Verified Successfully
+        db.otp_verifications.update_one(
+            {"_id": rec["_id"]},
+            {"$set": {"verified": True, "email_verified": True}}
+        )
+        if channel_clean == "email":
+            mark_signup_otp_verified(clean_id)
+        return True, "Email verified successfully"
+
     except Exception as e:
-        logger.error(f"Error reading product_cache: {e}")
-        return None
+        logger.error(f"Error in verify_otp_code for {clean_id}: {e}")
+        return False, f"Verification failed: {str(e)}"
+
+
+def check_otp_resend_cooldown(identifier: str, cooldown_seconds: int = 60) -> tuple[bool, str]:
+    """
+    Check if a resend request is allowed (must wait 60s between OTP requests).
+    Returns (True, "OK") if allowed, or (False, error_msg) if in cooldown.
+    """
+    if db is None or not identifier:
+        return True, "OK"
+
+    clean_id = identifier.strip().lower()
+    rec = db.otp_verifications.find_one({"email": clean_id})
+    if not rec:
+        rec = db.otp_codes.find_one({"identifier": clean_id})
+
+    if rec and rec.get("last_sent_at"):
+        last_sent = rec["last_sent_at"]
+        if isinstance(last_sent, datetime) and last_sent.tzinfo is None:
+            last_sent = last_sent.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - last_sent).total_seconds()
+        if elapsed < cooldown_seconds:
+            remaining = int(cooldown_seconds - elapsed)
+            return False, f"Please wait {remaining} seconds before requesting a new OTP."
+
+    return True, "OK"
+
+
+
+def mark_user_verified(user_id_or_email: str, channel: str = "email") -> bool:
+    """
+    Mark user account as email and/or phone verified in smartbuy_db.users.
+    """
+    if not user_id_or_email or db is None:
+        return False
+
+    field_updates = {}
+    if channel.lower() in ("email", "both"):
+        field_updates["is_email_verified"] = True
+        field_updates["email_verified"] = True
+        field_updates["emailVerified"] = True
+    if channel.lower() in ("phone", "both"):
+        field_updates["is_phone_verified"] = True
+        field_updates["phone_verified"] = True
+
+    try:
+        oid = to_object_id(user_id_or_email)
+        query = {"_id": oid} if oid else {"email": user_id_or_email.strip().lower()}
+        res = db.users.update_one(query, {"$set": field_updates})
+        return res.modified_count > 0 or res.matched_count > 0
+    except Exception as e:
+        logger.error(f"Error marking user verified for {user_id_or_email}: {e}")
+        return False
+
+
+
+
+
 
