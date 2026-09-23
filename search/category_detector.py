@@ -59,8 +59,9 @@ def detect_category(
     primary_text = f"{t_str} {pt_str} {q_str}".lower()
     full_text = f"{t_str} {pt_str} {mc_str} {attr_text} {desc_str} {q_str}".lower()
 
-    if not full_text.strip():
-        return "other"
+    # 0. Bags, Backpacks, Sleeves & Luggage (must precede chargers so 'laptop bag with charger pouch' or 'laptop sleeve' -> bags)
+    if re.search(r'\b(bag|bags|school\s*bag|backpack|backpacks|trolley|luggage|suitcase|duffel|handbag|handbags|purse|wallet|wallets|laptop\s*bag|laptop\s*case|sleeve|sleeves|laptop\s*sleeve|sleeve\s*case|pouch)\b', primary_text):
+        return "bags"
 
     # 1. Chargers, Cables & Power Adapters (MUST precede phone detection so 'vivo charger' -> charger)
     if re.search(r'\b(charger|chargers|adapter|adapters|fast\s*charger|charging\s*cable|power\s*adapter|power\s*cable|dock|powerbank|power\s*bank)\b', primary_text):

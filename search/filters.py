@@ -423,10 +423,12 @@ def parse_filter_params(request_args: dict) -> dict:
     else:
         # Also support separate price_min / price_max params
         try:
-            if request_args.get('price_min'):
-                params['price_min'] = int(request_args.get('price_min'))
-            if request_args.get('price_max'):
-                params['price_max'] = int(request_args.get('price_max'))
+            p_min = request_args.get('price_min')
+            if p_min:
+                params['price_min'] = int(p_min)
+            p_max = request_args.get('price_max')
+            if p_max:
+                params['price_max'] = int(p_max)
         except (ValueError, TypeError):
             pass
 

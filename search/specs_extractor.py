@@ -1,4 +1,5 @@
 import re
+from typing import Any, Optional, Dict, List, Union
 from search.category_detector import detect_category
 
 
@@ -119,7 +120,7 @@ def extract_specs(item: dict, query: str = "") -> dict:
     """
     title = item.get('title', '')
     title_lower = title.lower()
-    specs = {k: 'N/A' for k in _SPEC_PATTERNS}
+    specs: dict[str, Any] = {k: 'N/A' for k in _SPEC_PATTERNS}
     specs['brand']      = 'N/A'
     specs['color']      = 'N/A'
     specs['rating_num'] = 0.0
@@ -193,48 +194,54 @@ def extract_specs(item: dict, query: str = "") -> dict:
     specs['seller']   = item.get('seller') if item.get('seller') and item.get('seller') != 'N/A' else 'Not Available'
     price_val         = safe_number(item.get('price_num'))
     specs['delivery'] = 'Free Delivery (2-3 Days)' if price_val > 499 else 'Standard Delivery'
-    specs['warranty'] = '1 Year Brand Warranty' if category in ('Smartphones', 'Laptops', 'Televisions', 'Refrigerators', 'Washing Machines') else 'Not Available'
+    warr_raw = item.get('warranty')
+    if warr_raw and str(warr_raw).lower() not in ('n/a', 'none', 'not available'):
+        specs['warranty'] = str(warr_raw)
+    elif category in ('phone', 'Smartphones', 'laptop', 'Laptops', 'Televisions', 'Refrigerators', 'Washing Machines', 'kitchen', 'home_appliance'):
+        specs['warranty'] = '1 Year Brand Warranty'
+    else:
+        specs['warranty'] = 'Standard Return Policy'
 
     # Build category-tailored specifications list
     cat_specs = {}
-    if category in ("phone", "Smartphones"):
+    c_norm = str(category or "").lower()
+
+    if c_norm in ("phone", "smartphones", "mobile"):
         cat_specs["Display"] = specs.get('display', 'Not Available')
         cat_specs["Processor"] = specs.get('processor', 'Not Available')
         cat_specs["RAM"] = specs.get('ram', 'Not Available')
         cat_specs["Storage"] = specs.get('storage', 'Not Available')
         cat_specs["Camera"] = specs.get('camera', 'Not Available')
         cat_specs["Battery"] = specs.get('battery', 'Not Available')
-        cat_specs["OS"] = specs.get('os', 'Android/iOS')
+        cat_specs["OS"] = specs.get('os', 'Android / iOS')
         cat_specs["5G Support"] = specs.get('is_5g', 'Not Available')
         cat_specs["Color"] = specs.get('color', 'Not Available')
-    elif category in ("laptop", "Laptops"):
+    elif c_norm in ("laptop", "laptops"):
         cat_specs["Processor"] = specs.get('processor', 'Not Available')
         cat_specs["RAM"] = specs.get('ram', 'Not Available')
         cat_specs["SSD/Storage"] = specs.get('storage', 'Not Available')
         cat_specs["Display Size"] = specs.get('display', 'Not Available')
-        cat_specs["Graphics"] = "Integrated / Dedicated" if 'nvidia' in title_lower or 'rtx' in title_lower else "Integrated Graphics"
+        cat_specs["Graphics"] = "Integrated / Dedicated" if ('nvidia' in title_lower or 'rtx' in title_lower) else "Integrated Graphics"
         cat_specs["OS"] = specs.get('os', 'Windows 11 Home')
         cat_specs["Weight"] = specs.get('weight', 'Not Available')
-    elif category in ("face_wash", "Face Wash"):
+    elif c_norm in ("face_wash", "face wash"):
         cat_specs["Product Type"] = "Face Wash"
         v_m = re.search(r'\b(vitamin c|salicylic acid|tea tree|neem|aloe vera|charcoal|hyaluronic|papaya|coffee|ubtan|glycolic)\b', title_lower)
-        cat_specs["Variant"] = v_m.group(1).title() if v_m else "Gentle Cleansing"
+        cat_specs["Active Ingredient"] = v_m.group(1).title() if v_m else "Natural Cleansing Extracts"
         cat_specs["Skin Type"] = "Oily / Acne Prone" if any(w in title_lower for w in ['acne', 'pimple', 'oil']) else ("Dry Skin" if 'dry' in title_lower else "All Skin Types")
         vol_m = re.search(r'(\d+\s*(?:ml|g))\b', title_lower)
-        cat_specs["Volume / Weight"] = vol_m.group(1) if vol_m else specs.get('volume', '100ml')
-        cat_specs["Ingredients"] = v_m.group(1).title() if v_m else "Natural Extracts"
-        cat_specs["Benefits"] = "Deep Cleansing & Oil Control" if 'oil' in title_lower or 'acne' in title_lower else "Glowing & Hydrated Skin"
-    elif category in ("soap", "Soap"):
+        cat_specs["Volume / Weight"] = vol_m.group(1) if vol_m else specs.get('volume', '100 ml')
+        cat_specs["Benefits"] = "Deep Cleansing & Oil Control" if ('oil' in title_lower or 'acne' in title_lower) else "Glowing & Hydrated Skin"
+    elif c_norm in ("soap",):
         cat_specs["Product Type"] = "Bathing Soap"
         w_m = re.search(r'(\d+\s*g)\b', title_lower)
-        cat_specs["Weight"] = w_m.group(1) if w_m else "100g"
+        cat_specs["Weight"] = w_m.group(1) if w_m else specs.get('weight', '100g')
         pq_m = re.search(r'(?:pack of|pack|pack-)(\d+)', title_lower)
         cat_specs["Pack Quantity"] = f"Pack of {pq_m.group(1)}" if pq_m else "Pack of 1"
-        cat_specs["Fragrance"] = "Sandalwood / Herbal" if any(w in title_lower for w in ['sandal', 'herbal', 'ayurvedic', 'magic']) else "Refreshing Floral"
+        cat_specs["Fragrance"] = "Sandalwood / Herbal" if any(w in title_lower for w in ['sandal', 'herbal', 'ayurvedic', 'magic']) else "Refreshing Fragrance"
         cat_specs["Skin Type"] = "All Skin Types"
-        cat_specs["Ingredients"] = "Herbal Oils & Glycerin"
-    elif category in ("grocery", "food", "Chia Seeds", "Groceries"):
-        cat_specs["Product Type"] = "Chia Seeds / Grocery" if 'chia' in title_lower else "Grocery Food Item"
+    elif c_norm in ("grocery", "food", "chia seeds", "groceries"):
+        cat_specs["Product Type"] = "Chia Seeds / Superfood" if 'chia' in title_lower else "Grocery Food Item"
         w_m = re.search(r'(\d+\s*(?:g|kg))\b', title_lower)
         cat_specs["Weight"] = w_m.group(1) if w_m else specs.get('weight', '500g')
         pq_m = re.search(r'(?:pack of|pack|pack-)(\d+)', title_lower)
@@ -242,57 +249,46 @@ def extract_specs(item: dict, query: str = "") -> dict:
         cat_specs["Ingredients"] = "100% Whole Raw Chia Seeds" if 'chia' in title_lower else "Natural Ingredients"
         cat_specs["Organic"] = "Certified Organic" if 'organic' in title_lower else "100% Natural"
         cat_specs["Diet Type"] = "Gluten Free, Vegan, High Fiber, Omega-3"
-    elif category in ("clothing", "shoes", "Clothing & Fashion", "Shoes & Footwear"):
+    elif c_norm in ("clothing", "shoes", "fashion"):
         sz_m = re.search(r'\b(s|m|l|xl|xxl|2xl|3xl|32|34|36|38|40|42)\b', title_lower)
-        cat_specs["Size"] = sz_m.group(1).upper() if sz_m else "Regular Size (S/M/L/XL)"
+        cat_specs["Size"] = sz_m.group(1).upper() if sz_m else specs.get('size', 'Standard Size')
         cat_specs["Color"] = specs.get('color', 'Standard Variant')
-        cat_specs["Material"] = "100% Cotton / Denim" if any(w in title_lower for w in ['cotton', 'denim']) else "Premium Fabric"
+        cat_specs["Material"] = "100% Cotton / Denim" if any(w in title_lower for w in ['cotton', 'denim']) else specs.get('material', 'Premium Fabric')
         cat_specs["Pattern"] = "Solid" if 'solid' in title_lower else ("Printed" if 'printed' in title_lower else "Casual Regular")
         cat_specs["Fit Type"] = "Slim Fit" if 'slim' in title_lower else ("Regular Fit" if 'regular' in title_lower else "Standard Fit")
-    elif category == "Headphones":
+    elif c_norm in ("bags", "luggage", "backpack"):
+        cat_specs["Product Type"] = "Trolley Bag / Suitcase" if any(w in title_lower for w in ['trolley', 'luggage', 'suitcase']) else ("Backpack" if 'backpack' in title_lower else "Bag")
+        cap_m = re.search(r'(\d{2,3})\s*(?:l|ltr|litres?|liters?)\b', title_lower)
+        cat_specs["Capacity"] = f"{cap_m.group(1)} Litres" if cap_m else specs.get('capacity', 'Not Available')
+        sz_m = re.search(r'(\d{2}\s*(?:inch|cm|-inch))\b', title_lower)
+        cat_specs["Size"] = sz_m.group(1) if sz_m else specs.get('size', 'Cabin / Check-in Size')
+        mat_m = re.search(r'\b(polycarbonate|polyester|leather|nylon|abs|hard luggage|soft luggage)\b', title_lower)
+        cat_specs["Material"] = mat_m.group(1).title() if mat_m else specs.get('material', 'Durable Polycarbonate / Polyester')
+        cat_specs["Lock Type"] = "TSA Lock" if 'tsa' in title_lower else ("Combination Lock" if 'lock' in title_lower else "Not Available")
+        cat_specs["Wheels"] = "4 Wheel 360° Spinner" if any(w in title_lower for w in ['4 wheel', 'spinner', '360', 'wheel']) else "Not Available"
+    elif c_norm in ("kitchen", "home_appliance"):
+        cat_specs["Product Type"] = "Mixer Grinder" if ('mixer' in title_lower or 'grinder' in title_lower) else ("Cooker" if 'cooker' in title_lower else ("Kettle" if 'kettle' in title_lower else "Kitchen Appliance"))
+        w_m = re.search(r'\b(\d{3,4})\s*(?:w|watt|watts)\b', title_lower)
+        cat_specs["Wattage"] = f"{w_m.group(1)} W" if w_m else specs.get('wattage', 'Not Available')
+        cap_m = re.search(r'(\d+(?:\.\d+)?)\s*(?:l|ltr|litres?|liters?)\b', title_lower)
+        cat_specs["Capacity"] = f"{cap_m.group(1)} Litres" if cap_m else specs.get('capacity', 'Not Available')
+        jar_m = re.search(r'(\d+)\s*jars?\b', title_lower)
+        cat_specs["Jars Count"] = f"{jar_m.group(1)} Jars" if jar_m else "Not Available"
+        mat_m = re.search(r'\b(stainless steel|steel|copper|non-stick|cast iron|aluminum)\b', title_lower)
+        cat_specs["Material"] = mat_m.group(1).title() if mat_m else specs.get('material', 'Stainless Steel / Food Grade')
+    elif c_norm in ("headphones", "earphones"):
         cat_specs["Headphone Type"] = "True Wireless (TWS)" if any(w in title_lower for w in ['tws', 'earbuds', 'buds']) else ("Over Ear" if 'over' in title_lower else "In-Ear Neckband")
-        cat_specs["Connectivity"] = "Bluetooth 5.3"
-        cat_specs["Playback Time"] = "Up to 30-50 Hours"
-        cat_specs["Noise Cancellation"] = "Active Noise Cancellation (ANC)" if 'anc' in title_lower else "Environmental Noise Cancellation (ENC)"
-        cat_specs["Mic"] = "Built-in Mic"
-    elif category == "Smartwatches":
-        cat_specs["Display Size"] = specs.get('display', '1.8 - 2.0 Inch HD Display')
-        cat_specs["Battery Life"] = "Up to 7 Days"
-        cat_specs["Calling Support"] = "Bluetooth Calling" if 'calling' in title_lower or 'bluetooth' in title_lower else "Smart Notifications"
-        cat_specs["Health Sensors"] = "Heart Rate, SpO2, Sleep Tracker, Step Counter"
-        cat_specs["Water Resistance"] = "IP68 Water Resistant"
-    elif category == "Televisions":
-        cat_specs["Screen Size"] = specs.get('display', 'Not Available')
-        cat_specs["Resolution"] = "4K Ultra HD" if '4k' in title_lower else ("Full HD" if 'fhd' in title_lower else "HD Ready")
-        cat_specs["Display Type"] = "OLED" if 'oled' in title_lower else ("QLED" if 'qled' in title_lower else "LED")
-        cat_specs["Smart TV"] = "Yes (Android/Google TV)" if 'smart' in title_lower or 'android' in title_lower else "Yes"
-        cat_specs["HDMI Ports"] = "2 - 3 Ports"
-    elif category == "Refrigerators":
-        cat_specs["Capacity"] = specs.get('capacity', 'Not Available')
-        cat_specs["Star Rating"] = "3 Star / 4 Star" if '3 star' in title_lower or '4 star' in title_lower else "3 Star Energy Rated"
-        cat_specs["Cooling Tech"] = "Frost Free / Direct Cool"
-        cat_specs["Compressor"] = "Inverter Compressor"
-    elif category == "Washing Machines":
-        cat_specs["Capacity"] = specs.get('capacity', specs.get('weight', 'Not Available'))
-        cat_specs["Type"] = "Front Load" if 'front' in title_lower else "Top Load Fully Automatic"
-        cat_specs["Spin Speed"] = "700 - 1200 RPM"
-        cat_specs["Energy Rating"] = "5 Star Rated"
-    elif category == "Groceries":
-        cat_specs["Brand"] = specs.get('brand', 'Not Available')
-        cat_specs["Weight / Volume"] = specs.get('weight', specs.get('volume', 'Not Available'))
-        cat_specs["Quantity"] = specs.get('quantity', '1 Pack')
-        cat_specs["Pack Size"] = specs.get('quantity', 'Standard Pack')
-        cat_specs["Expiry Date"] = "6-12 Months Best Before"
-    elif category == "Beauty & Personal Care":
-        cat_specs["Brand"] = specs.get('brand', 'Not Available')
-        cat_specs["Volume / Net Wt"] = specs.get('volume', specs.get('weight', 'Not Available'))
-        cat_specs["Skin Type"] = "All Skin Types"
-        cat_specs["Expiry Date"] = "24 Months Best Before"
-    elif category == "Kitchen Products":
-        cat_specs["Material"] = specs.get('material', 'Stainless Steel / Non-Stick')
-        cat_specs["Capacity"] = specs.get('capacity', specs.get('volume', 'Not Available'))
-        cat_specs["Color"] = specs.get('color', 'Not Available')
-        cat_specs["Wattage"] = specs.get('wattage', 'Not Available')
+        bt_m = re.search(r'\b(bluetooth\s*\d(?:\.\d)?|v\d(?:\.\d)?)\b', title_lower)
+        cat_specs["Connectivity"] = bt_m.group(0).title() if bt_m else "Bluetooth Wireless"
+        pb_m = re.search(r'(\d{2,3})\s*(?:hours?|hrs?)\b', title_lower)
+        cat_specs["Playback Time"] = f"{pb_m.group(1)} Hours" if pb_m else "Not Available"
+        cat_specs["Noise Cancellation"] = "Active Noise Cancellation (ANC)" if 'anc' in title_lower else ("Environmental Noise Cancellation (ENC)" if 'enc' in title_lower else "Not Available")
+        cat_specs["Mic"] = "Built-in Mic" if 'mic' in title_lower else "Not Available"
+    elif c_norm in ("watch", "smartwatch", "smartwatches"):
+        cat_specs["Display Size"] = specs.get('display', 'HD Smart Display')
+        cat_specs["Calling Support"] = "Bluetooth Calling" if ('calling' in title_lower or 'bluetooth' in title_lower) else "Smart Notifications"
+        cat_specs["Health Sensors"] = "Heart Rate, SpO2, Step Counter"
+        cat_specs["Water Resistance"] = "IP68 Water Resistant" if 'ip68' in title_lower else "Water Resistant"
     else:
         cat_specs["Material"] = specs.get('material', 'Not Available')
         cat_specs["Color"] = specs.get('color', 'Not Available')
@@ -546,128 +542,166 @@ CATEGORY_SPEC_PROFILES = {
 }
 
 
+# Common standard fields prioritising Quality of Product first, then Price of Product
+_COMMON_IDENTITY_FIELDS = ["Product Name", "Brand", "Model", "Product Type"]
+
+_COMMON_QUALITY_FIELDS = [
+    "Quality Score", "Quality Band", "Data Confidence", "Build Material",
+    "Warranty", "Seller", "Rating", "Reviews", "Quality Highlights"
+]
+
+_COMMON_PRICE_FIELDS = [
+    "Price", "MRP", "Discount", "Value for Money Index"
+]
+
 # Category Specification Candidate Profiles
 CATEGORY_SPEC_FIELDS: dict[str, list[str]] = {
     # 1. Chargers & Power Adapters
-    "charger": [
-        "Product Name", "Brand", "Product Type", "Model", "Output Voltage",
-        "Output Wattage", "Power", "Input Voltage", "Connector Type", "Port Type",
-        "Compatibility", "Fast Charging", "Cable Included", "Color", "Price",
-        "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller", "Warranty"
-    ],
-    "adapter": [
-        "Product Name", "Brand", "Product Type", "Model", "Output Voltage",
-        "Output Wattage", "Power", "Input Voltage", "Connector Type", "Port Type",
-        "Compatibility", "Fast Charging", "Cable Included", "Color", "Price",
-        "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller", "Warranty"
-    ],
-    "power_bank": [
-        "Product Name", "Brand", "Product Type", "Model", "Battery Capacity",
-        "Output Wattage", "Output Ports", "Fast Charging", "Color", "Weight",
-        "Price", "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller", "Warranty"
-    ],
+    "charger": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Output Voltage", "Output Wattage", "Power", "Input Voltage", "Connector Type",
+            "Port Type", "Compatibility", "Fast Charging", "Cable Included", "Color",
+            "Availability", "Buy Link"
+        ]
+    ),
+    "adapter": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Output Voltage", "Output Wattage", "Power", "Input Voltage", "Connector Type",
+            "Port Type", "Compatibility", "Fast Charging", "Cable Included", "Color",
+            "Availability", "Buy Link"
+        ]
+    ),
+    "power_bank": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Battery Capacity", "Output Wattage", "Output Ports", "Fast Charging",
+            "Color", "Weight", "Availability", "Buy Link"
+        ]
+    ),
     # 2. Smartphones & Mobiles
-    "smartphone": [
-        "Product Name", "Brand", "Model", "Product Type", "Price", "MRP", "Discount",
-        "Rating", "Reviews", "RAM", "Storage", "Display", "Processor", "Battery",
-        "Camera", "Front Camera", "OS", "Color", "SIM", "5G", "Warranty",
-        "Availability", "Seller"
-    ],
-    "phone": [
-        "Product Name", "Brand", "Model", "Product Type", "Price", "MRP", "Discount",
-        "Rating", "Reviews", "RAM", "Storage", "Display", "Processor", "Battery",
-        "Camera", "Front Camera", "OS", "Color", "SIM", "5G", "Warranty",
-        "Availability", "Seller"
-    ],
+    "smartphone": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "RAM", "Storage", "Display", "Processor", "Battery", "Camera",
+            "Front Camera", "OS", "Color", "SIM", "5G", "Availability", "Buy Link"
+        ]
+    ),
+    "phone": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "RAM", "Storage", "Display", "Processor", "Battery", "Camera",
+            "Front Camera", "OS", "Color", "SIM", "5G", "Availability", "Buy Link"
+        ]
+    ),
     # 3. Laptops & Computers
-    "laptop": [
-        "Product Name", "Brand", "Model", "Product Type", "Price", "MRP", "Discount",
-        "Rating", "Reviews", "Processor", "RAM", "Storage", "SSD/HDD", "Display",
-        "Graphics", "OS", "Battery", "Weight", "Color", "Warranty",
-        "Availability", "Seller"
-    ],
-    "tablet": [
-        "Product Name", "Brand", "Model", "Product Type", "Price", "MRP", "Discount",
-        "Rating", "Reviews", "Processor", "RAM", "Storage", "Display", "Battery",
-        "Camera", "OS", "Connectivity", "Color", "Warranty", "Availability", "Seller"
-    ],
+    "laptop": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Processor", "RAM", "Storage", "SSD/HDD", "Display", "Graphics",
+            "OS", "Battery", "Weight", "Color", "Availability", "Buy Link"
+        ]
+    ),
+    "tablet": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Processor", "RAM", "Storage", "Display", "Battery", "Camera",
+            "OS", "Connectivity", "Color", "Availability", "Buy Link"
+        ]
+    ),
     # 4. Grocery & Food
-    "grocery": [
-        "Product Name", "Brand", "Product Type", "Weight", "Pack Quantity", "Quantity",
-        "Ingredients", "Flavor", "Dietary Preference", "Shelf Life", "Unit Price",
-        "Price", "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller"
-    ],
-    "food": [
-        "Product Name", "Brand", "Product Type", "Weight", "Pack Quantity", "Quantity",
-        "Ingredients", "Flavor", "Dietary Preference", "Shelf Life", "Unit Price",
-        "Price", "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller"
-    ],
+    "grocery": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Weight", "Pack Quantity", "Quantity", "Ingredients", "Flavor",
+            "Dietary Preference", "Shelf Life", "Unit Price", "Availability", "Buy Link"
+        ]
+    ),
+    "food": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Weight", "Pack Quantity", "Quantity", "Ingredients", "Flavor",
+            "Dietary Preference", "Shelf Life", "Unit Price", "Availability", "Buy Link"
+        ]
+    ),
     # 5. Soaps & Cleansers
-    "soap": [
-        "Product Name", "Brand", "Product Type", "Weight", "Net Quantity",
-        "Pack Quantity", "Skin Type", "Ingredients", "Fragrance", "Benefits",
-        "Price", "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller"
-    ],
+    "soap": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Weight", "Net Quantity", "Pack Quantity", "Skin Type", "Ingredients",
+            "Fragrance", "Benefits", "Availability", "Buy Link"
+        ]
+    ),
     # 6. Face Wash & Skincare
-    "face_wash": [
-        "Product Name", "Brand", "Product Type", "Skin Type", "Net Quantity",
-        "Volume", "Ingredients", "Suitable Use", "Fragrance", "Benefits",
-        "Price", "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller"
-    ],
-    "skincare": [
-        "Product Name", "Brand", "Product Type", "Skin Type", "Net Quantity",
-        "Volume", "Ingredients", "Suitable Use", "Fragrance", "Benefits",
-        "Price", "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller"
-    ],
-    "beauty": [
-        "Product Name", "Brand", "Product Type", "Skin Type", "Net Quantity",
-        "Volume", "Weight", "Ingredients", "Suitable Use", "Fragrance",
-        "Benefits", "Price", "MRP", "Discount", "Rating", "Reviews",
-        "Availability", "Seller"
-    ],
+    "face_wash": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Skin Type", "Net Quantity", "Volume", "Ingredients", "Suitable Use",
+            "Fragrance", "Benefits", "Availability", "Buy Link"
+        ]
+    ),
+    "skincare": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Skin Type", "Net Quantity", "Volume", "Ingredients", "Suitable Use",
+            "Fragrance", "Benefits", "Availability", "Buy Link"
+        ]
+    ),
+    "beauty": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Skin Type", "Net Quantity", "Volume", "Weight", "Ingredients",
+            "Suitable Use", "Fragrance", "Benefits", "Availability", "Buy Link"
+        ]
+    ),
     # 7. Clothing & Fashion
-    "clothing": [
-        "Product Name", "Brand", "Product Type", "Size", "Color", "Material",
-        "Fabric", "Pattern", "Fit", "Sleeve", "Occasion", "Quantity",
-        "Price", "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller"
-    ],
-    "fashion": [
-        "Product Name", "Brand", "Product Type", "Size", "Color", "Material",
-        "Fabric", "Pattern", "Fit", "Sleeve", "Occasion", "Quantity",
-        "Price", "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller"
-    ],
+    "clothing": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Size", "Color", "Material", "Fabric", "Pattern", "Fit",
+            "Sleeve", "Occasion", "Quantity", "Availability", "Buy Link"
+        ]
+    ),
+    "fashion": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Size", "Color", "Material", "Fabric", "Pattern", "Fit",
+            "Sleeve", "Occasion", "Quantity", "Availability", "Buy Link"
+        ]
+    ),
     # 8. Audio & Headphones
-    "headphones": [
-        "Product Name", "Brand", "Model", "Product Type", "Headphone Type",
-        "Connectivity", "Battery Life", "Noise Cancellation", "Driver Size",
-        "Microphone", "Color", "Price", "MRP", "Discount", "Rating",
-        "Reviews", "Availability", "Seller", "Warranty"
-    ],
-    "earphones": [
-        "Product Name", "Brand", "Model", "Product Type", "Headphone Type",
-        "Connectivity", "Battery Life", "Noise Cancellation", "Driver Size",
-        "Microphone", "Color", "Price", "MRP", "Discount", "Rating",
-        "Reviews", "Availability", "Seller", "Warranty"
-    ],
+    "headphones": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Headphone Type", "Connectivity", "Battery Life", "Noise Cancellation",
+            "Driver Size", "Microphone", "Color", "Availability", "Buy Link"
+        ]
+    ),
+    "earphones": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Headphone Type", "Connectivity", "Battery Life", "Noise Cancellation",
+            "Driver Size", "Microphone", "Color", "Availability", "Buy Link"
+        ]
+    ),
     # 9. Watches
-    "watch": [
-        "Product Name", "Brand", "Model", "Product Type", "Display", "Dial Shape",
-        "Strap Material", "Water Resistance", "Battery Life", "Connectivity",
-        "Color", "Price", "MRP", "Discount", "Rating", "Reviews",
-        "Availability", "Seller", "Warranty"
-    ],
+    "watch": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Display", "Dial Shape", "Strap Material", "Water Resistance",
+            "Battery Life", "Connectivity", "Color", "Availability", "Buy Link"
+        ]
+    ),
     # 10. Bags & Luggage
-    "bags": [
-        "Product Name", "Brand", "Model", "Product Type", "Material", "Bag Type",
-        "Capacity", "Compartments", "Closure", "Dimensions", "Color",
-        "Price", "MRP", "Discount", "Rating", "Reviews", "Availability", "Seller", "Warranty"
-    ],
-    # 11. Default / General
-    "default": [
-        "Product Name", "Brand", "Model", "Product Type", "Color", "Material",
-        "Quantity", "Weight", "Dimensions", "Price", "MRP", "Discount",
-        "Rating", "Reviews", "Warranty", "Availability", "Seller"
-    ]
+    "bags": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Material", "Bag Type", "Capacity", "Compartments", "Closure",
+            "Dimensions", "Color", "Weight", "Pack Quantity", "Availability", "Buy Link"
+        ]
+    ),
+    # 11. Kitchen Appliances & Cookware
+    "kitchen": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Wattage", "Capacity", "Jars Count", "Material", "Color",
+            "Speed Settings", "Motor Type", "Availability", "Buy Link"
+        ]
+    ),
+    "home_appliance": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Capacity", "Wattage", "Energy Rating", "Material", "Color",
+            "Availability", "Buy Link"
+        ]
+    ),
+    # 12. Default / General
+    "default": (
+        _COMMON_IDENTITY_FIELDS + _COMMON_QUALITY_FIELDS + _COMMON_PRICE_FIELDS + [
+            "Color", "Material", "Quantity", "Weight", "Dimensions",
+            "Availability", "Buy Link"
+        ]
+    )
 }
 
 # Compatibility alias for existing callers
@@ -821,7 +855,7 @@ def get_category_spec_profile(category: str) -> list:
     return get_fields_for_category(category)
 
 
-def get_relevant_specifications(category: str, specifications: dict = None) -> list[str]:
+def get_relevant_specifications(category: str, specifications: Optional[dict] = None) -> list[str]:
     """Helper alias returning relevant spec keys for a category."""
     return get_fields_for_category(category)
 
@@ -865,9 +899,66 @@ def extract_field_value(product: Optional[dict], field: str, category: str) -> O
 
     # 4. Product Type
     if f_low in ("product type", "category"):
+        title_l = str(product.get("title") or "").lower()
+        if any(w in title_l for w in ("backpack", "laptop bag", "sleeve", "sleeve case", "duffel", "luggage", "trolley")):
+            if "backpack" in title_l:
+                return "Laptop Backpack"
+            if "sleeve" in title_l:
+                return "Laptop Sleeve"
+            return "Laptop Bag"
         pt = product.get("product_type") or product.get("category")
         if has_real_value(pt) and str(pt).strip().lower() not in ("other", "general", "default"):
             return str(pt).strip().title()
+        return None
+
+    # Quality Score (First Preference)
+    if f_low in ("quality score", "estimated quality", "estimated quality score", "quality"):
+        qs = product.get("quality_score") or (product.get("quality_report", {}).get("raw_quality_score") if isinstance(product.get("quality_report"), dict) else None)
+        q_band = product.get("quality_band") or (product.get("quality_report", {}).get("quality_band") if isinstance(product.get("quality_report"), dict) else "Standard Quality")
+        if qs is not None:
+            return f"{float(qs):.0f}/100 ({q_band})"
+        return None
+
+    # Quality Band
+    if f_low in ("quality band", "quality rating"):
+        q_band = product.get("quality_band") or (product.get("quality_report", {}).get("quality_band") if isinstance(product.get("quality_report"), dict) else None)
+        if has_real_value(q_band):
+            return str(q_band).strip()
+        return None
+
+    # Data Confidence
+    if f_low in ("data confidence", "evidence confidence", "evidence completeness"):
+        dc = product.get("data_confidence") or (product.get("quality_report", {}).get("data_confidence") if isinstance(product.get("quality_report"), dict) else None)
+        if dc is not None:
+            return f"{float(dc):.0f}% Verified Evidence"
+        return None
+
+    # Build Material
+    if f_low in ("build material", "material", "fabric", "build"):
+        q_mat = (product.get("quality_attributes", {}).get("material") if isinstance(product.get("quality_attributes"), dict) else None)
+        mat = q_mat or product.get("material") or product.get("fabric")
+        if has_real_value(mat):
+            return str(mat).strip().title()
+        return None
+
+    # Quality Highlights / Review Sentiment
+    if f_low in ("quality highlights", "review insights", "positive themes", "key strengths"):
+        themes = product.get("positive_themes") or (product.get("quality_report", {}).get("review_signals", {}).get("positive_themes") if isinstance(product.get("quality_report"), dict) else [])
+        if themes and isinstance(themes, list):
+            return " • ".join(str(t) for t in themes[:2])
+        return None
+
+    # Value for Money Index
+    if f_low in ("value for money", "value for money index", "value index"):
+        vfm = product.get("vfm_index")
+        if vfm is not None and float(vfm) > 0:
+            return f"{float(vfm):.1f}/100"
+        qs = product.get("quality_score")
+        p_num = product.get("price_num")
+        if qs and p_num and p_num > 0:
+            from search.quality_scorer import calculate_value_for_money_index
+            calc_vfm = calculate_value_for_money_index(float(qs), float(p_num), float(p_num))
+            return f"{calc_vfm:.1f}/100"
         return None
 
     # 5. Price
@@ -1079,6 +1170,42 @@ def extract_field_value(product: Optional[dict], field: str, category: str) -> O
             m = re.search(r'\b(\d+(?:\.\d+)?)\s*(ml|l|litre?s?|liter?s?)\b', title_low)
             if m:
                 return f"{m.group(1)} {m.group(2)}"
+        elif f_low in ("ingredients", "active ingredient"):
+            v_m = re.search(r'\b(vitamin c|salicylic acid|tea tree|neem|aloe vera|charcoal|hyaluronic|papaya|coffee|ubtan|glycolic)\b', title_low)
+            if v_m:
+                return v_m.group(1).title()
+
+    elif cat_low in ("kitchen", "home_appliance"):
+        if f_low in ("wattage", "power"):
+            m = re.search(r'\b(\d{3,4})\s*(?:w|watt|watts)\b', title_low)
+            if m:
+                return f"{m.group(1)} W"
+        elif f_low in ("capacity",):
+            m = re.search(r'(\d+(?:\.\d+)?)\s*(?:l|ltr|litres?|liters?)\b', title_low)
+            if m:
+                return f"{m.group(1)} Litres"
+        elif f_low in ("jars count", "jars"):
+            m = re.search(r'(\d+)\s*jars?\b', title_low)
+            if m:
+                return f"{m.group(1)} Jars"
+        elif f_low in ("material",):
+            m = re.search(r'\b(stainless steel|steel|copper|non-stick|cast iron|aluminum)\b', title_low)
+            if m:
+                return m.group(1).title()
+
+    elif cat_low in ("bags", "luggage", "backpack"):
+        if f_low in ("capacity",):
+            m = re.search(r'(\d{2,3})\s*(?:l|ltr|litres?|liters?)\b', title_low)
+            if m:
+                return f"{m.group(1)} Litres"
+        elif f_low in ("dimensions", "size"):
+            m = re.search(r'(\d{2}\s*(?:inch|cm|-inch))\b', title_low)
+            if m:
+                return m.group(1)
+        elif f_low in ("material",):
+            m = re.search(r'\b(polycarbonate|polyester|leather|nylon|abs)\b', title_low)
+            if m:
+                return m.group(1).title()
 
     return None
 

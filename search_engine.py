@@ -13,6 +13,7 @@ Core Search Engine Orchestrator:
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, Dict, Any, List, Tuple
 
 # ── Scrapers ──────────────────────────────────────────────────────────────
 from scrapers.amazon_scraper import AmazonScraper
@@ -178,8 +179,8 @@ def fetch_all_products_with_fallbacks(query_chain: list[str], bypass_fresh: bool
 
 
 def process_results(query: str, raw_results: dict,
-                    filter_params: dict = None,
-                    platform_status: dict = None) -> dict:
+                    filter_params: Optional[dict] = None,
+                    platform_status: Optional[dict] = None) -> dict:
     """
     Full product comparison pipeline:
         raw items → similarity filter → spec extraction → deduplication → match scoring → ranking → badges
@@ -238,6 +239,8 @@ def process_results(query: str, raw_results: dict,
 
     top_verified_offers = pipeline_data["top_verified_offers"]
     specifications_matrix = pipeline_data["specifications_matrix"]
+    quality_comparison_table = pipeline_data.get("quality_comparison_table", [])
+    comparison_summary = pipeline_data.get("comparison_summary", {})
     best_deal = pipeline_data["best_deal"]
     overall_best = best_deal
     savings_info = pipeline_data["savings_info"]
@@ -268,16 +271,28 @@ def process_results(query: str, raw_results: dict,
         }
     }
 
+    amz_prod = best_match_per_platform.get("Amazon") or (platform_results.get("Amazon", [None])[0] if platform_results.get("Amazon") else None)
+    fk_prod = best_match_per_platform.get("Flipkart") or (platform_results.get("Flipkart", [None])[0] if platform_results.get("Flipkart") else None)
+    mee_prod = best_match_per_platform.get("Meesho") or (platform_results.get("Meesho", [None])[0] if platform_results.get("Meesho") else None)
+
     comparison = {
         "query": query,
         "matched_products": [p for p in best_match_per_platform.values() if p],
         "specifications": specifications_matrix,
         "best_deal": best_deal,
+        "amazon": amz_prod,
+        "flipkart": fk_prod,
+        "meesho": mee_prod,
+        "Amazon": amz_prod,
+        "Flipkart": fk_prod,
+        "Meesho": mee_prod,
         "specification_table": {
             "has_match": pipeline_data["has_cross_platform_match"],
             "rows": specifications_matrix,
             "columns": ["specification", "amazon", "flipkart", "meesho"]
         },
+        "quality_comparison_table": quality_comparison_table,
+        "comparison_summary": comparison_summary,
         "match_pairs": match_pairs,
         "products": {
             "amazon": platform_results.get("Amazon", []),
@@ -308,6 +323,8 @@ def process_results(query: str, raw_results: dict,
         "comparison_data":       comparison,
         "specification_table":   comparison.get("specification_table", {}),
         "specifications_matrix": specifications_matrix,
+        "quality_comparison_table": quality_comparison_table,
+        "comparison_summary":    comparison_summary,
         "marketplace_status":    marketplace_status,
         "best_deal":             best_deal,
         "match_pairs":           match_pairs,

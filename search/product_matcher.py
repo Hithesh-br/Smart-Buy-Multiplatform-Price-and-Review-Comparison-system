@@ -102,7 +102,15 @@ def check_hard_rejections(
                 return True, f"Brand conflict: expected '{target_brand.title()}', found '{cand_brand.title()}'"
         else:
             if not re.search(r'\b' + re.escape(target_brand) + r'\b', t_low):
-                return True, f"Brand mismatch: target brand '{target_brand.title()}' missing from candidate"
+                # Allow unbranded / marketplace alternatives if they match the product category or query tokens
+                target_cat = str(target_info.get("category") or target_info.get("product_type") or "").lower()
+                cand_cat = str(candidate.get("category") or detect_category(title=t_title)).lower()
+                cat_match = (
+                    (target_cat and cand_cat and target_cat == cand_cat) or
+                    any(tok in t_low for tok in re.findall(r'[a-zA-Z]{3,}', str(target_info.get("raw_query", "")).lower()) if tok != target_brand)
+                )
+                if not cat_match:
+                    return True, f"Brand mismatch: target brand '{target_brand.title()}' missing from candidate"
 
     # 2. Category / Accessory Conflict
     target_cat = str(target_info.get("category") or target_info.get("product_type") or "other").lower()
@@ -277,6 +285,40 @@ def evaluate_product_match(
             is_variant_diff = True
             reasons.append("Network difference (4G vs 5G)")
 
+    # Check Wattage (e.g. 500W vs 750W mixer)
+    tgt_w = target_info.get("wattage") or (target_info.get("specs") or {}).get("wattage")
+    if not tgt_w:
+        m_tw = re.search(r'\b(\d{3,4})\s*(?:w|watt)\b', str(target_info.get("title") or "").lower())
+        if m_tw:
+            tgt_w = f"{m_tw.group(1)}W"
+    if tgt_w:
+        cand_w = candidate.get("wattage") or (candidate.get("specs") or {}).get("wattage")
+        if not cand_w:
+            m_w = re.search(r'\b(\d{3,4})\s*(?:w|watt)\b', t_low)
+            if m_w:
+                cand_w = f"{m_w.group(1)}W"
+        if cand_w and str(cand_w).lower().replace(" ", "") != str(tgt_w).lower().replace(" ", ""):
+            variant_pts -= 15.0
+            is_variant_diff = True
+            reasons.append(f"Wattage variant difference ({cand_w} vs {tgt_w})")
+
+    # Check Capacity / Size (e.g. 55cm / 28 inch / litres)
+    tgt_cap = target_info.get("capacity") or (target_info.get("specs") or {}).get("capacity")
+    if not tgt_cap:
+        m_tc = re.search(r'\b(\d{1,3})\s*(?:l|litres?|ltr)\b', str(target_info.get("title") or "").lower())
+        if m_tc:
+            tgt_cap = f"{m_tc.group(1)}L"
+    if tgt_cap:
+        cand_cap = candidate.get("capacity") or (candidate.get("specs") or {}).get("capacity")
+        if not cand_cap:
+            m_cap = re.search(r'\b(\d{1,3})\s*(?:l|litres?|ltr)\b', t_low)
+            if m_cap:
+                cand_cap = f"{m_cap.group(1)}L"
+        if cand_cap and str(cand_cap).lower().replace(" ", "") != str(tgt_cap).lower().replace(" ", ""):
+            variant_pts -= 15.0
+            is_variant_diff = True
+            reasons.append(f"Capacity variant difference ({cand_cap} vs {tgt_cap})")
+
     variant_pts = max(0.0, variant_pts)
     breakdown["variant"] = variant_pts
 
@@ -337,13 +379,16 @@ def evaluate_product_match(
     total_score = max(0.0, min(100.0, total_score))
 
     # ── 7. Classify Final Status ──────────────────────────────────────────────
-    if total_score >= 85.0 and not is_variant_diff:
+    if is_variant_diff:
+        if total_score >= 45.0:
+            status = "VARIANT_MATCH"
+        else:
+            status = "SIMILAR_PRODUCT"
+    elif total_score >= 85.0:
         if target_model and not has_model_match:
             status = "SIMILAR_PRODUCT"
         else:
             status = "EXACT_MATCH"
-    elif is_variant_diff and has_model_match and total_score >= 60.0:
-        status = "VARIANT_MATCH"
     elif total_score >= 50.0:
         status = "SIMILAR_PRODUCT"
     elif total_score >= 35.0:
@@ -370,10 +415,12 @@ def check_suspicious_price(
     if not p_num or p_num <= 0:
         return False, ""
 
-    valid_prices = [
-        it.get("price_num") for it in all_products
-        if it.get("price_num") and it.get("price_num") > 0 and it.get("match_status") in ("EXACT_MATCH", "VARIANT_MATCH")
-    ]
+    valid_prices: list[float] = []
+    for it in all_products:
+        p_val = it.get("price_num")
+        if isinstance(p_val, (int, float)) and p_val > 0 and it.get("match_status") in ("EXACT_MATCH", "VARIANT_MATCH"):
+            valid_prices.append(float(p_val))
+
     if len(valid_prices) < 2:
         return False, ""
 
@@ -386,6 +433,6 @@ def check_suspicious_price(
         specs = product.get("specifications") or {}
         model = product.get("model")
         if not model or model == "N/A" or len(specs) < 3:
-            return True, f"Suspicious price (₹{p_num:,} vs median ₹{int(median_price):,}) with incomplete specifications"
+            return True, f"Suspicious price (₹{int(p_num):,} vs median ₹{int(median_price):,}) with incomplete specifications"
 
     return False, ""

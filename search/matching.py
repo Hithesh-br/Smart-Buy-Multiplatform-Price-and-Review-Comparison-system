@@ -105,7 +105,7 @@ def calculate_similarity(query: str, title: str) -> float:
     return round(float(score), 2)
 
 
-def is_relevant(query: str, title: str, threshold: float = None) -> tuple[bool, float]:
+def is_relevant(query: str, title: str, threshold: float | None = None) -> tuple[bool, float]:
     """
     Determine if a product is relevant to the query.
     """

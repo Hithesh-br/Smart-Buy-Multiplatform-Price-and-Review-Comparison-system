@@ -36,10 +36,13 @@ if not SMTP_USER or not SMTP_PASSWORD:
     print("ERROR: SMTP_USER or SMTP_PASSWORD is missing from your .env")
     raise SystemExit(1)
 
+from_addr = str(SMTP_FROM or SMTP_USER)
+to_addr = str(TEST_TO or SMTP_USER)
+
 msg = MIMEText("This is a test email from SmartBuy's SMTP setup.")
 msg["Subject"] = "SmartBuy SMTP test"
-msg["From"] = SMTP_FROM
-msg["To"] = TEST_TO
+msg["From"] = from_addr
+msg["To"] = to_addr
 
 try:
     print("Connecting...")
@@ -50,7 +53,7 @@ try:
     print("Logging in...")
     server.login(SMTP_USER, SMTP_PASSWORD)
     print("Sending...")
-    server.sendmail(SMTP_FROM, [TEST_TO], msg.as_string())
+    server.sendmail(from_addr, [to_addr], msg.as_string())
     server.quit()
     print("-" * 40)
     print(f"SUCCESS: Test email sent to {TEST_TO}. Check your inbox.")

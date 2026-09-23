@@ -6,6 +6,7 @@ Provides multiple sort views for the results page.
 """
 
 import re
+from typing import Optional, Dict, Any, List
 
 
 def safe_number(val, default: float = 0.0) -> float:
@@ -97,7 +98,7 @@ def get_summary_badges(products: list) -> dict:
         return {}
 
     valid_price = [i for i in products if _parse_price_num(i) is not None]
-    lowest_price_item = min(valid_price, key=lambda x: _parse_price_num(x)) if valid_price else None
+    lowest_price_item = min(valid_price, key=lambda x: _parse_price_num(x) or 9_999_999) if valid_price else None
     highest_rating_item = max(products, key=_parse_rating)
     most_reviews_item = max(products, key=_parse_review_count)
     best_discount_item = max(products, key=_parse_discount)
@@ -145,7 +146,7 @@ def annotate_badges(platform_results: dict) -> None:
         return
 
     valid_price = [i for i in all_items if _parse_price_num(i) is not None]
-    min_price_item = min(valid_price, key=lambda x: _parse_price_num(x)) if valid_price else None
+    min_price_item = min(valid_price, key=lambda x: _parse_price_num(x) or 9_999_999) if valid_price else None
     max_rating_item = max(all_items, key=_parse_rating) if all_items else None
     max_disc_item = max(all_items, key=_parse_discount) if all_items else None
 
@@ -157,7 +158,7 @@ def annotate_badges(platform_results: dict) -> None:
                                     and _parse_discount(item) > 0)
 
 
-def extract_numeric_price(product: dict) -> float | None:
+def extract_numeric_price(product: Optional[dict]) -> float | None:
     """Safely extract positive numeric price from product dict without throwing errors."""
     if not isinstance(product, dict):
         return None

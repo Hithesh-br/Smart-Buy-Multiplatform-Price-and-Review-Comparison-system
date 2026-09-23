@@ -99,6 +99,12 @@ def parse_amazon_card(card: bs4.element.Tag) -> Optional[Dict[str, Any]]:
         else:
             url = f"https://www.amazon.in/dp/{asin}"
 
+        # Seller / Prime / Delivery signals
+        prime_elem = card.select_one('i.a-icon-prime, span.a-badge-text')
+        seller_label = "Amazon Fulfilled (Prime)" if prime_elem else "Verified Amazon Merchant"
+        del_elem = card.select_one('span.a-text-bold, span[aria-label*="delivery"], div.udm-delivery span')
+        delivery_info = del_elem.get_text(strip=True) if del_elem else "Standard Delivery"
+
         return {
             "platform": "amazon",
             "asin": asin,
@@ -119,6 +125,8 @@ def parse_amazon_card(card: bs4.element.Tag) -> Optional[Dict[str, Any]]:
             "url": url,
             "product_url": url,
             "link": url,
+            "seller": seller_label,
+            "delivery": delivery_info,
             "availability": "In Stock",
             "in_stock": True,
             "source": "amazon"

@@ -15,8 +15,12 @@ logger = logging.getLogger("smartbuy.scrapers.flipkart.parser")
 def parse_flipkart_card(card: bs4.element.Tag) -> Optional[Dict[str, Any]]:
     """Extract product data from a Flipkart card or container."""
     try:
+        # Brand extraction (Flipkart displays brand in separate element for bags/fashion/footwear)
+        brand_elem = card.select_one('div.Fo1I0b, div.syl9yP, div._2W96wQ, div.yKfJA4, div._2WkVRV, div.G6XhRU, span._2I90We, div._2B_ZTg')
+        brand = brand_elem.get_text(strip=True) if brand_elem else ""
+
         # Title
-        title_elem = card.select_one('div.KzDlHZ, a.wjcEIp, a.WKTcLC, div._4rR01T, a.s1Q9rs, div._2W96wQ, a.IRpwTa, div.RG5Slk, div.nZIRY7')
+        title_elem = card.select_one('div.KzDlHZ, a.wjcEIp, a.WKTcLC, div._4rR01T, a.s1Q9rs, div._2W96wQ, a.IRpwTa, div.RG5Slk, div.nZIRY7, a.atJtCj')
         if not title_elem:
             title_elem = card.select_one('a[title]')
         if not title_elem:
@@ -25,6 +29,9 @@ def parse_flipkart_card(card: bs4.element.Tag) -> Optional[Dict[str, Any]]:
         title = title_elem.get('title') or title_elem.get_text(strip=True)
         if not title or len(title) < 4:
             return None
+
+        if brand and not title.lower().startswith(brand.lower()):
+            title = f"{brand} {title}"
 
         # Price
         price_elem = card.select_one('div.Nx9bqj, div._30jeq3, div.hl05eU, div.hZ3P6w')
@@ -144,13 +151,34 @@ def parse_flipkart_card(card: bs4.element.Tag) -> Optional[Dict[str, Any]]:
             m_pid2 = re.search(r'/p/([a-zA-Z0-9]+)', url)
             if m_pid2:
                 product_id = m_pid2.group(1)
-        if not product_id:
-            product_id = f"fk_{abs(hash(title)) % 1000000}"
+        # Specifications from Flipkart listing bullets
+        specs_extracted = {}
+        spec_items = card.select('ul._1xgFaf li, li.rgWa7D, ul.G4BRas li, div._21AqiJ')
+        warr_val = None
+        for s_idx, sp in enumerate(spec_items):
+            s_text = sp.get_text(strip=True)
+            if s_text:
+                if 'ram' in s_text.lower() or 'rom' in s_text.lower() or 'storage' in s_text.lower():
+                    specs_extracted['RAM / Storage'] = s_text
+                elif 'display' in s_text.lower() or 'inch' in s_text.lower() or 'cm' in s_text.lower():
+                    specs_extracted['Display'] = s_text
+                elif 'camera' in s_text.lower() or 'mp' in s_text.lower():
+                    specs_extracted['Camera'] = s_text
+                elif 'battery' in s_text.lower() or 'mah' in s_text.lower():
+                    specs_extracted['Battery'] = s_text
+                elif 'processor' in s_text.lower():
+                    specs_extracted['Processor'] = s_text
+                elif 'warranty' in s_text.lower() or 'guarantee' in s_text.lower():
+                    warr_val = s_text
+                    specs_extracted['Warranty'] = s_text
+                else:
+                    specs_extracted[f'Feature {s_idx+1}'] = s_text
 
         return {
             "platform": "flipkart",
             "product_id": product_id,
             "title": title,
+            "brand": brand or None,
             "price": f"₹{price_num:,}",
             "price_num": price_num,
             "mrp": f"₹{mrp_num:,}" if mrp_num else f"₹{price_num:,}",
@@ -168,6 +196,8 @@ def parse_flipkart_card(card: bs4.element.Tag) -> Optional[Dict[str, Any]]:
             "link": url,
             "availability": "In Stock",
             "in_stock": True,
+            "warranty": warr_val,
+            "specifications": specs_extracted,
             "source": "flipkart"
         }
     except Exception as e:

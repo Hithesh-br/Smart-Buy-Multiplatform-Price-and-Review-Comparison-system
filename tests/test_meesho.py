@@ -21,7 +21,7 @@ import urllib.parse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 try:
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+        getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 except Exception:
     pass
 
@@ -80,7 +80,8 @@ def run_meesho_health_test(query: str = "hp laptop charger"):
         rel, score, reason = is_product_relevant(p, query)
         if rel:
             matched_count += 1
-            print(f"   -> MATCHED: '{p.get('title')[:60]}' | Price: {p.get('price') or p.get('price_str')}")
+            t_str = str(p.get('title') or '')
+            print(f"   -> MATCHED: '{t_str[:60]}' | Price: {p.get('price') or p.get('price_str')}")
 
     print(f"MATCHED PRODUCTS: {matched_count}")
 

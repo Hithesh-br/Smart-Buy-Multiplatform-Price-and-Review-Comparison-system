@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
+    getattr(sys.stdout, 'reconfigure')(encoding='utf-8')
 
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -78,7 +78,8 @@ def run_tests():
         print("  ✓ MongoDB document stored correctly:")
         print(f"    - name: {user_doc.get('name')}")
         print(f"    - email: {user_doc.get('email')}")
-        print(f"    - hashed_password: {user_doc.get('hashed_password')[:30]}...")
+        hp = str(user_doc.get('hashed_password') or user_doc.get('password_hash') or '')
+        print(f"    - hashed_password: {hp[:30]}...")
         print(f"    - created_at: {user_doc.get('created_at')}")
         print(f"    - email_verified: {user_doc.get('email_verified')}")
 
@@ -99,8 +100,9 @@ def run_tests():
 
         # Non-existent email
         res_no_user = client.post('/send-reset-otp', json={'email': 'nonexistent_9999@smartbuy.com'})
-        assert res_no_user.status_code == 404, f"Expected 404 for missing email, got {res_no_user.status_code}"
-        print("  ✓ Non-existent email request rejected (HTTP 404).")
+        assert res_no_user.status_code in (200, 404), f"Expected 200 or 404 for missing email, got {res_no_user.status_code}"
+        assert db.otp_verifications.find_one({"email": 'nonexistent_9999@smartbuy.com'}) is None, "OTP should not be created for nonexistent user!"
+        print("  ✓ Non-existent email request handled safely (no OTP generated).")
 
         # Existing email
         delete_otp(test_email)
@@ -150,8 +152,10 @@ def run_tests():
 
         # Verify password updated in MongoDB
         updated_user = get_user_by_email(test_email)
+        assert updated_user is not None, "Updated user not found in DB!"
         from werkzeug.security import check_password_hash
-        assert check_password_hash(updated_user['hashed_password'], new_pwd), "MongoDB password hash not updated to new password!"
+        pwd_hash = str(updated_user.get('hashed_password') or updated_user.get('password_hash') or '')
+        assert check_password_hash(pwd_hash, new_pwd), "MongoDB password hash not updated to new password!"
         print("  ✓ MongoDB user hashed_password updated successfully.")
 
         # Verify OTP record invalidated/removed

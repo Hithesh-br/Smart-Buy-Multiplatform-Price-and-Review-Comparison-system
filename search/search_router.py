@@ -78,22 +78,29 @@ def route_search(
             "best_deal": best_deal,
             "platform_status": comp_result.get("platform_status", {}),
             "similar_products": comp_result.get("similar_products", {}),
+            "quality_comparison_table": comp_result.get("quality_comparison_table", []),
+            "comparison_summary": comp_result.get("comparison_summary", {}),
             "success": comp_result.get("success", True),
             "error": comp_result.get("error")
         }
 
     # Product Name text search
     raw_results, platform_status = fetch_all_products_with_fallbacks([clean_query], bypass_fresh=bypass_fresh)
-    processed = process_results(clean_query, raw_results, filter_params=filters, platform_status=platform_status)
+    processed = process_results(clean_query, raw_results, filter_params=filters or {}, platform_status=platform_status)
 
     comparison_data = processed.get("comparison_data") or {}
     platform_res = processed.get("platform_results") or {}
     matrix = comparison_data.get("specifications") or processed.get("specifications_matrix") or []
     best_deal = processed.get("best_deal") or processed.get("best_overall_deal")
 
-    matched_amazon = comparison_data.get("amazon") or (platform_res.get("Amazon")[0] if platform_res.get("Amazon") else None)
-    matched_flipkart = comparison_data.get("flipkart") or (platform_res.get("Flipkart")[0] if platform_res.get("Flipkart") else None)
-    matched_meesho = comparison_data.get("meesho") or (platform_res.get("Meesho")[0] if platform_res.get("Meesho") else None)
+    amz_list = platform_res.get("Amazon") or []
+    matched_amazon = comparison_data.get("amazon") or (amz_list[0] if amz_list else None)
+
+    fk_list = platform_res.get("Flipkart") or []
+    matched_flipkart = comparison_data.get("flipkart") or (fk_list[0] if fk_list else None)
+
+    msh_list = platform_res.get("Meesho") or []
+    matched_meesho = comparison_data.get("meesho") or (msh_list[0] if msh_list else None)
 
     return {
         "search_type": "product_name",
@@ -116,6 +123,8 @@ def route_search(
             "columns": ["specification", "amazon", "flipkart", "meesho"]
         },
         "best_deal": best_deal,
+        "quality_comparison_table": processed.get("quality_comparison_table", comparison_data.get("quality_comparison_table", [])),
+        "comparison_summary": processed.get("comparison_summary", comparison_data.get("comparison_summary", {})),
         "platform_status": platform_status,
         "success": True,
         "total_results": processed.get("total", 0)

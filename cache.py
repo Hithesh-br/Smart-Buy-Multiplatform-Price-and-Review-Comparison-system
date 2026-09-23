@@ -10,6 +10,7 @@ Prevents platform data cross-contamination and supports ?fresh=1 cache bypass.
 import os
 import time
 import logging
+from typing import cast, Dict, Any, Optional
 from cachetools import TTLCache
 from search.normalizer import normalize_query
 
@@ -17,9 +18,9 @@ logger = logging.getLogger("smartbuy.cache")
 
 # Short TTL (1800s / 30 mins) for fresh e-commerce pricing
 CACHE_TTL = int(os.getenv("SCRAPER_CACHE_TTL", "1800"))
-_PLATFORM_CACHE = TTLCache(maxsize=500, ttl=CACHE_TTL)
-_SEARCH_CACHE = TTLCache(maxsize=200, ttl=CACHE_TTL)
-_URL_CACHE = TTLCache(maxsize=200, ttl=CACHE_TTL)
+_PLATFORM_CACHE: TTLCache = TTLCache(maxsize=500, ttl=CACHE_TTL)
+_SEARCH_CACHE: TTLCache = TTLCache(maxsize=200, ttl=CACHE_TTL)
+_URL_CACHE: TTLCache = TTLCache(maxsize=200, ttl=CACHE_TTL)
 
 
 def build_url_cache_key(platform: str, url: str) -> str:
@@ -29,15 +30,15 @@ def build_url_cache_key(platform: str, url: str) -> str:
     return f"{clean_p}:{clean_u}"
 
 
-def get_cached_url_product(platform: str, url: str, bypass_fresh: bool = False):
+def get_cached_url_product(platform: str, url: str, bypass_fresh: bool = False) -> Optional[dict]:
     """Retrieve cached scraped product for a canonical product URL."""
     if bypass_fresh or not is_cache_enabled():
         return None
     key = build_url_cache_key(platform, url)
     if key in _URL_CACHE:
-        entry = _URL_CACHE[key]
+        entry = cast(dict, _URL_CACHE[key])
         logger.info(f"[CACHE] URL Hit for '{key}'")
-        return entry.get("product")
+        return cast(Optional[dict], entry.get("product"))
     return None
 
 
@@ -69,7 +70,7 @@ def build_platform_cache_key(platform: str, query: str) -> str:
     return f"{clean_p}:{norm_q}"
 
 
-def get_platform_cached_results(platform: str, query: str, bypass_fresh: bool = False):
+def get_platform_cached_results(platform: str, query: str, bypass_fresh: bool = False) -> Optional[dict]:
     """
     Retrieve cached results for a specific platform.
     Bypassed when fresh=1 is requested or cache is disabled.
@@ -78,7 +79,7 @@ def get_platform_cached_results(platform: str, query: str, bypass_fresh: bool = 
         return None
     key = build_platform_cache_key(platform, query)
     if key in _PLATFORM_CACHE:
-        entry = _PLATFORM_CACHE[key]
+        entry = cast(dict, _PLATFORM_CACHE[key])
         logger.info(f"[CACHE] Hit for platform key '{key}' ({len(entry.get('results', []))} items)")
         return entry
     return None
@@ -103,13 +104,13 @@ def set_platform_cached_results(platform: str, query: str, results: list, scrape
     logger.info(f"[CACHE] Stored {len(results)} items for '{key}'")
 
 
-def get_cached_search(cache_key: str, bypass_fresh: bool = False):
+def get_cached_search(cache_key: str, bypass_fresh: bool = False) -> Optional[dict]:
     """Legacy/unified search cache lookup."""
     if bypass_fresh or not is_cache_enabled():
         return None
     if cache_key in _SEARCH_CACHE:
         logger.info(f"[CACHE] Hit for unified query key: {cache_key[:50]}...")
-        return _SEARCH_CACHE[cache_key]
+        return cast(dict, _SEARCH_CACHE[cache_key])
     return None
 
 

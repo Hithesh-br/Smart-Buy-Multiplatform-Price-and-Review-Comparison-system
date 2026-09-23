@@ -41,11 +41,13 @@ from database import (
     mark_inbox_message_read, delete_inbox_message, get_inbox_message_by_id,
     save_user_comparison, get_user_saved_comparisons, save_user_selected_product,
     get_user_selected_products, get_latest_user_selected_product,
+    set_search_selected_platform, _format_selected_product,
     update_user_last_login, create_admin_inbox_notification,
     get_admin_inbox_notifications, get_admin_unread_count,
     mark_admin_notification_read, delete_admin_notification,
     get_all_users_for_admin, get_user_full_details_for_admin,
-    store_otp, verify_otp_code, check_otp_resend_cooldown, get_otp_expiry_minutes
+    store_otp, verify_otp_code, check_otp_resend_cooldown, get_otp_expiry_minutes,
+    delete_otp
 )
 from autocomplete_engine import build_trie_from_history, get_autocomplete_suggestions
 from search.normalizer import normalize_query, build_search_query
@@ -261,14 +263,57 @@ def handle_buy_click():
     specifications = request.args.get('specifications', '').strip()
     search_query = request.args.get('search_query', '').strip()
 
-    # If price is missing or placeholder, resolve from price_num or query
-    if not price or price.lower() in ('', 'not available', 'none', 'price unavailable', 'n/a', 'best deal', 'best'):
+    # If price is missing or placeholder, resolve from price_num, recent scraped search results, or catalog
+    if not price or price.lower() in ('', 'not available', 'none', 'price unavailable', 'n/a', 'best deal', 'best', '0', '0.0'):
         if price_num_raw and price_num_raw.isdigit():
             price = f"₹{int(price_num_raw):,}"
+        else:
+            # Check recent search history platform_results for authentic scraped price
+            from database import db, CATALOG_DEALS, to_object_id
+            found_price = None
+            if db is not None:
+                q_filters = []
+                if 'user_id' in session:
+                    uid = to_object_id(session['user_id'])
+                    if uid:
+                        q_filters.append({"user_id": uid})
+                q_filter = q_filters[0] if q_filters else {}
+                try:
+                    recent_searches = db.search_history.find(q_filter).sort("searched_at", -1).limit(5)
+                    for s in recent_searches:
+                        pr = s.get("platform_results", {})
+                        for plat_k, items in pr.items():
+                            if isinstance(items, list):
+                                for it in items:
+                                    if isinstance(it, dict):
+                                        it_title = str(it.get("title") or "").lower()
+                                        it_link = str(it.get("link") or it.get("product_url") or "").lower()
+                                        if (deal_url_raw and deal_url_raw.lower() in it_link) or (product_name and (product_name.lower() in it_title or it_title in product_name.lower())):
+                                            if it.get("price_num"):
+                                                found_price = f"₹{int(it['price_num']):,}"
+                                                break
+                                            elif it.get("price"):
+                                                found_price = str(it["price"])
+                                                break
+                                if found_price:
+                                    break
+                        if found_price:
+                            break
+                except Exception:
+                    pass
+            if found_price:
+                price = found_price
+            else:
+                full_title = f"{product_name} {search_query}".lower()
+                for k, d in CATALOG_DEALS.items():
+                    if k in full_title:
+                        price = f"₹{d['price']:,}"
+                        break
 
     deal_url = normalize_external_url(deal_url_raw, platform_clean)
+    search_id = request.args.get('search_id', '').strip() or None
 
-    pending_product = {
+    raw_pending = {
         'product_name': product_name,
         'platform': platform_clean,
         'price': price,
@@ -277,8 +322,10 @@ def handle_buy_click():
         'image_url': image,
         'specifications': specifications,
         'product_url': deal_url,
-        'search_query': search_query
+        'search_query': search_query,
+        'search_id': search_id
     }
+    pending_product = _format_selected_product(raw_pending)
 
     # Save selected product in session (session["pending_product"])
     session['pending_product'] = pending_product
@@ -289,15 +336,14 @@ def handle_buy_click():
     # Check if user is logged in
     if 'user_id' in session:
         user_id = session['user_id']
-        user = get_user_by_id(user_id)
-        user_name = user.get('name', 'User') if isinstance(user, dict) else 'User'
-
-        save_user_selected_product(
-            user_id, None, pending_product.get('product_name', 'Searched Product'),
-            pending_product.get('platform', 'Online Store'), pending_product.get('price', ''),
-            pending_product.get('rating', ''), pending_product.get('reviews', ''),
-            pending_product.get('specifications', ''), pending_product.get('image_url', ''),
-            pending_product.get('product_url', '')
+        set_search_selected_platform(
+            user_id=user_id,
+            search_id=search_id,
+            platform=pending_product.get('platform', platform_clean),
+            price=pending_product.get('price', price),
+            product_name=pending_product.get('product_name', product_name),
+            product_url=pending_product.get('product_url', deal_url),
+            image_url=pending_product.get('image_url', image)
         )
         return redirect(url_for('api.profile'))
 
@@ -551,6 +597,7 @@ def reset_password_submit():
             return jsonify({"success": False, "message": msg}), 500
         return render_template('reset_password.html', email=email, errors=[msg]), 500
 
+    delete_otp(email)
     session.pop('reset_password_email', None)
     session.pop('reset_password_verified_at', None)
 
@@ -798,6 +845,53 @@ def delete_feedback(feedback_id):
     return redirect(url_for('api.profile'))
 
 
+@api_bp.route('/api/select-product', methods=['POST', 'GET'])
+@login_required
+def select_product_api():
+    """Endpoint for user selecting a specific platform deal from search activity or modal."""
+    data = request.get_json(silent=True) or request.form.to_dict() or request.args.to_dict()
+    search_id = data.get('search_id')
+    platform = (data.get('platform') or 'Flipkart').strip()
+    price = str(data.get('price') or '').strip()
+    product_name = data.get('product_name', '').strip()
+    product_url = data.get('product_url', '').strip()
+    image_url = data.get('image_url', '').strip()
+    query = data.get('query', '').strip()
+
+    user_id = session.get('user_id')
+    set_search_selected_platform(
+        user_id=user_id,
+        search_id=search_id,
+        platform=platform,
+        price=price,
+        product_name=product_name or query or "Selected Product",
+        product_url=product_url,
+        image_url=image_url
+    )
+
+    selected_product = _format_selected_product({
+        'product_name': product_name or query or "Selected Product",
+        'platform': platform,
+        'price': price,
+        'product_url': product_url,
+        'image_url': image_url,
+        'search_query': query
+    })
+    session['pending_product'] = selected_product
+    session['pending_purchase'] = selected_product
+    session['pending_selected_product'] = selected_product
+
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({
+            'status': 'success',
+            'message': f"Selected {platform} deal at {selected_product.get('price')}",
+            'selected_product': selected_product
+        })
+
+    flash(f"Successfully selected {platform} deal ({selected_product.get('price')})!", "success")
+    return redirect(url_for('api.profile'))
+
+
 @api_bp.route('/profile', methods=['GET'])
 @login_required
 def profile():
@@ -806,35 +900,19 @@ def profile():
     
     # Restore pending or latest selected product
     selected_product = session.get('pending_product') or session.get('pending_purchase') or session.get('pending_selected_product')
-    if not selected_product:
+    
+    # If session product has no price or placeholder, refresh from latest database record
+    p_check = str((selected_product or {}).get('price') or '').strip().lower()
+    if not selected_product or not p_check or p_check in ('', 'none', 'n/a', 'price unavailable', 'not available', 'best deal available', 'best deal', 'best', '0', '0.0'):
         db_prod = get_latest_user_selected_product(session['user_id'])
         if db_prod:
-            selected_product = {
-                'product_name': db_prod.get('product_name', 'Searched Product'),
-                'platform': (db_prod.get('platform') or 'Online Store').capitalize(),
-                'price': db_prod.get('price', ''),
-                'price_num': db_prod.get('price_num'),
-                'rating': db_prod.get('rating', ''),
-                'reviews': db_prod.get('reviews', ''),
-                'specifications': db_prod.get('specifications', ''),
-                'image_url': db_prod.get('image_url', ''),
-                'product_url': db_prod.get('product_url', '')
-            }
+            selected_product = db_prod
 
     if selected_product:
-        plat_clean = str(selected_product.get('platform') or '').strip().lower()
-        if 'amazon' in plat_clean:
-            selected_product['platform'] = 'Amazon'
-        elif 'flipkart' in plat_clean:
-            selected_product['platform'] = 'Flipkart'
-        elif 'meesho' in plat_clean:
-            selected_product['platform'] = 'Meesho'
-        elif selected_product.get('platform'):
-            selected_product['platform'] = selected_product['platform'].capitalize()
-
-        if not selected_product.get('price') or str(selected_product.get('price')).strip().lower() in ('', 'none', 'n/a', 'price unavailable', 'not available'):
-            if selected_product.get('price_num'):
-                selected_product['price'] = f"₹{int(selected_product['price_num']):,}"
+        selected_product = _format_selected_product(dict(selected_product))
+        session['pending_product'] = selected_product
+        session['pending_purchase'] = selected_product
+        session['pending_selected_product'] = selected_product
 
     return render_template('profile.html', stats=stats, selected_product=selected_product, restored_comparison=selected_product)
 
@@ -859,7 +937,7 @@ def continue_to_deal():
             session['user_id'], 'deal_opened', '🔗 Deal Opened',
             f"You opened this product on {platform}.\n\nProduct:\n{p_name}\n\nPrice at selection:\n{p_price}"
         )
-        target_url = normalize_external_url(selected_product.get('product_url'), platform)
+        target_url = normalize_external_url(str(selected_product.get('product_url') or ''), platform)
         return redirect(target_url)
 
     flash("No active selected product found.", "info")
@@ -958,12 +1036,36 @@ def search():
                     b_title = p_name
                     b_url = url_param
 
+                if not b_price:
+                    matches = comp_result.get('matches', {})
+                    for m_prod in matches.values():
+                        if isinstance(m_prod, dict) and (m_prod.get('price_num') or m_prod.get('price')):
+                            b_price = m_prod.get('price_num') or m_prod.get('price')
+                            if not b_plat:
+                                b_plat = m_prod.get('platform', '')
+                            break
+
+                if not b_price:
+                    from database import CATALOG_DEALS
+                    full_txt = f"{p_name} {url_param}".lower()
+                    for k, d in CATALOG_DEALS.items():
+                        if k in full_txt:
+                            b_price = d['price']
+                            if not b_plat:
+                                b_plat = d['platform']
+                            break
+
+                best_q_url = comp_result.get('comparison_summary', {}).get('best_quality') if isinstance(comp_result.get('comparison_summary'), dict) else None
+                q_score_url = best_q_url.get('quality_score') if best_q_url else None
+                d_conf_url = best_q_url.get('data_confidence') if best_q_url else None
+
                 log_user_search(
                     user_id, p_name, src_prod.get('category', 'General'),
                     num_results=3, platforms_found="Amazon, Flipkart, Meesho",
                     best_platform=b_plat, best_price=b_price,
                     best_product_title=b_title, best_product_url=b_url,
-                    best_deal=best_deal
+                    best_deal=best_deal,
+                    quality_score=q_score_url, data_confidence=d_conf_url
                 )
             except Exception:
                 pass
@@ -990,6 +1092,8 @@ def search():
             "query": p_name,
             "matched_products": matched_list,
             "specifications": comp_result.get('specifications_matrix', []),
+            "quality_comparison_table": comp_result.get('quality_comparison_table', []),
+            "comparison_summary": comp_result.get('comparison_summary', {}),
             "best_deal": comp_result.get('best_deal'),
             "specification_table": {
                 "has_match": bool(len(matched_list) >= 2),
@@ -1037,6 +1141,8 @@ def search():
             marketplace_status=url_mp_status,
             comparison_data=comparison,
             specifications_matrix=comp_result.get('specifications_matrix', []),
+            quality_comparison_table=comp_result.get('quality_comparison_table', []),
+            comparison_summary=comp_result.get('comparison_summary', {}),
             best_deal=comp_result.get('best_deal'),
             best_overall_deal=comp_result.get('best_deal'),
             best_per_platform=best_per_plat,
@@ -1138,13 +1244,64 @@ def search():
             b_title = best_deal.get('title') or best_deal.get('product_name') or ""
             b_url = best_deal.get('link') or best_deal.get('product_url') or ""
 
+        # Fallback to lowest-priced available product if best_deal did not specify platform/price
+        if not b_plat or not b_price:
+            all_prods = list(processed.get('all_results') or [])
+            if not all_prods:
+                pr = processed.get('platform_results') or {}
+                if isinstance(pr, dict):
+                    for p_items in pr.values():
+                        if isinstance(p_items, list):
+                            all_prods.extend(p_items)
+            valid_candidates = []
+            for it in all_prods:
+                if isinstance(it, dict):
+                    p_val = it.get('price_num')
+                    if not p_val and it.get('price'):
+                        try:
+                            clean_str = re.sub(r'[^\d.]', '', str(it.get('price')))
+                            if clean_str:
+                                p_val = int(float(clean_str))
+                        except Exception:
+                            p_val = None
+                    if p_val and p_val > 0:
+                        valid_candidates.append((p_val, it))
+            if valid_candidates:
+                valid_candidates.sort(key=lambda x: x[0])
+                lowest_p, best_cand = valid_candidates[0]
+                if not b_plat:
+                    b_plat = (best_cand.get('platform') or "").capitalize()
+                if not b_price:
+                    b_price = lowest_p
+                if not b_title:
+                    b_title = best_cand.get('title') or best_cand.get('product_name') or ""
+                if not b_url:
+                    b_url = best_cand.get('link') or best_cand.get('product_url') or ""
+
+        # Fallback to catalog if still empty
+        if not b_plat or not b_price:
+            from database import CATALOG_DEALS
+            q_low = query.lower()
+            for k, d in CATALOG_DEALS.items():
+                if k in q_low:
+                    if not b_plat:
+                        b_plat = d['platform']
+                    if not b_price:
+                        b_price = d['price']
+                    break
+
+        best_q_cand = processed.get('comparison_summary', {}).get('best_quality') if isinstance(processed.get('comparison_summary'), dict) else None
+        q_score_log = best_q_cand.get('quality_score') if best_q_cand else None
+        d_conf_log = best_q_cand.get('data_confidence') if best_q_cand else None
+
         search_id = log_user_search(
             user_id, query, category_val or "General",
             specifications=specs_dict, search_query=query,
             num_results=total_count, platforms_found=platforms_str,
             best_platform=b_plat, best_price=b_price,
             best_product_title=b_title, best_product_url=b_url,
-            best_deal=best_deal, platform_results=processed.get('platform_results')
+            best_deal=best_deal, platform_results=processed.get('platform_results'),
+            quality_score=q_score_log, data_confidence=d_conf_log
         )
 
         # Automatic inbox message: Search Completed
@@ -1254,6 +1411,8 @@ def api_search():
         "best_deal": comp.get("best_deal"),
         "match_pairs": comp.get("match_pairs", {}),
         "marketplace_status": processed.get("marketplace_status", {}),
+        "quality_comparison_table": processed.get("quality_comparison_table", comp.get("quality_comparison_table", [])),
+        "comparison_summary": processed.get("comparison_summary", comp.get("comparison_summary", {})),
         # Legacy compatibility keys
         "platform_status": platform_status,
         "results": processed["platform_results"],

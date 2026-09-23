@@ -40,7 +40,8 @@ def normalize_flipkart_product(raw: Dict[str, Any], query: str = "") -> Optional
             'Apple', 'Samsung', 'Vivo', 'Oppo', 'OnePlus', 'Realme', 'Xiaomi', 'Redmi', 'Motorola',
             'HP', 'Dell', 'Lenovo', 'Asus', 'Acer', 'boAt', 'Noise', 'Boult', 'Fastrack', 'Titan',
             'Pilgrim', 'Ghar', 'Mamaearth', 'Dot & Key', 'The Derma Co', 'Cetaphil', 'Nivea', 'Dove',
-            'Nike', 'Adidas', 'Puma', 'Bata', 'Skybags', 'Milton', 'Cadbury', 'Nestle', 'Tata'
+            'Nike', 'Adidas', 'Puma', 'Bata', 'Skybags', 'Safari', 'American Tourister', 'Aristocrat',
+            'Kamiliant', 'VIP', 'Wildcraft', 'Milton', 'Cadbury', 'Nestle', 'Tata'
         ]
         t_low = title.lower()
         for b in known_brands:

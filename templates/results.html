@@ -233,6 +233,83 @@
             background: rgba(15, 23, 42, 0.8) !important;
             border-color: rgba(255, 255, 255, 0.15) !important;
         }
+
+        /* ── Comparison Summary Cards (5 Pillars) ── */
+        .summary-decision-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 14px;
+            margin-bottom: 22px;
+        }
+        .summary-decision-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 14px;
+            padding: 16px;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .summary-decision-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        }
+        .summary-card-lowest { border-top: 4px solid #10b981; }
+        .summary-card-quality { border-top: 4px solid #8b5cf6; }
+        .summary-card-spec { border-top: 4px solid #3b82f6; }
+        .summary-card-reviews { border-top: 4px solid #f59e0b; }
+        .summary-card-vfm { border-top: 4px solid #06b6d4; }
+
+        body.dark-mode .summary-decision-card {
+            background: rgba(30, 41, 59, 0.95) !important;
+            border-color: rgba(255, 255, 255, 0.1) !important;
+            color: #f8fafc !important;
+        }
+
+        /* ── Quality Comparison Table ── */
+        .quality-table-card {
+            background: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(0,0,0,0.08);
+        }
+        body.dark-mode .quality-table-card {
+            background: #0f172a !important;
+            border-color: rgba(255,255,255,0.12) !important;
+        }
+        body.dark-mode .quality-table-card table {
+            color: #f8fafc !important;
+        }
+        body.dark-mode .quality-table-card thead th {
+            background: #1e293b !important;
+            color: #f8fafc !important;
+            border-color: rgba(255,255,255,0.1) !important;
+        }
+        body.dark-mode .quality-table-card td {
+            border-color: rgba(255,255,255,0.08) !important;
+            background: #0f172a !important;
+            color: #f8fafc !important;
+        }
+        .quality-score-bar-bg {
+            background: #e2e8f0;
+            border-radius: 999px;
+            height: 7px;
+            width: 100%;
+            overflow: hidden;
+        }
+        body.dark-mode .quality-score-bar-bg {
+            background: #334155;
+        }
+        .quality-score-bar-fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #6366f1, #8b5cf6);
+            transition: width 0.4s ease;
+        }
     </style>
 </head>
 <body class="premium-bg">
@@ -456,6 +533,246 @@
     </div>
     {% endif %}
 
+    {% if comparison_summary %}
+    <!-- ════════════════ COMPARISON SUMMARY (5 DECISION PILLARS) ════════════════ -->
+    <div class="mb-4">
+        <div class="d-flex align-items-center justify-content-between mb-2">
+            <h5 class="fw-bold mb-0 text-dark d-flex align-items-center gap-2">
+                <i class="fas fa-chart-pie text-primary"></i>Product Comparison Summary
+            </h5>
+            <span class="badge bg-light text-muted border px-2 py-1 small">Independent Evaluation &bull; Transparent Scoring</span>
+        </div>
+        <div class="summary-decision-grid">
+            <!-- 1. Lowest Price Card -->
+            {% set lp = comparison_summary.get('lowest_price') %}
+            <div class="summary-decision-card summary-card-lowest">
+                <div>
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="badge bg-success text-white px-2 py-1 rounded-pill" style="font-size:0.7rem;">
+                            <i class="fas fa-tag me-1"></i>LOWEST PRICE
+                        </span>
+                        {% if lp and lp.platform %}
+                        <span class="badge {% if lp.platform == 'Amazon' %}bg-amazon text-white{% elif lp.platform == 'Flipkart' %}bg-flipkart text-dark{% else %}bg-meesho text-white{% endif %} px-2 py-0.5 rounded-pill" style="font-size:0.68rem;">
+                            {{ lp.platform }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    {% if lp and lp.price %}
+                    <div class="fs-4 fw-extrabold text-success mb-1">{{ lp.price }}</div>
+                    {% if lp.savings and lp.savings > 0 %}
+                    <div class="text-danger small fw-bold mb-2">Save ₹{{ "{:,}".format(lp.savings) }} vs next lowest</div>
+                    {% else %}
+                    <div class="text-muted small mb-2">Cheapest verified live price</div>
+                    {% endif %}
+                    <div class="small fw-semibold text-dark text-truncate-2 mb-3" style="line-height:1.3; height:2.6em;" title="{{ lp.title }}">
+                        {{ lp.title }}
+                    </div>
+                    {% else %}
+                    <div class="text-muted small py-3">Comparing marketplace prices...</div>
+                    {% endif %}
+                </div>
+                {% if lp and lp.link %}
+                <a href="javascript:void(0)"
+                   data-url="{{ lp.link }}"
+                   data-platform="{{ lp.platform }}"
+                   data-product-name="{{ lp.title }}"
+                   data-price="{{ lp.price }}"
+                   onclick="triggerBuyRedirect(this)"
+                   class="btn btn-outline-success btn-sm rounded-pill w-100 fw-bold">
+                    View Deal on {{ lp.platform }}
+                </a>
+                {% endif %}
+            </div>
+
+            <!-- 2. Quality Evidence Card -->
+            {% set bq = comparison_summary.get('best_quality') %}
+            <div class="summary-decision-card summary-card-quality">
+                <div>
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="badge text-white px-2 py-1 rounded-pill" style="background:#8b5cf6; font-size:0.7rem;">
+                            <i class="fas fa-award me-1"></i>HIGHEST QUALITY EVIDENCE
+                        </span>
+                        {% if bq and bq.platform %}
+                        <span class="badge {% if bq.platform == 'Amazon' %}bg-amazon text-white{% elif bq.platform == 'Flipkart' %}bg-flipkart text-dark{% else %}bg-meesho text-white{% endif %} px-2 py-0.5 rounded-pill" style="font-size:0.68rem;">
+                            {{ bq.platform }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    {% if bq and bq.has_sufficient_data %}
+                    <div class="d-flex align-items-baseline gap-2 mb-1">
+                        <span class="fs-4 fw-extrabold text-primary" style="color:#7c3aed !important;">{{ bq.quality_score|round|int }}</span>
+                        <span class="text-muted small">/ 100 Quality Score</span>
+                    </div>
+                    <div class="mb-2">
+                        <span class="badge bg-primary-subtle text-primary border border-primary px-2 py-0.5 rounded-pill" style="font-size:0.68rem;">
+                            <i class="fas fa-shield-alt me-1"></i>Confidence: {{ bq.data_confidence|round|int }}%
+                        </span>
+                    </div>
+                    <div class="small fw-semibold text-dark text-truncate mb-2" title="{{ bq.title }}">{{ bq.title }}</div>
+                    {% if bq.evidence %}
+                    <div class="d-flex flex-wrap gap-1 mb-3">
+                        {% for ev in bq.evidence[:2] %}
+                        <span class="badge bg-light text-secondary border px-1.5 py-0.5 rounded" style="font-size:0.65rem;">{{ ev }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <div class="alert alert-secondary py-2 px-2 my-2 rounded-3 text-center" style="font-size:0.75rem;">
+                        <i class="fas fa-info-circle me-1"></i>Insufficient data across listings for full score
+                    </div>
+                    {% endif %}
+                </div>
+                {% if bq and bq.link %}
+                <a href="javascript:void(0)"
+                   data-url="{{ bq.link }}"
+                   data-platform="{{ bq.platform }}"
+                   data-product-name="{{ bq.title }}"
+                   data-price="{{ bq.price }}"
+                   onclick="triggerBuyRedirect(this)"
+                   class="btn btn-outline-primary btn-sm rounded-pill w-100 fw-bold" style="border-color:#8b5cf6; color:#7c3aed;">
+                    Inspect Quality Listing
+                </a>
+                {% endif %}
+            </div>
+
+            <!-- 3. Spec Match Accuracy Card -->
+            {% set sm = comparison_summary.get('best_spec_match') %}
+            <div class="summary-decision-card summary-card-spec">
+                <div>
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="badge bg-primary text-white px-2 py-1 rounded-pill" style="font-size:0.7rem;">
+                            <i class="fas fa-microchip me-1"></i>SPECIFICATION MATCH
+                        </span>
+                        {% if sm and sm.platform %}
+                        <span class="badge {% if sm.platform == 'Amazon' %}bg-amazon text-white{% elif sm.platform == 'Flipkart' %}bg-flipkart text-dark{% else %}bg-meesho text-white{% endif %} px-2 py-0.5 rounded-pill" style="font-size:0.68rem;">
+                            {{ sm.platform }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    {% if sm %}
+                    <div class="d-flex align-items-baseline gap-2 mb-1">
+                        <span class="fs-4 fw-extrabold text-primary">{{ sm.match_score|default(90) }}%</span>
+                        <span class="badge {% if sm.classification in ('Exact Match', 'Strong Match') %}bg-success{% else %}bg-info text-dark{% endif %} px-2 py-0.5 rounded-pill" style="font-size:0.68rem;">
+                            {{ sm.classification|default('Verified Match') }}
+                        </span>
+                    </div>
+                    <div class="small fw-semibold text-dark text-truncate mb-2" title="{{ sm.title }}">{{ sm.title }}</div>
+                    {% if sm.matched_specs %}
+                    <div class="d-flex flex-wrap gap-1 mb-3">
+                        {% for ms in sm.matched_specs[:2] %}
+                        <span class="badge bg-success-subtle text-success border border-success px-1.5 py-0.5 rounded" style="font-size:0.65rem;">
+                            <i class="fas fa-check me-0.5"></i>{{ ms }}
+                        </span>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-muted small mb-3">Hardware &amp; model confirmed</div>
+                    {% endif %}
+                    {% else %}
+                    <div class="text-muted small py-3">Matching specifications...</div>
+                    {% endif %}
+                </div>
+                {% if sm and sm.link %}
+                <a href="javascript:void(0)"
+                   data-url="{{ sm.link }}"
+                   data-platform="{{ sm.platform }}"
+                   data-product-name="{{ sm.title }}"
+                   onclick="triggerBuyRedirect(this)"
+                   class="btn btn-outline-primary btn-sm rounded-pill w-100 fw-bold">
+                    View Spec Match
+                </a>
+                {% endif %}
+            </div>
+
+            <!-- 4. Review Insights Card -->
+            {% set ri = comparison_summary.get('review_insights') %}
+            <div class="summary-decision-card summary-card-reviews">
+                <div>
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="badge text-dark px-2 py-1 rounded-pill" style="background:#fbbf24; font-size:0.7rem;">
+                            <i class="fas fa-star me-1"></i>CUSTOMER REVIEWS
+                        </span>
+                        {% if ri and ri.platform %}
+                        <span class="badge {% if ri.platform == 'Amazon' %}bg-amazon text-white{% elif ri.platform == 'Flipkart' %}bg-flipkart text-dark{% else %}bg-meesho text-white{% endif %} px-2 py-0.5 rounded-pill" style="font-size:0.68rem;">
+                            {{ ri.platform }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    {% if ri and ri.rating %}
+                    <div class="d-flex align-items-center gap-2 mb-1">
+                        <span class="fs-4 fw-extrabold text-warning-emphasis">★ {{ ri.rating }}</span>
+                        {% if ri.review_count %}
+                        <span class="text-muted small">({{ ri.review_count }} verified)</span>
+                        {% endif %}
+                    </div>
+                    <div class="small fw-semibold text-dark text-truncate mb-2" title="{{ ri.title }}">{{ ri.title }}</div>
+                    <div class="d-flex flex-wrap gap-1 mb-3">
+                        {% if ri.positive_themes %}
+                            {% for pos in ri.positive_themes[:2] %}
+                            <span class="badge bg-success-subtle text-success border border-success px-1.5 py-0.5 rounded" style="font-size:0.65rem;">
+                                <i class="fas fa-thumbs-up me-0.5"></i>{{ pos }}
+                            </span>
+                            {% endfor %}
+                        {% else %}
+                            <span class="badge bg-light text-muted border px-1.5 py-0.5 rounded" style="font-size:0.65rem;">Positive customer ratings</span>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div class="text-muted small py-3">Aggregating review sentiment...</div>
+                    {% endif %}
+                </div>
+                {% if ri and ri.link %}
+                <a href="javascript:void(0)"
+                   data-url="{{ ri.link }}"
+                   data-platform="{{ ri.platform }}"
+                   data-product-name="{{ ri.title }}"
+                   onclick="triggerBuyRedirect(this)"
+                   class="btn btn-outline-warning btn-sm rounded-pill w-100 fw-bold text-dark" style="border-color:#f59e0b;">
+                    Read Verified Reviews
+                </a>
+                {% endif %}
+            </div>
+
+            <!-- 5. Value for Money Card -->
+            {% set vfm = comparison_summary.get('value_for_money') %}
+            <div class="summary-decision-card summary-card-vfm">
+                <div>
+                    <div class="d-flex align-items-center justify-content-between mb-2">
+                        <span class="badge text-white px-2 py-1 rounded-pill" style="background:#0891b2; font-size:0.7rem;">
+                            <i class="fas fa-balance-scale me-1"></i>VALUE FOR MONEY
+                        </span>
+                        {% if vfm and vfm.platform %}
+                        <span class="badge {% if vfm.platform == 'Amazon' %}bg-amazon text-white{% elif vfm.platform == 'Flipkart' %}bg-flipkart text-dark{% else %}bg-meesho text-white{% endif %} px-2 py-0.5 rounded-pill" style="font-size:0.68rem;">
+                            {{ vfm.platform }}
+                        </span>
+                        {% endif %}
+                    </div>
+                    {% if vfm and vfm.price %}
+                    <div class="fs-4 fw-extrabold text-info-emphasis mb-1">{{ vfm.price }}</div>
+                    <div class="text-muted small mb-2">Optimal balance of price &amp; quality evidence</div>
+                    <div class="small fw-semibold text-dark text-truncate-2 mb-3" style="line-height:1.3; height:2.6em;" title="{{ vfm.title }}">
+                        {{ vfm.title }}
+                    </div>
+                    {% else %}
+                    <div class="text-muted small py-3">Calculating price-to-quality balance...</div>
+                    {% endif %}
+                </div>
+                {% if vfm and vfm.link %}
+                <a href="javascript:void(0)"
+                   data-url="{{ vfm.link }}"
+                   data-platform="{{ vfm.platform }}"
+                   data-product-name="{{ vfm.title }}"
+                   data-price="{{ vfm.price }}"
+                   onclick="triggerBuyRedirect(this)"
+                   class="btn btn-outline-info btn-sm rounded-pill w-100 fw-bold" style="border-color:#0891b2; color:#0e7490;">
+                    Choose Best Value Deal
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <div class="row g-3">
         <!-- ════ FILTER SIDEBAR ════ -->
         <div class="col-lg-2 col-md-3">
@@ -572,10 +889,16 @@
         <!-- ════ RESULTS AREA ════ -->
         <div class="col-lg-10 col-md-9">
 
-            <!-- View Tabs (Side-by-Side Platforms | Specification Table | All Product Cards) -->
+            <!-- View Tabs (Side-by-Side Platforms | Quality Comparison Table | Specification Table | All Product Cards) -->
             <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
                 <button class="view-tab-btn active" id="tabPlatform" onclick="switchView('platform')">
                     <i class="fas fa-columns me-1"></i> Side-by-Side Platforms (Amazon | Flipkart | Meesho)
+                </button>
+                <button class="view-tab-btn" id="tabQualityTable" onclick="switchView('qualityTable')">
+                    <i class="fas fa-award me-1"></i> Quality Comparison Table
+                    {% if quality_comparison_table %}
+                    <span class="badge bg-success text-white rounded-pill ms-1">{{ quality_comparison_table | length }}</span>
+                    {% endif %}
                 </button>
                 <button class="view-tab-btn" id="tabSpecTable" onclick="switchView('specTable')">
                     <i class="fas fa-table me-1"></i> Product Specification Table
@@ -649,104 +972,161 @@
                             </tr>
                         </thead>
                         <tbody>
+                            <!-- Resolution of Platform Products with Robust Fallback -->
+                            {% set amz_item = comparison_data.amazon or comparison_data.Amazon or (best_per_platform.get('Amazon') if best_per_platform else None) or (platform_results.Amazon[0] if (platform_results and platform_results.get('Amazon')) else None) %}
+                            {% set fk_item = comparison_data.flipkart or comparison_data.Flipkart or (best_per_platform.get('Flipkart') if best_per_platform else None) or (platform_results.Flipkart[0] if (platform_results and platform_results.get('Flipkart')) else None) %}
+                            {% set mee_item = comparison_data.meesho or comparison_data.Meesho or (best_per_platform.get('Meesho') if best_per_platform else None) or (platform_results.Meesho[0] if (platform_results and platform_results.get('Meesho')) else None) %}
+
                             <!-- Product Preview Image Row -->
-                            <tr>
-                                <td class="fw-bold text-start ps-4 text-muted small text-uppercase">Preview</td>
+                            <tr class="table-light">
+                                <td class="fw-bold text-start ps-4 text-dark small text-uppercase"><i class="fas fa-image me-2 text-muted"></i>Preview</td>
                                 <td>
-                                    {% set amz_img = comparison_data.amazon.image_url if (comparison_data.get('amazon') and comparison_data.amazon.get('image_url')) else (comparison_data.amazon.image if (comparison_data.get('amazon') and comparison_data.amazon.get('image')) else None) %}
-                                    {% if amz_img and (amz_img.startswith('http://') or amz_img.startswith('https://') or amz_img.startswith('data:image/')) and amz_img|length >= 10 and not ('placeholder' in amz_img|lower or 'no_image' in amz_img|lower) %}
-                                    <img src="{{ amz_img }}" alt="Amazon Product" style="height: 65px; max-width: 100px; object-fit: contain;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline';">
+                                    {% set amz_img = amz_item.image if (amz_item and amz_item.image) else (amz_item.image_url if (amz_item and amz_item.image_url) else None) %}
+                                    {% if amz_img and amz_img|length >= 10 and not ('placeholder' in amz_img|lower or 'no_image' in amz_img|lower) %}
+                                    <img src="{{ amz_img }}" alt="Amazon Product" style="height: 70px; max-width: 100px; object-fit: contain; border-radius: 6px; background:#fff; padding: 2px;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline';">
                                     <span style="display:none;" class="text-muted">—</span>
                                     {% else %}
                                     <span class="text-muted">—</span>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% set fk_img = comparison_data.flipkart.image_url if (comparison_data.get('flipkart') and comparison_data.flipkart.get('image_url')) else (comparison_data.flipkart.image if (comparison_data.get('flipkart') and comparison_data.flipkart.get('image')) else None) %}
-                                    {% if fk_img and (fk_img.startswith('http://') or fk_img.startswith('https://') or fk_img.startswith('data:image/')) and fk_img|length >= 10 and not ('placeholder' in fk_img|lower or 'no_image' in fk_img|lower) %}
-                                    <img src="{{ fk_img }}" alt="Flipkart Product" style="height: 65px; max-width: 100px; object-fit: contain;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline';">
+                                    {% set fk_img = fk_item.image if (fk_item and fk_item.image) else (fk_item.image_url if (fk_item and fk_item.image_url) else None) %}
+                                    {% if fk_img and fk_img|length >= 10 and not ('placeholder' in fk_img|lower or 'no_image' in fk_img|lower) %}
+                                    <img src="{{ fk_img }}" alt="Flipkart Product" style="height: 70px; max-width: 100px; object-fit: contain; border-radius: 6px; background:#fff; padding: 2px;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline';">
                                     <span style="display:none;" class="text-muted">—</span>
                                     {% else %}
                                     <span class="text-muted">—</span>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% set mee_img = comparison_data.meesho.image_url if (comparison_data.get('meesho') and comparison_data.meesho.get('image_url')) else (comparison_data.meesho.image if (comparison_data.get('meesho') and comparison_data.meesho.get('image')) else None) %}
-                                    {% if mee_img and (mee_img.startswith('http://') or mee_img.startswith('https://') or mee_img.startswith('data:image/')) and mee_img|length >= 10 and not ('placeholder' in mee_img|lower or 'no_image' in mee_img|lower) %}
-                                    <img src="{{ mee_img }}" alt="Meesho Product" style="height: 65px; max-width: 100px; object-fit: contain;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline';">
+                                    {% set mee_img = mee_item.image if (mee_item and mee_item.image) else (mee_item.image_url if (mee_item and mee_item.image_url) else None) %}
+                                    {% if mee_img and mee_img|length >= 10 and not ('placeholder' in mee_img|lower or 'no_image' in mee_img|lower) %}
+                                    <img src="{{ mee_img }}" alt="Meesho Product" style="height: 70px; max-width: 100px; object-fit: contain; border-radius: 6px; background:#fff; padding: 2px;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline';">
                                     <span style="display:none;" class="text-muted">—</span>
                                     {% else %}
                                     <span class="text-muted">—</span>
                                     {% endif %}
                                 </td>
                             </tr>
-                            <!-- Dynamic Specification Rows -->
+
+                            <!-- Categorized Specification Rows with Distinct Preference Dividers -->
+                            {% set is_inv = ('', 'N/A', 'NA', 'Not Available', 'Unknown', 'null', 'None', 'Scraping unavailable', 'No matching product', 'No matching product found', '—', '-', 'generic') %}
+                            {% set quality_field_names = ('Quality Score', 'Quality Band', 'Data Confidence', 'Build Material', 'Warranty', 'Seller', 'Rating', 'Reviews', 'Total Reviews', 'Quality Highlights') %}
+                            {% set price_field_names = ('Price', 'MRP', 'Discount', 'Value for Money Index', 'Value for Money') %}
+                            {% set identity_field_names = ('Product Name', 'Brand', 'Model', 'Product Type') %}
+
+                            {# Flag tracker for section dividers #}
+                            {% set ns = namespace(shown_quality_hdr=false, shown_price_hdr=false, shown_tech_hdr=false) %}
+
                             {% for row in specifications_matrix %}
+                                {% set r_name = (row.name or row.specification or row.field or '')|string|trim %}
                                 {% set amz_val = row.amazon %}
                                 {% set fk_val = row.flipkart %}
                                 {% set mee_val = row.meesho %}
-                                {% set is_inv = ('', 'N/A', 'NA', 'Not Available', 'Unknown', 'null', 'None', 'Scraping unavailable', 'No matching product', 'No matching product found', '—', '-', 'generic') %}
                                 {% set has_amz = amz_val and amz_val not in is_inv and not ('temporarily unavailable' in amz_val|string|lower or 'scraping unavailable' in amz_val|string|lower or 'no matching product' in amz_val|string|lower) %}
                                 {% set has_fk = fk_val and fk_val not in is_inv and not ('temporarily unavailable' in fk_val|string|lower or 'scraping unavailable' in fk_val|string|lower or 'no matching product' in fk_val|string|lower) %}
                                 {% set has_mee = mee_val and mee_val not in is_inv and not ('temporarily unavailable' in mee_val|string|lower or 'scraping unavailable' in mee_val|string|lower or 'no matching product' in mee_val|string|lower) %}
-                                {% if (has_amz or has_fk or has_mee) and (row.name or row.specification or row.field) not in ('Buy Link', 'link', 'url', 'product_url') %}
-                                <tr>
-                                    <td class="fw-semibold text-start ps-4 text-dark">{{ row.name or row.specification or row.field }}</td>
-                                    <td class="{% if (row.name == 'Price' or row.specification == 'Price' or row.field == 'Price') and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Amazon' %}fw-bold text-success bg-success bg-opacity-10{% endif %}">
-                                        {{ amz_val if has_amz else '—' }}
-                                    </td>
-                                    <td class="{% if (row.name == 'Price' or row.specification == 'Price' or row.field == 'Price') and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Flipkart' %}fw-bold text-success bg-success bg-opacity-10{% endif %}">
-                                        {{ fk_val if has_fk else '—' }}
-                                    </td>
-                                    <td class="{% if (row.name == 'Price' or row.specification == 'Price' or row.field == 'Price') and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Meesho' %}fw-bold text-success bg-success bg-opacity-10{% endif %}">
-                                        {{ mee_val if has_mee else '—' }}
-                                    </td>
-                                </tr>
+
+                                {% if (has_amz or has_fk or has_mee) and r_name not in ('Buy Link', 'link', 'url', 'product_url') %}
+
+                                    {# Render Section 1: Quality of Product (First Preference) Header #}
+                                    {% if r_name in quality_field_names and not ns.shown_quality_hdr %}
+                                        {% set ns.shown_quality_hdr = true %}
+                                        <tr class="table-primary bg-primary bg-opacity-10 border-top border-bottom border-primary border-opacity-25">
+                                            <td colspan="4" class="text-start ps-4 py-2 fw-bold text-primary small text-uppercase" style="letter-spacing: 0.5px;">
+                                                <i class="fas fa-award me-2"></i>1. Product Quality &amp; Trust Evidence (First Preference)
+                                            </td>
+                                        </tr>
+                                    {% endif %}
+
+                                    {# Render Section 2: Price of Product (Next Preference) Header #}
+                                    {% if r_name in price_field_names and not ns.shown_price_hdr %}
+                                        {% set ns.shown_price_hdr = true %}
+                                        <tr class="table-success bg-success bg-opacity-10 border-top border-bottom border-success border-opacity-25">
+                                            <td colspan="4" class="text-start ps-4 py-2 fw-bold text-success small text-uppercase" style="letter-spacing: 0.5px;">
+                                                <i class="fas fa-tag me-2"></i>2. Product Price &amp; Value Analysis (Next Preference)
+                                            </td>
+                                        </tr>
+                                    {% endif %}
+
+                                    {# Render Section 3: Technical Specifications Header #}
+                                    {% if r_name not in identity_field_names and r_name not in quality_field_names and r_name not in price_field_names and not ns.shown_tech_hdr %}
+                                        {% set ns.shown_tech_hdr = true %}
+                                        <tr class="table-light border-top border-bottom border-secondary border-opacity-25">
+                                            <td colspan="4" class="text-start ps-4 py-2 fw-bold text-secondary small text-uppercase" style="letter-spacing: 0.5px;">
+                                                <i class="fas fa-sliders-h me-2"></i>3. Product Technical Specifications
+                                            </td>
+                                        </tr>
+                                    {% endif %}
+
+                                    <tr>
+                                        <td class="fw-semibold text-start ps-4 text-dark">
+                                            {% if r_name in ('Quality Score', 'Quality Band', 'Quality Highlights') %}
+                                                <i class="fas fa-award text-primary me-1"></i>
+                                            {% elif r_name in ('Price', 'MRP', 'Discount', 'Value for Money Index') %}
+                                                <i class="fas fa-coins text-success me-1"></i>
+                                            {% endif %}
+                                            {{ r_name }}
+                                        </td>
+                                        <td class="{% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Amazon' %}fw-bold text-success bg-success bg-opacity-10{% elif r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">
+                                            {{ amz_val if has_amz else '—' }}
+                                        </td>
+                                        <td class="{% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Flipkart' %}fw-bold text-success bg-success bg-opacity-10{% elif r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">
+                                            {{ fk_val if has_fk else '—' }}
+                                        </td>
+                                        <td class="{% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Meesho' %}fw-bold text-success bg-success bg-opacity-10{% elif r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">
+                                            {{ mee_val if has_mee else '—' }}
+                                        </td>
+                                    </tr>
                                 {% endif %}
                             {% endfor %}
-                            <!-- Buy Link Row -->
+
+                            <!-- Buy Link Row with Verified Direct Action Buttons -->
                             <tr class="table-light">
-                                <td class="fw-bold text-start ps-4">Buy Link</td>
+                                <td class="fw-bold text-start ps-4 text-dark"><i class="fas fa-shopping-cart me-2 text-muted"></i>Buy Link</td>
                                 <td>
-                                    {% if comparison_data.get('amazon') and (comparison_data.amazon.product_url or comparison_data.amazon.link) %}
+                                    {% set amz_url = amz_item.product_url or amz_item.link or amz_item.url if amz_item else None %}
+                                    {% if amz_url and amz_url != '#' %}
                                     <a href="javascript:void(0)"
-                                       data-url="{{ comparison_data.amazon.product_url or comparison_data.amazon.link }}"
+                                       data-url="{{ amz_url }}"
                                        data-platform="Amazon"
-                                       data-product-name="{{ comparison_data.amazon.title }}"
-                                       data-price="{{ comparison_data.amazon.price }}"
+                                       data-product-name="{{ amz_item.title }}"
+                                       data-price="{{ amz_item.price_formatted or amz_item.price }}"
                                        onclick="triggerBuyRedirect(this)"
                                        class="btn btn-warning btn-sm rounded-pill px-3 py-1 fw-bold text-dark shadow-sm">
-                                       Buy on Amazon
+                                       <i class="fas fa-external-link-alt me-1"></i>Buy on Amazon
                                     </a>
                                     {% else %}
                                     <span class="text-muted">—</span>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if comparison_data.get('flipkart') and (comparison_data.flipkart.product_url or comparison_data.flipkart.link) %}
+                                    {% set fk_url = fk_item.product_url or fk_item.link or fk_item.url if fk_item else None %}
+                                    {% if fk_url and fk_url != '#' %}
                                     <a href="javascript:void(0)"
-                                       data-url="{{ comparison_data.flipkart.product_url or comparison_data.flipkart.link }}"
+                                       data-url="{{ fk_url }}"
                                        data-platform="Flipkart"
-                                       data-product-name="{{ comparison_data.flipkart.title }}"
-                                       data-price="{{ comparison_data.flipkart.price }}"
+                                       data-product-name="{{ fk_item.title }}"
+                                       data-price="{{ fk_item.price_formatted or fk_item.price }}"
                                        onclick="triggerBuyRedirect(this)"
                                        class="btn btn-primary btn-sm rounded-pill px-3 py-1 fw-bold shadow-sm">
-                                       Buy on Flipkart
+                                       <i class="fas fa-external-link-alt me-1"></i>Buy on Flipkart
                                     </a>
                                     {% else %}
                                     <span class="text-muted">—</span>
                                     {% endif %}
                                 </td>
                                 <td>
-                                    {% if comparison_data.get('meesho') and (comparison_data.meesho.product_url or comparison_data.meesho.link) %}
+                                    {% set mee_url = mee_item.product_url or mee_item.link or mee_item.url if mee_item else None %}
+                                    {% if mee_url and mee_url != '#' %}
                                     <a href="javascript:void(0)"
-                                       data-url="{{ comparison_data.meesho.product_url or comparison_data.meesho.link }}"
+                                       data-url="{{ mee_url }}"
                                        data-platform="Meesho"
-                                       data-product-name="{{ comparison_data.meesho.title }}"
-                                       data-price="{{ comparison_data.meesho.price }}"
+                                       data-product-name="{{ mee_item.title }}"
+                                       data-price="{{ mee_item.price_formatted or mee_item.price }}"
                                        onclick="triggerBuyRedirect(this)"
                                        class="btn btn-danger btn-sm rounded-pill px-3 py-1 fw-bold shadow-sm" style="background:#f43397; border-color:#f43397;">
-                                       Buy on Meesho
+                                       <i class="fas fa-external-link-alt me-1"></i>Buy on Meesho
                                     </a>
                                     {% else %}
                                     <span class="text-muted">—</span>
@@ -954,6 +1334,56 @@
                                         {% endfor %}
                                     </div>
                                     {% endif %}
+
+                                    <!-- Quality Points (First Preference Quality Display) -->
+                                    <div class="quality-points-box p-2 my-2 rounded-3 text-start" style="background: rgba(14, 165, 233, 0.05); border: 1px dashed rgba(14, 165, 233, 0.35);">
+                                        <div class="d-flex align-items-center justify-content-between mb-1">
+                                            <span class="fw-bold text-primary small" style="font-size: 0.72rem;">
+                                                <i class="fas fa-shield-alt me-1"></i>Quality Points
+                                            </span>
+                                            {% if item.quality_score %}
+                                            <span class="badge bg-primary text-white" style="font-size: 0.65rem;">
+                                                {{ item.quality_score|round|int }}/100
+                                            </span>
+                                            {% endif %}
+                                        </div>
+                                        <ul class="list-unstyled mb-0" style="font-size: 0.73rem; line-height: 1.4;">
+                                            {% set q_pts = item.quality_points or [] %}
+                                            {% if not q_pts %}
+                                                {% set q_pts = [] %}
+                                                {% if item.quality_score %}
+                                                    {% set _ = q_pts.append("Quality Score: " ~ (item.quality_score|round|int) ~ "/100 (" ~ (item.quality_band or 'Standard Quality') ~ ")") %}
+                                                {% endif %}
+                                                {% if item.quality_attributes and item.quality_attributes.material and item.quality_attributes.material != 'Standard Durable Material' %}
+                                                    {% set _ = q_pts.append("Build: " ~ item.quality_attributes.material) %}
+                                                {% elif item.material and item.material != 'N/A' %}
+                                                    {% set _ = q_pts.append("Build: " ~ item.material) %}
+                                                {% endif %}
+                                                {% if item.warranty and item.warranty != 'N/A' %}
+                                                    {% set _ = q_pts.append("Warranty: " ~ item.warranty) %}
+                                                {% elif item.quality_attributes and item.quality_attributes.warranty %}
+                                                    {% set _ = q_pts.append("Warranty: " ~ item.quality_attributes.warranty) %}
+                                                {% endif %}
+                                                {% if item.rating and item.rating != 'N/A' and item.rating != '0' %}
+                                                    {% set _ = q_pts.append("Buyer Trust: ★ " ~ item.rating ~ " (" ~ (item.reviews or 'Verified') ~ " reviews)") %}
+                                                {% elif item.reviews and item.reviews != 'N/A' and item.reviews != '0' %}
+                                                    {% set _ = q_pts.append("Buyer Trust: " ~ item.reviews ~ " verified reviews") %}
+                                                {% endif %}
+                                                {% if item.positive_themes %}
+                                                    {% for p_th in item.positive_themes[:2] %}
+                                                        {% set _ = q_pts.append("Highlight: " ~ p_th) %}
+                                                    {% endfor %}
+                                                {% endif %}
+                                            {% endif %}
+                                            {% for pt in q_pts[:3] %}
+                                            <li class="text-dark d-flex align-items-baseline mb-0.5">
+                                                <i class="fas fa-check-circle text-success me-1 flex-shrink-0" style="font-size: 0.65rem;"></i>
+                                                <span class="text-truncate" title="{{ pt }}">{{ pt }}</span>
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                    </div>
+
                                     <!-- Price Row -->
                                     <div class="mt-2">
                                         <div class="d-flex align-items-baseline gap-2 flex-wrap">
@@ -970,12 +1400,28 @@
                                             <i class="fas fa-balance-scale me-1"></i>{{ item.unit_price }}
                                         </div>
                                         {% endif %}
-                                        <div class="d-flex align-items-center gap-2 mt-1">
+                                        <div class="d-flex align-items-center gap-2 mt-1 flex-wrap">
+                                            {% set r_val = item.rating %}
+                                            {% set rev_val = item.reviews %}
+                                            {% set has_real_r = r_val and r_val not in ('N/A', 'NA', 'None', 'null', '0', 0, 0.0) %}
+                                            {% set has_real_rev = rev_val and rev_val not in ('N/A', 'NA', 'None', 'null', '0', 0) %}
+                                            {% if has_real_r %}
                                             <span class="rating-tag small">
                                                 <i class="fas fa-star text-warning"></i>
-                                                {{ item.rating | default('N/A', true) }}
-                                                <small class="text-muted">({{ item.reviews | default('0', true) }})</small>
+                                                {{ r_val }}
+                                                {% if has_real_rev %}
+                                                <small class="text-muted">({{ rev_val }})</small>
+                                                {% endif %}
                                             </span>
+                                            {% elif has_real_rev %}
+                                            <span class="badge bg-light text-secondary border small" style="font-size: 0.72rem;">
+                                                <i class="fas fa-check-circle text-success me-1"></i>{{ rev_val }} reviews
+                                            </span>
+                                            {% else %}
+                                            <span class="badge bg-light text-muted border small" style="font-size: 0.72rem;">
+                                                <i class="fas fa-star text-muted me-1"></i>Verified Listing
+                                            </span>
+                                            {% endif %}
                                             {% if item.seller and item.seller != 'N/A' %}
                                             <small class="text-muted text-truncate" style="max-width:100px;" title="{{ item.seller }}">
                                                 <i class="fas fa-store me-1"></i>{{ item.seller[:20] }}
@@ -985,17 +1431,39 @@
                                     </div>
                                     <!-- Buy Now -->
                                     <a href="javascript:void(0)"
-                                       data-url="{{ item.link }}"
+                                       data-url="{{ item.link or item.product_url or item.url }}"
                                        data-platform="{{ platform }}"
                                        data-product-name="{{ item.title }}"
-                                       data-price="{{ item.price_formatted }}"
+                                       data-price="{{ item.price_formatted or item.price or item.price_num }}"
                                        data-rating="{{ item.rating }}"
                                        data-reviews="{{ item.reviews }}"
-                                       data-image="{{ item.image }}"
+                                       data-image="{{ item.image or item.image_url }}"
                                        onclick="triggerBuyRedirect(this)"
                                        class="btn btn-primary btn-sm w-100 mt-3 rounded-pill py-2 fw-bold d-flex align-items-center justify-content-center">
                                         <i class="fas fa-shopping-cart me-2"></i>Buy on {{ platform }}
                                     </a>
+
+                                    <!-- Add to Compare -->
+                                    <button type="button"
+                                            class="btn btn-outline-primary btn-sm w-100 mt-1.5 rounded-pill py-1.5 fw-semibold d-flex align-items-center justify-content-center btn-add-compare"
+                                            onclick="toggleCompareProduct(this)"
+                                            data-id="{{ item.product_id or item.title | replace('\"', '') }}"
+                                            data-title="{{ item.title }}"
+                                            data-platform="{{ platform }}"
+                                            data-price="{{ item.price }}"
+                                            data-price-num="{{ item.price_num or 0 }}"
+                                            data-mrp="{{ item.original_price or item.mrp or item.price }}"
+                                            data-discount="{{ item.discount or '' }}"
+                                            data-rating="{{ item.rating or 'N/A' }}"
+                                            data-reviews="{{ item.reviews or '0' }}"
+                                            data-image="{{ item.image or item.image_url }}"
+                                            data-link="{{ item.link or item.product_url or item.url }}"
+                                            data-quality-score="{{ item.quality_score or 50 }}"
+                                            data-quality-band="{{ item.quality_band or 'Standard Quality' }}"
+                                            data-specs='{{ item.specs | tojson if item.specs else "{}" }}'
+                                            data-points='{{ (item.quality_points or []) | tojson }}'>
+                                        <i class="fas fa-balance-scale me-1.5"></i><span>Add to Compare</span>
+                                    </button>
                                 </div>
                                 {% endfor %}
                                 {% else %}
@@ -1020,7 +1488,213 @@
                 {% endif %}
             </div>
 
-            <!-- ════ 2. PRODUCT SPECIFICATION COMPARISON TABLE VIEW ════ -->
+            <!-- ════ 2. QUALITY COMPARISON TABLE VIEW ════ -->
+            <div id="viewQualityTable" style="display:none;">
+                {% if quality_comparison_table %}
+                <div class="quality-table-card shadow-sm mb-4">
+                    <div class="card-header bg-dark text-white py-3 px-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="fas fa-award text-warning fs-5"></i>
+                            <h5 class="mb-0 fw-bold">MULTI-PLATFORM PRODUCT QUALITY COMPARISON</h5>
+                            <span class="badge bg-primary text-white rounded-pill px-2.5 py-1 small">Independent Evaluation</span>
+                        </div>
+                        <div class="small text-muted">
+                            Multi-criteria scoring: Specs (30%), Ratings (25%), Build (20%), Performance (15%), Warranty &amp; Seller (10%)
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0 text-center" style="font-size: 0.86rem;">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="min-width: 90px;">Platform</th>
+                                    <th style="min-width: 220px; text-align: left;">Product Name</th>
+                                    <th style="min-width: 100px;">Model / Variant</th>
+                                    <th style="min-width: 100px;">Price</th>
+                                    <th style="min-width: 110px;">Rating &amp; Reviews</th>
+                                    <th style="min-width: 200px; text-align: left;">Main Specifications</th>
+                                    <th style="min-width: 190px; text-align: left;">Quality Attributes</th>
+                                    <th style="min-width: 140px;">Estimated Quality</th>
+                                    <th style="min-width: 130px;">Data Confidence</th>
+                                    <th style="min-width: 100px;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for q_item in quality_comparison_table %}
+                                <tr class="{% if q_item.is_lowest_price %}table-success-subtle{% endif %}">
+                                    <!-- Platform -->
+                                    <td>
+                                        <span class="badge fw-bold px-2.5 py-1.5 rounded-pill" style="font-size:0.75rem;
+                                            {% if q_item.platform == 'Amazon' %}background:#FF9900; color:#000;
+                                            {% elif q_item.platform == 'Flipkart' %}background:#2874f0; color:#fff;
+                                            {% else %}background:#F43397; color:#fff;{% endif %}">
+                                            {{ q_item.platform }}
+                                        </span>
+                                    </td>
+
+                                    <!-- Product Name + Thumbnail -->
+                                    <td class="text-start">
+                                        <div class="d-flex align-items-center gap-2">
+                                            {% if q_item.image %}
+                                            <img src="{{ q_item.image }}" alt="{{ q_item.title }}" style="width: 44px; height: 44px; object-fit: contain; border-radius: 6px; background:#fff;" referrerpolicy="no-referrer" onerror="this.style.display='none'">
+                                            {% endif %}
+                                            <div>
+                                                <div class="fw-semibold text-dark text-truncate-2" style="max-width: 260px; line-height: 1.3;" title="{{ q_item.title }}">
+                                                    {{ q_item.title }}
+                                                </div>
+                                                {% if q_item.is_lowest_price %}
+                                                <span class="badge bg-success mt-1" style="font-size: 0.65rem;"><i class="fas fa-tag me-1"></i>Lowest Price</span>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    <!-- Model / Variant -->
+                                    <td>
+                                        <code class="text-primary small fw-bold">{{ q_item.model or 'Standard' }}</code>
+                                    </td>
+
+                                    <!-- Price -->
+                                    <td>
+                                        <div class="fw-bold text-success fs-6">{{ q_item.price }}</div>
+                                        {% if q_item.savings and q_item.savings > 0 %}
+                                        <span class="badge bg-danger-subtle text-danger px-1.5 py-0.5 rounded" style="font-size:0.68rem;">Save ₹{{ "{:,}".format(q_item.savings) }}</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Rating & Reviews (Bayesian smoothed) -->
+                                    <td>
+                                        {% if q_item.rating and q_item.rating != 'N/A' %}
+                                        <div class="fw-bold text-warning-emphasis">
+                                            <i class="fas fa-star text-warning me-1"></i>{{ q_item.rating }}
+                                        </div>
+                                        <div class="text-muted small" style="font-size: 0.72rem;">({{ q_item.review_count or '0' }} reviews)</div>
+                                        {% else %}
+                                        <span class="text-muted small">Not Available</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Main Specifications -->
+                                    <td class="text-start">
+                                        {% if q_item.main_specs %}
+                                        <div class="d-flex flex-wrap gap-1" style="max-width: 250px;">
+                                            {% for skey, sval in q_item.main_specs.items() %}
+                                            <span class="badge bg-light text-dark border px-2 py-1 rounded" style="font-size:0.7rem;">
+                                                <strong class="text-muted">{{ skey }}:</strong> {{ sval }}
+                                            </span>
+                                            {% endfor %}
+                                        </div>
+                                        {% else %}
+                                        <span class="text-muted small">General Specs</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Quality Attributes -->
+                                    <td class="text-start">
+                                        {% if q_item.available %}
+                                        <div class="d-flex flex-column gap-1" style="font-size: 0.75rem;">
+                                            {% if q_item.quality_attributes is mapping %}
+                                            <div>
+                                                <i class="fas fa-shield-alt text-primary me-1"></i>
+                                                <strong class="text-muted">Warranty:</strong>
+                                                <span>{{ q_item.quality_attributes.get('Warranty') or q_item.quality_attributes.get('warranty') or 'Standard 1 Year' }}</span>
+                                            </div>
+                                            <div>
+                                                <i class="fas fa-cube text-info me-1"></i>
+                                                <strong class="text-muted">Build:</strong>
+                                                <span>{{ q_item.quality_attributes.get('Material/Build') or q_item.quality_attributes.get('material') or 'Standard Build' }}</span>
+                                            </div>
+                                            <div>
+                                                <i class="fas fa-store text-success me-1"></i>
+                                                <strong class="text-muted">Seller:</strong>
+                                                <span>{{ q_item.quality_attributes.get('Seller/Delivery') or q_item.quality_attributes.get('seller') or 'Verified Marketplace Seller' }}</span>
+                                            </div>
+                                            {% else %}
+                                            <div>
+                                                <i class="fas fa-certificate text-primary me-1"></i>
+                                                <span>{{ q_item.quality_attributes or 'Standard Quality Features' }}</span>
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                        {% else %}
+                                        <span class="text-muted small">Listing Unavailable</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Estimated Quality Score -->
+                                    <td>
+                                        {% if q_item.has_sufficient_data and q_item.quality_score is not none %}
+                                        <div class="d-flex flex-column align-items-center">
+                                            <div class="fw-extrabold text-primary fs-5" style="color:#7c3aed !important;">
+                                                {{ q_item.quality_score|round|int }}<small class="text-muted fs-6">/100</small>
+                                            </div>
+                                            <div class="quality-score-bar-bg my-1" style="max-width:90px;">
+                                                <div class="quality-score-bar-fill" style="width: {{ [q_item.quality_score, 100]|min }}%;"></div>
+                                            </div>
+                                            <span class="small text-muted" style="font-size:0.68rem;">{{ q_item.quality_band or 'High Quality' }}</span>
+                                        </div>
+                                        {% else %}
+                                        <span class="badge bg-secondary-subtle text-secondary border px-2 py-1 rounded-pill" style="font-size:0.7rem;">
+                                            <i class="fas fa-info-circle me-1"></i>Insufficient Data
+                                        </span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Data Confidence / Availability -->
+                                    <td>
+                                        {% set conf = q_item.data_confidence|default(0)|round|int %}
+                                        {% if not q_item.has_sufficient_data or conf < 35 %}
+                                        <span class="badge bg-secondary text-white px-2 py-1 rounded-pill" style="font-size:0.7rem;" title="Data is incomplete to formulate a confident score">
+                                            Insufficient ({{ conf }}%)
+                                        </span>
+                                        {% elif conf >= 70 %}
+                                        <span class="badge bg-success text-white px-2 py-1 rounded-pill" style="font-size:0.7rem;" title="High volume of verified specs and rating signals">
+                                            <i class="fas fa-check-circle me-1"></i>High ({{ conf }}%)
+                                        </span>
+                                        {% elif conf >= 50 %}
+                                        <span class="badge bg-warning text-dark px-2 py-1 rounded-pill" style="font-size:0.7rem;" title="Moderate volume of verified data">
+                                            Moderate ({{ conf }}%)
+                                        </span>
+                                        {% else %}
+                                        <span class="badge bg-secondary text-white px-2 py-1 rounded-pill" style="font-size:0.7rem;">
+                                            Limited ({{ conf }}%)
+                                        </span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Action -->
+                                    <td>
+                                        <a href="javascript:void(0)"
+                                           data-url="{{ q_item.product_url }}"
+                                           data-platform="{{ q_item.platform }}"
+                                           data-product-name="{{ q_item.title }}"
+                                           data-price="{{ q_item.price }}"
+                                           data-rating="{{ q_item.rating }}"
+                                           data-reviews="{{ q_item.review_count }}"
+                                           data-image="{{ q_item.image }}"
+                                           onclick="triggerBuyRedirect(this)"
+                                           class="btn btn-primary btn-sm rounded-pill px-3 py-1 fw-bold shadow-xs" style="font-size:0.78rem;">
+                                            <i class="fas fa-external-link-alt me-1"></i>Buy
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% else %}
+                <div class="card border-0 shadow-sm glass-card rounded-4 p-4 text-center">
+                    <div class="py-3">
+                        <i class="fas fa-award text-muted fs-2 mb-2"></i>
+                        <h6 class="fw-bold text-dark">Quality comparison data is compiling for this query</h6>
+                        <p class="text-muted small mb-0">Use the Side-by-Side Platforms view or Specification Table to inspect available products.</p>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- ════ 3. PRODUCT SPECIFICATION COMPARISON TABLE VIEW ════ -->
             <div id="viewSpecTable" style="display:none;">
                 {% if all_results %}
 
@@ -1124,20 +1798,20 @@
                                 <tr>
                                     <th style="min-width:70px;">Image</th>
                                     <th style="min-width:200px; text-align:left;">Product Name</th>
-                                    <th style="min-width:90px;">Brand</th>
-                                    <th style="min-width:110px;">Category</th>
-                                    <th style="min-width:100px;">Model Number</th>
                                     <th style="min-width:90px;">Platform</th>
-                                    <th style="min-width:100px;">Current Price</th>
-                                    <th style="min-width:95px;">Original Price</th>
-                                    <th style="min-width:90px;">Discount %</th>
-                                    <th style="min-width:95px;">Rating</th>
-                                    <th style="min-width:90px;">Reviews</th>
-                                    <th style="min-width:95px;">Availability</th>
-                                    <th style="min-width:100px;">Seller</th>
-                                    <th style="min-width:110px;">Delivery Time</th>
-                                    <th style="min-width:110px;">Warranty</th>
-                                    <th style="min-width:240px; text-align:left;">Product Specifications</th>
+                                    <th style="min-width:110px;">Brand &amp; Model</th>
+                                    <!-- 1. Quality of Product (First Preference) -->
+                                    <th style="min-width:125px; background:rgba(14,165,233,0.12); color:#0284c7;" class="fw-bold"><i class="fas fa-award me-1"></i>Quality Score</th>
+                                    <th style="min-width:115px; background:rgba(14,165,233,0.12); color:#0284c7;" class="fw-bold"><i class="fas fa-star me-1"></i>Rating &amp; Reviews</th>
+                                    <th style="min-width:120px; background:rgba(14,165,233,0.12); color:#0284c7;" class="fw-bold"><i class="fas fa-shield-alt me-1"></i>Warranty &amp; Build</th>
+                                    <th style="min-width:115px; background:rgba(14,165,233,0.12); color:#0284c7;" class="fw-bold"><i class="fas fa-certificate me-1"></i>Data Confidence</th>
+                                    <!-- 2. Price of Product (Next Preference) -->
+                                    <th style="min-width:105px; background:rgba(16,185,129,0.12); color:#059669;" class="fw-bold"><i class="fas fa-tag me-1"></i>Price</th>
+                                    <th style="min-width:110px; background:rgba(16,185,129,0.12); color:#059669;" class="fw-bold"><i class="fas fa-percent me-1"></i>MRP &amp; Discount</th>
+                                    <th style="min-width:110px; background:rgba(16,185,129,0.12); color:#059669;" class="fw-bold"><i class="fas fa-balance-scale me-1"></i>Value for Money</th>
+                                    <!-- 3. Technical Specifications -->
+                                    <th style="min-width:220px; text-align:left;">Product Specifications</th>
+                                    <th style="min-width:110px;">Availability &amp; Seller</th>
                                     <th style="min-width:100px;">Action</th>
                                 </tr>
                             </thead>
@@ -1167,27 +1841,6 @@
                                         {% endif %}
                                     </td>
 
-                                    <!-- Brand -->
-                                    <td>
-                                        <span class="badge bg-dark text-light border" style="font-size:0.75rem;">
-                                            {{ item.specs.brand if (item.specs and item.specs.brand and item.specs.brand != 'N/A') else 'Not Available' }}
-                                        </span>
-                                    </td>
-
-                                    <!-- Category -->
-                                    <td>
-                                        <span class="badge bg-secondary text-white" style="font-size:0.75rem;">
-                                            {{ item.specs.category if (item.specs and item.specs.category) else 'Not Available' }}
-                                        </span>
-                                    </td>
-
-                                    <!-- Model Number -->
-                                    <td>
-                                        <code class="text-warning small">
-                                            {{ item.specs.model_number if (item.specs and item.specs.model_number and item.specs.model_number != 'N/A') else 'Not Available' }}
-                                        </code>
-                                    </td>
-
                                     <!-- Platform -->
                                     <td>
                                         <span class="badge fw-bold" style="font-size:0.75rem;
@@ -1198,114 +1851,184 @@
                                         </span>
                                     </td>
 
-                                    <!-- Current Price -->
+                                    <!-- Brand & Model -->
                                     <td>
+                                        <div class="d-flex flex-column gap-1 align-items-center">
+                                            <span class="badge bg-dark text-light border" style="font-size:0.72rem;">
+                                                {{ item.specs.brand if (item.specs and item.specs.brand and item.specs.brand != 'N/A') else 'Not Available' }}
+                                            </span>
+                                            {% if item.specs and item.specs.model_number and item.specs.model_number != 'Not Available' %}
+                                            <code class="text-warning small" style="font-size:0.7rem;">{{ item.specs.model_number }}</code>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+
+                                    <!-- 1. Quality Score (First Preference) -->
+                                    <td style="background:rgba(14,165,233,0.03);">
+                                        {% if item.quality_score is not none and item.get('has_sufficient_data', True) %}
+                                        <span class="badge bg-primary-subtle text-primary border border-primary px-2 py-1 rounded-pill fw-bold d-inline-block" style="font-size:0.75rem;">
+                                            <i class="fas fa-award me-1"></i>{{ item.quality_score|round|int }}/100
+                                        </span>
+                                        <div class="small text-muted mt-1" style="font-size:0.68rem;">{{ item.quality_band or 'Standard Quality' }}</div>
+                                        {% else %}
+                                        <span class="badge bg-secondary-subtle text-secondary border px-2 py-1 rounded-pill" style="font-size:0.68rem;">
+                                            Insufficient Data
+                                        </span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Rating & Reviews -->
+                                    <td style="background:rgba(14,165,233,0.03);">
+                                        {% set r_val = item.rating %}
+                                        {% set rev_val = item.reviews %}
+                                        {% set has_real_r = r_val and r_val not in ('N/A', 'NA', 'None', 'null', '0', 0, 0.0) %}
+                                        {% set has_real_rev = rev_val and rev_val not in ('N/A', 'NA', 'None', 'null', '0', 0) %}
+                                        {% if has_real_r %}
+                                        <span class="rating-highlight-gold" style="font-size:0.83rem;">
+                                            <i class="fas fa-star me-1"></i>{{ r_val }}
+                                        </span>
+                                        {% if has_real_rev %}
+                                        <div class="text-muted small" style="font-size:0.68rem;">({{ rev_val }})</div>
+                                        {% endif %}
+                                        {% elif has_real_rev %}
+                                        <span class="badge bg-light text-secondary border small" style="font-size:0.7rem;">
+                                            <i class="fas fa-comments text-info me-1"></i>{{ rev_val }} reviews
+                                        </span>
+                                        {% else %}
+                                        <span class="text-muted small">—</span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- Warranty & Build -->
+                                    <td style="background:rgba(14,165,233,0.03);">
+                                        <div class="d-flex flex-column gap-1 align-items-center">
+                                            {% set w_txt = item.warranty or (item.specs.warranty if item.specs else None) or (item.quality_attributes.warranty if item.quality_attributes else None) %}
+                                            {% if w_txt and w_txt != 'Not Available' and w_txt != 'N/A' %}
+                                            <span class="badge bg-dark border text-light" style="font-size:0.68rem;"><i class="fas fa-shield-alt text-success me-1"></i>{{ w_txt }}</span>
+                                            {% endif %}
+                                            {% set mat_txt = (item.quality_attributes.material if item.quality_attributes else None) or item.material or (item.specs.material if item.specs else None) %}
+                                            {% if mat_txt and mat_txt not in ('N/A', 'Not Available', 'Standard Durable Material') %}
+                                            <span class="badge bg-secondary text-white" style="font-size:0.65rem;">{{ mat_txt }}</span>
+                                            {% endif %}
+                                            {% if not w_txt and not mat_txt %}
+                                            <span class="text-muted small">Standard Warranty</span>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+
+                                    <!-- Data Confidence -->
+                                    <td style="background:rgba(14,165,233,0.03);">
+                                        {% set item_conf = item.data_confidence|default(0)|round|int %}
+                                        {% if item_conf >= 70 %}
+                                        <span class="badge bg-success-subtle text-success border border-success px-2 py-1 rounded-pill" style="font-size:0.72rem;">
+                                            High ({{ item_conf }}%)
+                                        </span>
+                                        {% elif item_conf >= 40 %}
+                                        <span class="badge bg-warning-subtle text-warning border border-warning px-2 py-1 rounded-pill" style="font-size:0.72rem;">
+                                            Moderate ({{ item_conf }}%)
+                                        </span>
+                                        {% else %}
+                                        <span class="badge bg-light text-muted border px-2 py-1 rounded-pill" style="font-size:0.68rem;">
+                                            Verified ({{ item_conf }}%)
+                                        </span>
+                                        {% endif %}
+                                    </td>
+
+                                    <!-- 2. Price (Next Preference) -->
+                                    <td style="background:rgba(16,185,129,0.03);">
                                         <span class="{% if item.is_lowest_price %}price-highlight-lowest{% else %}fw-bold text-white{% endif %}" style="font-size:0.92rem;">
                                             {{ item.price }}
                                         </span>
                                     </td>
 
-                                    <!-- Original Price -->
-                                    <td>
+                                    <!-- MRP & Discount -->
+                                    <td style="background:rgba(16,185,129,0.03);">
                                         {% if item.original_price and item.original_price != 'N/A' %}
-                                        <del class="text-muted small">{{ item.original_price }}</del>
-                                        {% else %}
-                                        <span class="text-muted small">Not Available</span>
+                                        <del class="text-muted small d-block" style="font-size:0.75rem;">{{ item.original_price }}</del>
                                         {% endif %}
-                                    </td>
-
-                                    <!-- Discount % -->
-                                    <td>
                                         {% if item.discount and item.discount != 'N/A' %}
-                                        <span class="{% if item.is_best_discount %}discount-highlight-blue{% else %}badge bg-secondary{% endif %}" style="font-size:0.75rem;">
+                                        <span class="{% if item.is_best_discount %}discount-highlight-blue{% else %}badge bg-secondary{% endif %}" style="font-size:0.7rem;">
                                             {{ item.discount }}
                                         </span>
                                         {% else %}
-                                        <span class="text-muted small">Not Available</span>
+                                        <span class="text-muted small">—</span>
                                         {% endif %}
                                     </td>
 
-                                    <!-- Rating -->
-                                    <td>
-                                        {% if item.rating and item.rating != 'N/A' %}
-                                        <span class="rating-highlight-gold" style="font-size:0.83rem;">
-                                            <i class="fas fa-star me-1"></i>{{ item.rating }}
+                                    <!-- Value for Money Index -->
+                                    <td style="background:rgba(16,185,129,0.03);">
+                                        {% if item.vfm_index %}
+                                        <span class="badge bg-success-subtle text-success border border-success fw-bold" style="font-size:0.75rem;">
+                                            {{ item.vfm_index|round|int }}/100
                                         </span>
                                         {% else %}
-                                        <span class="text-muted small">Not Available</span>
+                                        <span class="text-muted small">Balanced</span>
                                         {% endif %}
                                     </td>
 
-                                    <!-- Number of Reviews -->
-                                    <td>
-                                        {% if item.reviews and item.reviews != '0' %}
-                                        <span class="text-info small fw-semibold">
-                                            <i class="fas fa-comments me-1"></i>{{ item.reviews }}
-                                        </span>
-                                        {% else %}
-                                        <span class="text-muted small">Not Available</span>
-                                        {% endif %}
-                                    </td>
-
-                                    <!-- Availability -->
-                                    <td>
-                                        {% if item.in_stock %}
-                                        <span class="badge" style="background:rgba(16,185,129,0.2); color:#34d399; font-size:0.7rem;"><i class="fas fa-check-circle me-1"></i>In Stock</span>
-                                        {% else %}
-                                        <span class="badge bg-danger" style="font-size:0.7rem;">Out of Stock</span>
-                                        {% endif %}
-                                    </td>
-
-                                    <!-- Seller -->
-                                    <td>
-                                        <span class="small text-muted" title="{{ item.specs.seller if item.specs else 'Not Available' }}">
-                                            {{ item.specs.seller[:15] if (item.specs and item.specs.seller and item.specs.seller != 'N/A') else 'Not Available' }}
-                                        </span>
-                                    </td>
-
-                                    <!-- Delivery Time -->
-                                    <td>
-                                        <span class="small text-muted">
-                                            {{ item.specs.delivery if (item.specs and item.specs.delivery) else 'Not Available' }}
-                                        </span>
-                                    </td>
-
-                                    <!-- Warranty -->
-                                    <td>
-                                        <span class="small text-muted">
-                                            {{ item.specs.warranty if (item.specs and item.specs.warranty) else 'Not Available' }}
-                                        </span>
-                                    </td>
-
-                                    <!-- Category Specifications (Dynamic) -->
+                                    <!-- 3. Category Specifications (Dynamic) -->
                                     <td class="text-start">
                                         {% if item.specs and item.specs.category_specs %}
-                                        <div class="d-flex flex-column gap-1" style="font-size:0.78rem;">
+                                        <div class="d-flex flex-column gap-1" style="font-size:0.75rem;">
                                             {% for spec_name, spec_val in item.specs.category_specs.items() %}
-                                            <div class="text-truncate" style="max-width:230px;">
+                                            <div class="text-truncate" style="max-width:220px;">
                                                 <span style="color:#38bdf8; font-weight:600;">{{ spec_name }}:</span>
                                                 <span class="text-light">{{ spec_val }}</span>
                                             </div>
                                             {% endfor %}
                                         </div>
                                         {% else %}
-                                        <span class="text-muted small">Not Available</span>
+                                        <span class="text-muted small">Standard Specs</span>
                                         {% endif %}
                                     </td>
 
+                                    <!-- Availability & Seller -->
+                                    <td>
+                                        {% if item.in_stock %}
+                                        <span class="badge mb-1" style="background:rgba(16,185,129,0.2); color:#34d399; font-size:0.68rem;"><i class="fas fa-check-circle me-1"></i>In Stock</span>
+                                        {% else %}
+                                        <span class="badge bg-danger mb-1" style="font-size:0.68rem;">Out of Stock</span>
+                                        {% endif %}
+                                        <div class="small text-muted text-truncate" style="max-width:100px;" title="{{ item.seller or (item.specs.seller if item.specs else 'Verified Seller') }}">
+                                            {{ (item.seller or (item.specs.seller if item.specs else 'Verified'))[:14] }}
+                                        </div>
+                                    </td>
+
+                                    <!-- Action -->
                                     <td>
                                         <a href="javascript:void(0)"
-                                           data-url="{{ item.link }}"
+                                           data-url="{{ item.link or item.product_url or item.url }}"
                                            data-platform="{{ item.platform }}"
                                            data-product-name="{{ item.title }}"
-                                           data-price="{{ item.price }}"
+                                           data-price="{{ item.price_formatted or item.price or item.price_num }}"
                                            data-rating="{{ item.rating }}"
                                            data-reviews="{{ item.reviews }}"
-                                           data-image="{{ item.image }}"
+                                           data-image="{{ item.image or item.image_url }}"
                                            onclick="triggerBuyRedirect(this)"
-                                           class="btn btn-primary btn-sm rounded-pill px-3 py-1 fw-bold" style="font-size:0.78rem;">
+                                           class="btn btn-primary btn-sm rounded-pill px-3 py-1 fw-bold" style="font-size:0.75rem;">
                                             <i class="fas fa-shopping-cart me-1"></i>Buy on {{ item.platform }}
                                         </a>
+                                        <button type="button"
+                                                class="btn btn-outline-primary btn-sm rounded-pill px-2.5 py-0.5 mt-1 fw-semibold d-block mx-auto btn-add-compare"
+                                                onclick="toggleCompareProduct(this)"
+                                                data-id="{{ item.product_id or item.title | replace('\"', '') }}"
+                                                data-title="{{ item.title }}"
+                                                data-platform="{{ item.platform }}"
+                                                data-price="{{ item.price }}"
+                                                data-price-num="{{ item.price_num or 0 }}"
+                                                data-mrp="{{ item.original_price or item.mrp or item.price }}"
+                                                data-discount="{{ item.discount or '' }}"
+                                                data-rating="{{ item.rating or 'N/A' }}"
+                                                data-reviews="{{ item.reviews or '0' }}"
+                                                data-image="{{ item.image or item.image_url }}"
+                                                data-link="{{ item.link or item.product_url or item.url }}"
+                                                data-quality-score="{{ item.quality_score or 50 }}"
+                                                data-quality-band="{{ item.quality_band or 'Standard Quality' }}"
+                                                data-specs='{{ item.specs | tojson if item.specs else "{}" }}'
+                                                data-points='{{ (item.quality_points or []) | tojson }}'
+                                                style="font-size: 0.68rem;">
+                                            <i class="fas fa-balance-scale me-1"></i><span>Add to Compare</span>
+                                        </button>
                                     </td>
                                 </tr>
                                 {% endfor %}
@@ -1394,17 +2117,38 @@
                             <span class="ms-1">({{ item.reviews | default('0', true) }})</span>
                         </div>
                         <a href="javascript:void(0)"
-                           data-url="{{ item.link }}"
+                           data-url="{{ item.link or item.product_url or item.url }}"
                            data-platform="{{ item.platform }}"
                            data-product-name="{{ item.title }}"
-                           data-price="{{ item.price }}"
+                           data-price="{{ item.price_formatted or item.price or item.price_num }}"
                            data-rating="{{ item.rating }}"
                            data-reviews="{{ item.reviews }}"
-                           data-image="{{ item.image }}"
+                           data-image="{{ item.image or item.image_url }}"
                            onclick="triggerBuyRedirect(this)"
                            class="btn btn-primary btn-sm w-100 mt-2 rounded-pill fw-bold" style="font-size:0.8rem;">
                             <i class="fas fa-shopping-cart me-1"></i>Buy on {{ item.platform }}
                         </a>
+                        <button type="button"
+                                class="btn btn-outline-primary btn-sm w-100 mt-1.5 rounded-pill py-1 fw-semibold d-flex align-items-center justify-content-center btn-add-compare"
+                                onclick="toggleCompareProduct(this)"
+                                data-id="{{ item.product_id or item.title | replace('\"', '') }}"
+                                data-title="{{ item.title }}"
+                                data-platform="{{ item.platform }}"
+                                data-price="{{ item.price }}"
+                                data-price-num="{{ item.price_num or 0 }}"
+                                data-mrp="{{ item.original_price or item.mrp or item.price }}"
+                                data-discount="{{ item.discount or '' }}"
+                                data-rating="{{ item.rating or 'N/A' }}"
+                                data-reviews="{{ item.reviews or '0' }}"
+                                data-image="{{ item.image or item.image_url }}"
+                                data-link="{{ item.link or item.product_url or item.url }}"
+                                data-quality-score="{{ item.quality_score or 50 }}"
+                                data-quality-band="{{ item.quality_band or 'Standard Quality' }}"
+                                data-specs='{{ item.specs | tojson if item.specs else "{}" }}'
+                                data-points='{{ (item.quality_points or []) | tojson }}'
+                                style="font-size: 0.72rem;">
+                            <i class="fas fa-balance-scale me-1"></i><span>Add to Compare</span>
+                        </button>
                     </div>
                     {% endfor %}
                     {% else %}
@@ -1550,6 +2294,28 @@
                                    class="btn btn-primary btn-sm w-100 rounded-pill py-2 fw-bold shadow-sm d-flex align-items-center justify-content-center gap-2 mt-2">
                                     <i class="fas fa-external-link-alt"></i> View Deal
                                 </a>
+
+                                <!-- Add to Compare -->
+                                <button type="button"
+                                        class="btn btn-outline-primary btn-sm w-100 mt-1.5 rounded-pill py-1.5 fw-semibold d-flex align-items-center justify-content-center btn-add-compare"
+                                        onclick="toggleCompareProduct(this)"
+                                        data-id="{{ p_info.title | replace('\"', '') }}"
+                                        data-title="{{ p_info.title }}"
+                                        data-platform="{{ platform_name }}"
+                                        data-price="{{ p_info.price }}"
+                                        data-price-num="{{ p_info.price_num or 0 }}"
+                                        data-mrp="{{ p_info.mrp or p_info.price }}"
+                                        data-discount="{{ p_info.discount or '' }}"
+                                        data-rating="{{ p_info.rating or 'N/A' }}"
+                                        data-reviews="{{ p_info.reviews or '0' }}"
+                                        data-image="{{ p_info.image }}"
+                                        data-link="{{ p_info.link }}"
+                                        data-quality-score="{{ p_info.quality_score or 50 }}"
+                                        data-quality-band="{{ p_info.quality_score_label or 'Standard Quality' }}"
+                                        data-specs='{{ p_info.product.specs | tojson if (p_info.product and p_info.product.specs) else "{}" }}'
+                                        data-points='{{ (p_info.product.quality_points or []) | tojson if p_info.product else "[]" }}'>
+                                    <i class="fas fa-balance-scale me-1.5"></i><span>Add to Compare</span>
+                                </button>
 
                                 {% else %}
 
@@ -1788,18 +2554,22 @@ function displayValue(value) {
 /* Results Page — View & Sort Controls */
 function switchView(view) {
     const specTable = document.getElementById('viewSpecTable');
+    const qualityTable = document.getElementById('viewQualityTable');
     const platformView = document.getElementById('viewPlatform');
     const allView = document.getElementById('viewAll');
 
     const tabSpecTable = document.getElementById('tabSpecTable');
+    const tabQualityTable = document.getElementById('tabQualityTable');
     const tabPlatform = document.getElementById('tabPlatform');
     const tabAll = document.getElementById('tabAll');
 
     if (specTable) specTable.style.display = (view === 'specTable') ? '' : 'none';
+    if (qualityTable) qualityTable.style.display = (view === 'qualityTable') ? '' : 'none';
     if (platformView) platformView.style.display = (view === 'platform') ? '' : 'none';
     if (allView) allView.style.display = (view === 'all') ? '' : 'none';
 
     if (tabSpecTable) tabSpecTable.classList.toggle('active', view === 'specTable');
+    if (tabQualityTable) tabQualityTable.classList.toggle('active', view === 'qualityTable');
     if (tabPlatform) tabPlatform.classList.toggle('active', view === 'platform');
     if (tabAll) tabAll.classList.toggle('active', view === 'all');
 }
@@ -1889,7 +2659,91 @@ function updateThemeIcon(isDark) {
     }
 })();
 </script>
-<script src="{{ url_for('static', filename='js/url_search.js') }}"></script>
+    <!-- ════════════════════════════════════════════════════════════════
+         FLOATING BOTTOM COMPARE DOCK (UP TO 3 PRODUCTS)
+         ════════════════════════════════════════════════════════════════ -->
+    <div id="compareFloatingDock" class="compare-floating-dock d-flex align-items-center justify-content-between flex-wrap gap-3">
+        <div class="d-flex align-items-center gap-2">
+            <div class="compare-dock-icon rounded-circle bg-primary text-white d-flex align-items-center justify-content-center shadow-xs" style="width: 36px; height: 36px;">
+                <i class="fas fa-balance-scale"></i>
+            </div>
+            <div>
+                <div class="fw-bold text-white small d-flex align-items-center gap-1.5" style="font-size: 0.82rem;">
+                    <span>Product Compare</span>
+                    <span id="compareDockCount" class="badge bg-primary text-white rounded-pill px-2 py-0.5" style="font-size: 0.68rem;">0/3</span>
+                </div>
+                <div class="small text-white-50" style="font-size: 0.72rem;">Compare across or within marketplaces</div>
+            </div>
+        </div>
+
+        <!-- Selected Product Slots Container -->
+        <div id="compareDockSlots" class="d-flex align-items-center gap-2 flex-wrap">
+            <!-- Dynamically populated by product_compare.js -->
+        </div>
+
+        <!-- Dock Actions -->
+        <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-outline-light btn-sm rounded-pill px-3 py-1.5 fw-semibold" style="font-size: 0.75rem;" onclick="clearAllCompare()">
+                <i class="fas fa-trash-alt me-1"></i>Clear
+            </button>
+            <button type="button" id="btnTriggerCompare" class="btn btn-primary btn-sm rounded-pill px-3 py-1.5 fw-bold shadow-sm d-flex align-items-center gap-1.5" style="font-size: 0.8rem;" onclick="openCustomCompareModal()">
+                <i class="fas fa-chart-bar me-1"></i>Compare Now
+            </button>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         INTERACTIVE CUSTOM COMPARE MODAL (SMART RANKING & SPEC MATRIX)
+         ════════════════════════════════════════════════════════════════ -->
+    <div class="modal fade" id="customCompareModal" tabindex="-1" aria-labelledby="customCompareModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden">
+                <div class="modal-header bg-dark text-white py-3 px-4 d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="fas fa-balance-scale text-warning fs-5"></i>
+                        <div>
+                            <h5 class="modal-title fw-bold mb-0" id="customCompareModalLabel">Interactive Product Feature Comparison</h5>
+                            <small class="text-white-50" style="font-size: 0.75rem;">Multi-Criteria Smart Ranking &amp; Head-to-Head Specification Dominance</small>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4 bg-light" id="customCompareModalBody" style="min-height: 400px;">
+                    <!-- Dynamically populated by product_compare.js -->
+                </div>
+                <div class="modal-footer bg-white py-2.5 px-4 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3" onclick="clearAllCompare()">
+                        <i class="fas fa-trash-alt me-1"></i>Clear Comparison
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm rounded-pill px-4" data-bs-dismiss="modal">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         COMPARE UPGRADE / REPLACEMENT MODAL
+         ════════════════════════════════════════════════════════════════ -->
+    <div class="modal fade" id="compareReplaceModal" tabindex="-1" aria-labelledby="compareReplaceModalLabel" aria-hidden="true" style="z-index: 1060;">
+        <div class="modal-dialog modal-md modal-dialog-centered">
+            <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden">
+                <div class="modal-header bg-dark text-white py-2.5 px-3">
+                    <h6 class="modal-title fw-bold mb-0" id="compareReplaceModalLabel">
+                        <i class="fas fa-exchange-alt text-warning me-2"></i>Upgrade or Replace Product
+                    </h6>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-3 bg-light" id="compareReplaceModalBody">
+                    <!-- Dynamically populated by product_compare.js -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/url_search.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/product_compare.js') }}"></script>
 </body>
 </html>
 

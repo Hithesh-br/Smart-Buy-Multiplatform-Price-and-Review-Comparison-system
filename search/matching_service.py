@@ -199,10 +199,11 @@ def extract_product_identity(item: dict, query: str = "") -> dict:
     variant = {}
     # Storage
     st_m = re.search(r'\b(32|64|128|256|512)\s*gb\b', t_lower)
+    tb_m = re.search(r'\b(1|2)\s*tb\b', t_lower)
     if st_m:
         variant['storage'] = f"{st_m.group(1)}GB"
-    elif re.search(r'\b(1|2)\s*tb\b', t_lower):
-        variant['storage'] = f"{re.search(r'\b(1|2)\s*tb\b', t_lower).group(1)}TB"
+    elif tb_m:
+        variant['storage'] = f"{tb_m.group(1)}TB"
 
     # RAM
     ram_m = re.search(r'\b(4|6|8|12|16|32)\s*gb\s*(?:ram|ddr\d)?\b', t_lower)
@@ -371,7 +372,7 @@ def calculate_product_match_score(item1: dict, item2: dict) -> tuple[float, str,
         model_score = 18.0
     else:
         # One item has model, check if other title contains it
-        target_m = (m1 or m2).lower()
+        target_m = str(m1 or m2 or '').lower()
         other_title = (t2_clean if m1 else t1_clean).lower()
         if target_m in other_title:
             model_score = 16.0
@@ -982,7 +983,7 @@ def build_canonical_comparison(
             }
 
     # Best deal among matched products
-    matched_candidates = [it for it in platform_matched.values() if it is not None]
+    matched_candidates: list[dict] = [it for it in platform_matched.values() if it is not None]
     best_deal = compute_best_deal(matched_candidates, canonical, detected_cat)
 
     # Build Specification Comparison Table dynamically

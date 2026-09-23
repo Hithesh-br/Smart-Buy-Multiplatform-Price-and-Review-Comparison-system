@@ -896,3 +896,106 @@ html { scroll-padding-top: 80px; }
     50%       { opacity: 1;   transform: scale(1.2); }
 }
 
+/* ════════════════════════════════════════════════════════════════
+   INTERACTIVE PRODUCT COMPARISON SYSTEM (UP TO 3 PRODUCTS)
+   ════════════════════════════════════════════════════════════════ */
+
+/* Floating Bottom Compare Dock */
+.compare-floating-dock {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translate(-50%, 120%);
+    z-index: 1045;
+    background: rgba(15, 23, 42, 0.94);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 20px;
+    padding: 12px 20px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+    opacity: 0;
+    max-width: 95vw;
+}
+
+.compare-dock-slot {
+    transition: all 0.2s ease;
+}
+
+.compare-dock-slot.occupied:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.compare-dock-slot.empty {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+/* Pulsing animated compare button */
+.pulse-btn {
+    animation: btnGlowPulse 2s infinite;
+}
+
+@keyframes btnGlowPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.5); }
+    70%  { box-shadow: 0 0 0 10px rgba(37, 99, 235, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+}
+
+/* Add to Compare Button */
+.btn-add-compare {
+    font-size: 0.76rem;
+    transition: all 0.22s ease-in-out;
+}
+
+.btn-add-compare:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(37, 99, 235, 0.2);
+}
+
+.btn-add-compare.active {
+    background: #059669 !important;
+    border-color: #059669 !important;
+    color: #ffffff !important;
+}
+
+/* Smart Ranking Badges */
+.smart-rank-badge-1 {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.smart-rank-badge-2 {
+    background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.smart-rank-badge-3 {
+    background: linear-gradient(135deg, #b45309 0%, #78350f 100%);
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.winner-trophy-box {
+    animation: bounceTrophy 2.5s infinite ease-in-out;
+}
+
+@keyframes bounceTrophy {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-4px); }
+}
+
+/* Replacement Slot Hover Card */
+.replace-slot-option {
+    transition: all 0.2s ease;
+}
+
+.replace-slot-option:hover {
+    background: #f8fafc;
+    border-color: var(--primary) !important;
+}
+
+

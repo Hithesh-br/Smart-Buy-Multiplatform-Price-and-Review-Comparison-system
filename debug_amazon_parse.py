@@ -2,7 +2,8 @@ import bs4
 import re
 import sys
 
-sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stdout, "reconfigure"):
+    getattr(sys.stdout, "reconfigure")(encoding="utf-8")
 
 with open("test_amazon.html", encoding="utf-8") as f:
     soup = bs4.BeautifulSoup(f.read(), "html.parser")

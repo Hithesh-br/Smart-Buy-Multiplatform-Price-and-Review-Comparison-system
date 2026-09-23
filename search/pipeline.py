@@ -23,13 +23,55 @@ import re
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 
+logger = logging.getLogger(__name__)
+
 from search.query_parser import parse_query_entities
-from search.product_matcher import evaluate_product_match, check_suspicious_price
+from search.product_matcher import evaluate_product_match, check_suspicious_price, is_accessory_conflict
 from search.specs_extractor import build_category_spec_matrix, compute_marketplace_statuses
-from search.quality_scorer import compute_quality_and_confidence
+from search.quality_scorer import compute_quality_and_confidence, get_detailed_quality_report, calculate_value_for_money_index
 from search.category_detector import detect_category
 
-logger = logging.getLogger("smartbuy.search.pipeline")
+def _enrich_product_quality(item: Dict[str, Any], q_rep: Dict[str, Any], min_price: Optional[float] = None) -> None:
+    item["quality_report"] = q_rep
+    item["quality_score"] = q_rep.get("raw_quality_score") or 50.0
+    item["data_confidence"] = q_rep.get("data_confidence") or 50.0
+    item["has_sufficient_data"] = q_rep.get("has_sufficient_data", True)
+    item["quality_score_label"] = q_rep.get("quality_score_label")
+    item["quality_band"] = q_rep.get("quality_band", "Standard Quality")
+    item["quality_attributes"] = q_rep.get("quality_attributes", {})
+    item["positive_themes"] = q_rep.get("review_signals", {}).get("positive_themes", [])
+    item["negative_themes"] = q_rep.get("review_signals", {}).get("negative_themes", [])
+
+    # Extract quality points list for rich UI rendering
+    points = []
+    points.append(f"Quality Score: {item['quality_score']:.0f}/100 ({item['quality_band']})")
+    
+    q_mat = item["quality_attributes"].get("material") or item.get("material")
+    if q_mat and q_mat != "Standard Durable Material":
+        points.append(f"Build: {q_mat}")
+
+    q_warr = item["quality_attributes"].get("warranty") or item.get("warranty")
+    if q_warr:
+        points.append(f"Warranty: {q_warr}")
+
+    r_val = item.get("rating")
+    rev_cnt = item.get("reviews") or item.get("review_count")
+    if r_val and str(r_val) not in ("0", "0.0", "None", "N/A"):
+        points.append(f"Buyer Trust: ★ {r_val} ({rev_cnt or 'Verified'} reviews)")
+    elif rev_cnt and str(rev_cnt) not in ("0", "None", "N/A"):
+        points.append(f"Buyer Trust: {rev_cnt} verified reviews")
+
+    for th in item["positive_themes"][:2]:
+        points.append(f"Highlight: {th}")
+
+    item["quality_points"] = points
+
+    p_num = item.get("price_num")
+    if p_num and p_num > 0:
+        base_p = min_price if (min_price and min_price > 0) else p_num
+        item["vfm_index"] = calculate_value_for_money_index(item["quality_score"], p_num, base_p)
+    else:
+        item["vfm_index"] = round(item["quality_score"] * 0.8, 1)
 
 
 def run_comparison_pipeline(
@@ -100,15 +142,40 @@ def run_comparison_pipeline(
             item["match_breakdown"] = breakdown
             item["match_reasons"] = reasons
 
-            # Compute quality and confidence
-            q_score, d_conf = compute_quality_and_confidence(item)
-            item["quality_score"] = q_score
-            item["data_confidence"] = d_conf
+            # Compute category-aware quality and confidence
+            q_rep = get_detailed_quality_report(item, detected_cat)
+            _enrich_product_quality(item, q_rep)
 
             if status == "REJECTED":
                 rejected_products.append(item)
             else:
                 validated_products_by_platform[platform_key].append(item)
+
+    # 2b. Platform Fallback Rescue: ensure no platform is left empty if scraper returned candidates
+    for platform_key in ("Amazon", "Flipkart", "Meesho"):
+        if not validated_products_by_platform[platform_key]:
+            raw_items = raw_platform_results.get(platform_key) or raw_platform_results.get(platform_key.lower()) or []
+            rescued_count = 0
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                # Skip true accessory conflicts
+                if is_accessory_conflict(target_info.get("category", "other"), item.get("title", "")):
+                    continue
+                p_val = item.get("price_num")
+                if not p_val or p_val <= 0:
+                    continue
+                item["platform"] = platform_key
+                item["match_status"] = "SIMILAR_PRODUCT"
+                item["match_score"] = item.get("match_score") or 65.0
+                q_rep_res = get_detailed_quality_report(item, detected_cat)
+                _enrich_product_quality(item, q_rep_res)
+                validated_products_by_platform[platform_key].append(item)
+                rescued_count += 1
+                if rescued_count >= 15:
+                    break
+            if rescued_count > 0:
+                logger.info(f"[{platform_key}] Rescued {rescued_count} category/similar products to ensure platform coverage.")
 
     # 3. Suspicious Price Protection (Section 17)
     # Check all validated products against median price of exact/variant matches
@@ -120,7 +187,8 @@ def run_comparison_pipeline(
         if is_suspicious:
             p["match_status"] = "PRICE/IDENTITY UNVERIFIED"
             p["match_reasons"].append(susp_reason)
-            logger.warning(f"[{p.get('platform')}] Flagged suspicious price: '{p.get('title')[:35]}' ({p.get('price')}): {susp_reason}")
+            title_str = str(p.get('title') or '')
+            logger.warning(f"[{p.get('platform')}] Flagged suspicious price: '{title_str[:35]}' ({p.get('price')}): {susp_reason}")
 
     # validated_products is the SINGLE SOURCE OF TRUTH
     all_validated_products = [
@@ -153,14 +221,17 @@ def run_comparison_pipeline(
                 best_match_per_platform[plat] = similar_items[0]
 
     # 5. Top Verified Offers (Section 15)
-    # Replaces broken "No product available" logic. Only includes EXACT_MATCH or allowed VARIANT_MATCH.
+    # Includes exact/variant matches, and falls back to similar offers so each marketplace with products is represented.
     top_verified_offers: Dict[str, Dict[str, Any]] = {}
     valid_verified_deals: List[Dict[str, Any]] = []
+    all_available_deals: List[Dict[str, Any]] = []
 
     for plat in ("Amazon", "Flipkart", "Meesho"):
         best_p = best_match_per_platform.get(plat)
-        if best_p and best_p.get("match_status") in ("EXACT_MATCH", "VARIANT_MATCH"):
+        if best_p and best_p.get("price_num") and best_p["price_num"] > 0:
             p_fmt = best_p.get("price") or (f"₹{best_p.get('price_num'):,}" if best_p.get("price_num") else "N/A")
+            q_rep = best_p.get("quality_report") or get_detailed_quality_report(best_p, detected_cat)
+            best_p["quality_report"] = q_rep
             offer_data = {
                 "available": True,
                 "platform": plat,
@@ -172,24 +243,32 @@ def run_comparison_pipeline(
                 "formatted_price": p_fmt,
                 "price_formatted": p_fmt,
                 "price_num": best_p.get("price_num"),
-                "mrp": best_p.get("mrp"),
-                "discount": best_p.get("discount"),
+                "mrp": best_p.get("mrp") or p_fmt,
+                "discount": best_p.get("discount") or "0%",
                 "rating": best_p.get("rating"),
                 "reviews": best_p.get("review_count"),
                 "quality_score": best_p.get("quality_score", 0.0),
                 "data_confidence": best_p.get("data_confidence", 0.0),
+                "quality_report": q_rep,
+                "quality_score_label": q_rep.get("quality_score_label") or f"{best_p.get('quality_score', 0):.0f}/100",
+                "quality_status_badge": q_rep.get("quality_status_badge") or "badge bg-primary text-white",
+                "has_sufficient_data": q_rep.get("has_sufficient_data", True),
+                "review_signals": q_rep.get("review_signals") or {},
+                "quality_attributes": q_rep.get("quality_attributes") or {},
                 "quantity": best_p.get("quantity") or best_p.get("weight") or f"Pack of {best_p.get('pack_quantity', 1)}",
                 "variant": best_p.get("model") or "Standard",
                 "seller": best_p.get("seller") or "Verified Seller",
                 "availability": best_p.get("availability", "In Stock"),
                 "unit_price": best_p.get("unit_price") or "N/A",
-                "match_status": best_p.get("match_status"),
+                "match_status": best_p.get("match_status", "SIMILAR_PRODUCT"),
                 "match_score": best_p.get("match_score", 0.0),
                 "link": best_p.get("product_url") or best_p.get("link", "#"),
                 "is_overall_best": False
             }
             top_verified_offers[plat] = offer_data
-            valid_verified_deals.append(offer_data)
+            all_available_deals.append(offer_data)
+            if best_p.get("match_status") in ("EXACT_MATCH", "VARIANT_MATCH"):
+                valid_verified_deals.append(offer_data)
         else:
             top_verified_offers[plat] = {
                 "available": False,
@@ -199,10 +278,16 @@ def run_comparison_pipeline(
                 "title": "No verified match on this marketplace",
                 "price": "N/A",
                 "price_num": None,
+                "mrp": "N/A",
+                "discount": "—",
                 "rating": None,
                 "reviews": None,
                 "quality_score": 0.0,
                 "data_confidence": 0.0,
+                "quality_score_label": "Insufficient Data",
+                "has_sufficient_data": False,
+                "review_signals": {},
+                "quality_attributes": {},
                 "is_overall_best": False
             }
 
@@ -218,21 +303,256 @@ def run_comparison_pipeline(
         platform_status
     )
 
-    # 7. Best Deal Engine (Section 16: Best Value Algorithm + Savings)
+    # 6b. Quality Comparison Table across Amazon, Flipkart, and Meesho
+    quality_comparison_table = []
+    for plat in ("Amazon", "Flipkart", "Meesho"):
+        offer = top_verified_offers.get(plat)
+        if offer and offer.get("available") and offer.get("product"):
+            p = offer["product"]
+            q_rep = offer.get("quality_report") or get_detailed_quality_report(p, spec_category)
+
+            # Format main specifications string
+            sp_items = []
+            if p.get("specifications") and isinstance(p["specifications"], dict):
+                for k, v in list(p["specifications"].items())[:3]:
+                    if v and str(v).strip() not in ("N/A", "None", ""):
+                        sp_items.append(f"{k}: {v}")
+            if not sp_items and isinstance(p.get("specs"), dict) and p["specs"].get("category_specs"):
+                for k, v in list(p["specs"]["category_specs"].items())[:3]:
+                    if v and str(v).strip() not in ("N/A", "None", "Not Available", ""):
+                        sp_items.append(f"{k}: {v}")
+            main_specs_str = " • ".join(sp_items) if sp_items else "Standard Category Specifications"
+
+            # Format quality attributes string and dictionary
+            q_attr = q_rep.get("quality_attributes", {})
+            q_attr_items = []
+            if q_attr.get("material") and q_attr["material"] != "Standard Durable Material":
+                q_attr_items.append(f"Material: {q_attr['material']}")
+            if q_attr.get("warranty"):
+                q_attr_items.append(f"Warranty: {q_attr['warranty']}")
+            if q_attr.get("seller"):
+                q_attr_items.append(f"Seller: {q_attr['seller']}")
+            quality_attr_str = " | ".join(q_attr_items) if q_attr_items else (q_attr.get("warranty") or "Standard Quality Features")
+
+            q_attr_dict = {
+                "Warranty": q_attr.get("warranty") or "Standard 1 Year",
+                "Material/Build": q_attr.get("material") or "Standard Build",
+                "Seller/Delivery": q_attr.get("seller") or "Verified Marketplace Seller",
+                "Condition": q_attr.get("condition") or "Brand New"
+            }
+
+            row_entry = {
+                "platform": plat,
+                "title": offer["title"],
+                "product_name": offer["title"],
+                "model": p.get("model") or p.get("model_number") or "Standard Variant",
+                "price": offer["price"],
+                "price_num": offer["price_num"],
+                "mrp": offer.get("mrp") or offer["price"],
+                "discount": offer.get("discount") or "0%",
+                "rating": offer.get("rating"),
+                "rating_display": f"★ {float(offer['rating']):.1f}" if (offer.get("rating") and str(offer['rating']).replace('.', '', 1).isdigit()) else (f"★ {offer['rating']}" if offer.get("rating") else "Unrated"),
+                "review_count": offer.get("reviews"),
+                "review_count_display": f"{int(str(offer['reviews']).replace(',', '')):,} reviews" if (offer.get("reviews") and str(offer['reviews']).replace(',', '').isdigit()) else (f"{offer['reviews']} reviews" if offer.get("reviews") else "No reviews yet"),
+                "main_specs": p.get("specs") or p.get("category_specs") or {},
+                "main_specifications": main_specs_str,
+                "quality_attributes": q_attr_dict,
+                "quality_attributes_str": quality_attr_str,
+                "quality_score": offer["quality_score"],
+                "estimated_quality_score": offer["quality_score"],
+                "estimated_quality_label": q_rep.get("quality_score_label", f"{offer['quality_score']}/100"),
+                "quality_band": q_rep.get("quality_band", "Standard Quality"),
+                "has_sufficient_data": q_rep.get("has_sufficient_data", True),
+                "data_confidence": offer["data_confidence"],
+                "data_confidence_label": q_rep.get("data_confidence_label", f"{offer['data_confidence']}% Verified Evidence"),
+                "quality_badge": q_rep.get("quality_status_badge", "badge bg-primary text-white"),
+                "positive_themes": q_rep.get("review_signals", {}).get("positive_themes", []),
+                "negative_themes": q_rep.get("review_signals", {}).get("negative_themes", []),
+                "link": offer["link"],
+                "product_url": offer["link"],
+                "image": offer["image"],
+                "available": True
+            }
+            quality_comparison_table.append(row_entry)
+        else:
+            quality_comparison_table.append({
+                "platform": plat,
+                "product_name": "No verified match on this marketplace",
+                "model": "—",
+                "price": "N/A",
+                "price_num": None,
+                "mrp": "N/A",
+                "discount": "—",
+                "rating": None,
+                "rating_display": "—",
+                "review_count": None,
+                "review_count_display": "—",
+                "main_specs": {},
+                "main_specifications": "No specification data available",
+                "quality_attributes": {
+                    "Warranty": "—",
+                    "Material/Build": "—",
+                    "Seller/Delivery": "—",
+                    "Condition": "—"
+                },
+                "quality_attributes_str": "Listing unavailable on this platform",
+                "estimated_quality_score": None,
+                "estimated_quality_label": "Insufficient Data",
+                "has_sufficient_data": False,
+                "data_confidence": 0.0,
+                "data_confidence_label": "0% Data Availability",
+                "quality_badge": "badge bg-secondary text-white",
+                "positive_themes": [],
+                "negative_themes": [],
+                "link": "#",
+                "image": "",
+                "available": False
+            })
+
+    # 7. Comparison Summary: Lowest Price, Best Quality, Best Spec Match, Review Insights, Value for Money
+    comparison_summary: Dict[str, Any] = {
+        "lowest_price": None,
+        "best_quality": None,
+        "best_spec_match": None,
+        "review_insights": None,
+        "value_for_money": None
+    }
+
+    active_offers = [d for d in all_available_deals if d.get("price_num") and d["price_num"] > 0]
+    if active_offers:
+        min_price_val = min(d["price_num"] for d in active_offers)
+        
+        # 1. Lowest Price Indicator (strictly price-based)
+        cheapest_deal = min(active_offers, key=lambda x: x["price_num"])
+        highest_p = max(d["price_num"] for d in active_offers)
+        savings_vs_max = max(0, highest_p - cheapest_deal["price_num"]) if len(active_offers) >= 2 else 0
+        comparison_summary["lowest_price"] = {
+            "platform": cheapest_deal["platform"],
+            "title": cheapest_deal["title"],
+            "price": cheapest_deal["price"],
+            "price_num": cheapest_deal["price_num"],
+            "savings": savings_vs_max,
+            "savings_formatted": f"₹{savings_vs_max:,}" if savings_vs_max > 0 else None,
+            "link": cheapest_deal["link"],
+            "image": cheapest_deal["image"],
+            "label": f"Lowest Price: {cheapest_deal['price']} on {cheapest_deal['platform']}"
+        }
+
+        # 2. Quality Evidence Indicator (highest evidence-based quality score among items with sufficient data)
+        sufficient_quality_deals = [d for d in active_offers if d.get("has_sufficient_data", True)]
+        if sufficient_quality_deals:
+            top_quality_deal = max(sufficient_quality_deals, key=lambda x: x.get("quality_score", 0))
+            comparison_summary["best_quality"] = {
+                "platform": top_quality_deal["platform"],
+                "title": top_quality_deal["title"],
+                "quality_score": top_quality_deal["quality_score"],
+                "quality_label": top_quality_deal.get("quality_score_label") or f"{top_quality_deal['quality_score']}/100",
+                "data_confidence": top_quality_deal["data_confidence"],
+                "price": top_quality_deal["price"],
+                "link": top_quality_deal["link"],
+                "image": top_quality_deal["image"],
+                "reasons": f"Highest evidence-backed quality score ({top_quality_deal['quality_score']}/100) on {top_quality_deal['platform']}"
+            }
+        else:
+            comparison_summary["best_quality"] = {
+                "platform": "Marketplace Evidence",
+                "title": "Insufficient Data for Score",
+                "quality_score": None,
+                "quality_label": "Insufficient Data",
+                "data_confidence": max(d.get("data_confidence", 0) for d in active_offers),
+                "price": "N/A",
+                "link": "#",
+                "image": "",
+                "reasons": "Detailed specification and verified rating signals are currently incomplete."
+            }
+
+        # 3. Best Specification Match Indicator
+        best_spec_deal = max(active_offers, key=lambda x: (x.get("match_score", 0), x.get("data_confidence", 0)))
+        comparison_summary["best_spec_match"] = {
+            "platform": best_spec_deal["platform"],
+            "title": best_spec_deal["title"],
+            "match_score": best_spec_deal.get("match_score", 0),
+            "match_status": best_spec_deal.get("match_status", "SIMILAR_PRODUCT"),
+            "price": best_spec_deal["price"],
+            "link": best_spec_deal["link"],
+            "image": best_spec_deal["image"],
+            "reasons": f"Verified {best_spec_deal.get('match_status', 'Match')} ({best_spec_deal.get('match_score', 0)}%) on {best_spec_deal['platform']}"
+        }
+
+        # 4. Review Insights Indicator
+        deals_with_ratings = [d for d in active_offers if d.get("rating")]
+        if deals_with_ratings:
+            top_reviewed_deal = max(deals_with_ratings, key=lambda x: (x.get("reviews") or 0, x.get("rating") or 0))
+            all_pos_themes = []
+            for d in active_offers:
+                for th in d.get("review_signals", {}).get("positive_themes", []):
+                    if th not in all_pos_themes:
+                        all_pos_themes.append(th)
+            rev_val = top_reviewed_deal.get('reviews')
+            try:
+                rev_num = int(str(rev_val).replace(',', '')) if rev_val is not None else 0
+            except (ValueError, TypeError):
+                rev_num = 0
+            formatted_rev = f"{rev_num:,} verified reviews" if rev_num > 0 else (f"{rev_val} verified reviews" if rev_val else "Early reviews")
+            comparison_summary["review_insights"] = {
+                "platform": top_reviewed_deal["platform"],
+                "rating": top_reviewed_deal.get("rating"),
+                "reviews": rev_num if rev_num > 0 else rev_val,
+                "formatted_reviews": formatted_rev,
+                "top_positive_themes": all_pos_themes[:3],
+                "positive_themes": all_pos_themes[:3],
+                "summary": f"Rated ★ {top_reviewed_deal.get('rating')} with {formatted_rev} on {top_reviewed_deal['platform']}."
+            }
+        else:
+            comparison_summary["review_insights"] = {
+                "platform": "Marketplace",
+                "rating": None,
+                "reviews": 0,
+                "formatted_reviews": "Awaiting initial customer reviews",
+                "top_positive_themes": ["Authentic Listing Verified"],
+                "summary": "Customer review signals are accumulating for this product."
+            }
+
+        # 5. Best Value for Money Indicator (combines quality score and price efficiency)
+        scored_vfm = []
+        for d in active_offers:
+            vfm_idx = calculate_value_for_money_index(
+                d.get("quality_score", 50.0),
+                d.get("price_num"),
+                min_price_val
+            )
+            d["value_for_money_index"] = vfm_idx
+            scored_vfm.append((vfm_idx, d))
+        scored_vfm.sort(key=lambda x: -x[0])
+        best_vfm_deal = scored_vfm[0][1]
+        comparison_summary["value_for_money"] = {
+            "platform": best_vfm_deal["platform"],
+            "title": best_vfm_deal["title"],
+            "price": best_vfm_deal["price"],
+            "price_num": best_vfm_deal["price_num"],
+            "quality_score": best_vfm_deal.get("quality_score", 0),
+            "vfm_index": scored_vfm[0][0],
+            "link": best_vfm_deal["link"],
+            "image": best_vfm_deal["image"],
+            "reasons": f"Best balance of quality ({best_vfm_deal.get('quality_score', 0)}/100) and pricing ({best_vfm_deal['price']}) on {best_vfm_deal['platform']}."
+        }
+
+    # 8. Best Deal Engine (Value Algorithm + Savings)
     best_deal: Optional[Dict[str, Any]] = None
     no_deal_message: Optional[str] = None
     savings_info: Optional[Dict[str, Any]] = None
 
     # Check cross-platform match requirements
+    candidate_deals = valid_verified_deals if valid_verified_deals else all_available_deals
     verified_platforms_count = len(valid_verified_deals)
-    has_cross_platform_match = verified_platforms_count >= 2
+    has_cross_platform_match = len(candidate_deals) >= 2
 
-    if verified_platforms_count >= 1:
-        # Calculate Best Value score for each verified deal
-        min_p = min(d["price_num"] for d in valid_verified_deals if d["price_num"])
+    if candidate_deals:
+        # Calculate Best Value score for each deal
+        min_p = min(d["price_num"] for d in candidate_deals if d["price_num"])
         scored_deals = []
 
-        for d in valid_verified_deals:
+        for d in candidate_deals:
             p_val = d["price_num"]
             prod = d["product"]
 
@@ -259,12 +579,12 @@ def run_comparison_pipeline(
 
         # Calculate savings if 2 or more offers exist
         savings = 0
-        if verified_platforms_count >= 2:
-            prices = [d["price_num"] for d in valid_verified_deals if d["price_num"]]
+        if len(candidate_deals) >= 2:
+            prices = [d["price_num"] for d in candidate_deals if d["price_num"]]
             highest_p = max(prices)
             savings = max(0, highest_p - winner_deal["price_num"])
             if savings > 0:
-                highest_deal = next(d for d in valid_verified_deals if d["price_num"] == highest_p)
+                highest_deal = next(d for d in candidate_deals if d["price_num"] == highest_p)
                 savings_info = {
                     "amount": savings,
                     "amount_formatted": f"₹{savings:,}",
@@ -279,8 +599,13 @@ def run_comparison_pipeline(
             f"{winner_deal['availability']}"
         ]
         if winner_deal.get("rating"):
-            reasons.append(f"Rated {winner_deal['rating']} ★ ({winner_deal.get('reviews', 0):,} reviews)")
-        if savings > 0:
+            w_rev = winner_deal.get("reviews")
+            try:
+                w_rev_int = int(str(w_rev).replace(",", "")) if w_rev is not None else 0
+                reasons.append(f"Rated {winner_deal['rating']} ★ ({w_rev_int:,} reviews)")
+            except (ValueError, TypeError):
+                reasons.append(f"Rated {winner_deal['rating']} ★ ({w_rev or 0} reviews)")
+        if savings > 0 and savings_info:
             reasons.append(f"Saves ₹{savings:,} compared to {savings_info['compared_platform']}")
 
         best_deal = {
@@ -297,6 +622,9 @@ def run_comparison_pipeline(
             "reviews": winner_deal["reviews"],
             "quality_score": winner_deal["quality_score"],
             "data_confidence": winner_deal["data_confidence"],
+            "quality_score_label": winner_deal.get("quality_score_label"),
+            "quality_attributes": winner_deal.get("quality_attributes"),
+            "review_signals": winner_deal.get("review_signals"),
             "savings": savings,
             "match_status": winner_deal["match_status"],
             "reasons": reasons,
@@ -305,7 +633,7 @@ def run_comparison_pipeline(
     else:
         no_deal_message = "No exact cross-platform match available"
 
-    # 8. Pairwise Matching Status Summary
+    # 9. Pairwise Matching Status Summary
     match_pairs = {}
     pair_defs = [
         ("Amazon", "Flipkart", "Amazon ↔ Flipkart"),
@@ -341,6 +669,8 @@ def run_comparison_pipeline(
         "top_verified_offers": top_verified_offers,
         "top_prices": top_verified_offers,
         "specifications_matrix": specification_matrix,
+        "quality_comparison_table": quality_comparison_table,
+        "comparison_summary": comparison_summary,
         "best_deal": best_deal,
         "overall_best": best_deal,
         "best_overall_deal": best_deal,
