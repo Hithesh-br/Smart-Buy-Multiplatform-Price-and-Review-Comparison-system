@@ -1,9 +1,11 @@
 from flask import Flask, jsonify
 
+app = Flask(__name__)
+
 try:
-    from app import app
+    from app import app as flask_app
+    app = flask_app
 except Exception as exc:
-    app = Flask(__name__)
     startup_error = f"{type(exc).__name__}: {exc}"
 
     @app.route("/", defaults={"path": ""})
