@@ -22,8 +22,10 @@ from api import api_bp
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "smartbuy_super_secret_key_2026")
 
-# Initialize Database
-init_db(app)
+# Initialize the database locally or when a hosted MongoDB URI is configured.
+# Vercel has no local MongoDB service, so avoid blocking function startup there.
+if not os.getenv("VERCEL") or os.getenv("MONGO_URI"):
+    init_db(app)
 
 # Inject current logged-in user & inbox unread count into template context
 @app.context_processor
