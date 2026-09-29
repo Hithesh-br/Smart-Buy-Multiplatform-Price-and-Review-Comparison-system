@@ -42,11 +42,14 @@ class MeeshoUrlScraper:
         clean_url = url.strip()
         logger.info(f"[MeeshoUrlScraper] Fetching product from URL: {clean_url}")
 
-        # Extract Meesho Product ID from path
+        # Extract Meesho Product ID and Slug from path
         pid = ""
-        m = re.search(r'/(?:s/)?p/([a-zA-Z0-9]+)', clean_url)
-        if m:
-            pid = m.group(1)
+        m_pid = re.search(r'/(?:s/)?p/([a-zA-Z0-9]+)', clean_url)
+        if m_pid:
+            pid = m_pid.group(1)
+
+        m_slug = re.search(r'/([^/]+)/p/[a-zA-Z0-9]+', clean_url)
+        slug = m_slug.group(1) if m_slug else ""
 
         # ── Level 1: Configured API ──────────────────────────────────────────
         if MEESHO_API_URL and MEESHO_API_KEY:
@@ -66,25 +69,95 @@ class MeeshoUrlScraper:
 
         # ── Level 2: Playwright Browser Scraper ──────────────────────────────
         def _browser_task(page):
-            page.goto(clean_url, wait_until="domcontentloaded", timeout=28000)
-
-            title_text = page.title().lower()
-            if "access denied" in title_text or "security challenge" in page.content().lower():
-                raise RuntimeError("Meesho anti-bot challenge detected")
-
+            # First attempt: Try direct page load
             try:
-                page.wait_for_selector("h1, h4", timeout=6000)
-            except Exception:
-                pass
+                page.goto(clean_url, wait_until="commit", timeout=14000)
+                try:
+                    page.wait_for_selector("h1, h4, span[class*='ProductTitle']", timeout=6000)
+                except Exception:
+                    page.wait_for_timeout(1500)
+                title_text = page.title().lower()
+                content_lower = page.content().lower()
+                if not ("access denied" in title_text or "access denied" in content_lower or "security challenge" in content_lower):
+                    html = page.content()
+                    res = self._parse_meesho_page_html(html, clean_url, pid)
+                    if res:
+                        return res
+            except Exception as direct_exc:
+                logger.debug(f"[MeeshoUrlScraper] Direct PDP load failed or challenged: {direct_exc}")
 
-            html = page.content()
-            return self._parse_meesho_page_html(html, clean_url, pid)
+            # Fallback for Edge Protection: Query catalog via search page session
+            if slug or pid:
+                logger.info(f"[MeeshoUrlScraper] Falling back to in-page catalog retrieval for slug='{slug}', pid='{pid}'")
+                clean_slug = re.sub(r'[-_]+', ' ', slug).strip()
+                slug_query = " ".join(clean_slug.split()[:6]) if clean_slug else pid
+                search_nav_url = f"https://www.meesho.com/search?q={urllib.parse.quote_plus(slug_query)}"
+                page.goto(search_nav_url, wait_until="domcontentloaded", timeout=15000)
+
+                # Check if search page is blocked
+                if "access denied" in page.title().lower() or "sec-if-cpt-container" in page.content().lower():
+                    raise RuntimeError("Access Denied: Meesho edge protection challenge detected")
+
+                js_search = """
+                async (q) => {
+                    try {
+                        const resp = await fetch('https://www.meesho.com/api/v1/products/search', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                            body: JSON.stringify({query: q, type: 'text_search', page: 1, offset: 0, limit: 20})
+                        });
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            return data.catalogs || [];
+                        }
+                    } catch (e) {}
+                    return [];
+                }
+                """
+                # Try query cascade: slug_query, then full clean_slug
+                for q_try in [slug_query, clean_slug]:
+                    if not q_try:
+                        continue
+                    catalogs = page.evaluate(js_search, q_try) or []
+                    matched = None
+                    for c in catalogs:
+                        c_pid = str(c.get('product_id') or c.get('id') or '').strip().lower()
+                        if pid and c_pid == pid.lower():
+                            matched = c
+                            break
+                    if not matched and catalogs and slug:
+                        for c in catalogs:
+                            c_slug = str(c.get('slug') or '').lower()
+                            if slug.lower() in c_slug or c_slug in slug.lower():
+                                matched = c
+                                break
+
+                    if not matched and catalogs:
+                        clean_tokens = [w for w in clean_slug.lower().split() if len(w) > 2]
+                        for c in catalogs:
+                            c_name = str(c.get('name') or c.get('title') or '').lower()
+                            if clean_tokens and all(tok in c_name for tok in clean_tokens[:3]):
+                                matched = c
+                                break
+
+                    if not matched and catalogs and len(catalogs) > 0:
+                        matched = catalogs[0]
+
+                    if matched:
+                        from scrapers.meesho.meesho_parser import parse_meesho_catalog_item
+                        parsed = parse_meesho_catalog_item(matched)
+                        if parsed:
+                            parsed['product_url'] = clean_url
+                            parsed['url'] = clean_url
+                            return parsed
+
+            return None
 
         browser_res, browser_stat, browser_err = self.client.execute_browser_task(_browser_task)
         if browser_stat == "success" and browser_res:
             norm = normalize_canonical_product(browser_res, "meesho", clean_url)
             if norm:
-                logger.info(f"[MeeshoUrlScraper] Successfully extracted via Playwright: '{norm['title'][:40]}'")
+                logger.info(f"[MeeshoUrlScraper] Successfully extracted canonical product: '{norm['title'][:40]}'")
                 return norm, "success", None
 
         logger.warning(f"[MeeshoUrlScraper] Playwright attempt failed ({browser_stat}: {browser_err}). Trying HTTP parser...")
@@ -99,16 +172,25 @@ class MeeshoUrlScraper:
                     if norm:
                         logger.info(f"[MeeshoUrlScraper] Successfully extracted via HTTP fallback: '{norm['title'][:40]}'")
                         return norm, "success", None
+            elif status in ("blocked", "timeout"):
+                browser_stat = status
+                browser_err = err
         except Exception as http_err:
             logger.debug(f"[MeeshoUrlScraper] HTTP fallback failed: {http_err}")
 
         # ── Level 4: Clear Failure ──────────────────────────────────────────
-        error_msg = browser_err or "Unable to retrieve product from Meesho URL"
-        return None, "scraper_error", error_msg
+        final_status = browser_stat if browser_stat in ("blocked", "timeout") else "scraper_error"
+        error_msg = browser_err or f"Unable to retrieve product from Meesho URL ({final_status})"
+        return None, final_status, error_msg
 
     def _parse_meesho_page_html(self, html: str, url: str, pid: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Parse raw Meesho product page HTML and embedded JSON-LD for product details."""
         if not html:
+            return None
+
+        # Edge protection challenge guard
+        html_lower = html.lower()
+        if "access denied" in html_lower or "security challenge" in html_lower or "sec-if-cpt-container" in html_lower:
             return None
 
         soup = bs4.BeautifulSoup(html, "html.parser")
@@ -137,7 +219,7 @@ class MeeshoUrlScraper:
             if og_title and og_title.get('content'):
                 title = og_title['content'].strip()
 
-        if not title or len(title) < 3:
+        if not title or len(title) < 3 or title.lower() in ("access denied", "security challenge", "robot check", "just a moment..."):
             return None
 
         # 2. Price
@@ -199,12 +281,22 @@ class MeeshoUrlScraper:
                 pass
 
         if rating is None:
-            rate_elem = soup.select_one("span[class*='Rating']")
+            rate_elem = soup.select_one("span[class*='Rating'], div[class*='Rating'], span[class*='Pill'], [class*='rating']")
             if rate_elem:
-                m_r = re.search(r'([\d.]+)', rate_elem.get_text())
+                m_r = re.search(r'([1-5](?:\.\d+)?)', rate_elem.get_text())
                 if m_r:
                     try:
                         rating = float(m_r.group(1))
+                    except Exception:
+                        pass
+
+        if reviews == 0:
+            rev_elem = soup.select_one("span[class*='Review'], div[class*='Review'], span[class*='Reviews']")
+            if rev_elem:
+                m_rev = re.search(r'([\d,]+)\s*(?:Reviews?|Ratings?)', rev_elem.get_text(), re.I)
+                if m_rev:
+                    try:
+                        reviews = int(m_rev.group(1).replace(",", ""))
                     except Exception:
                         pass
 

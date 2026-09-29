@@ -105,28 +105,38 @@ class MeeshoClient:
 
     def execute_browser_task(self, task_callable, query: str = "") -> Tuple[Any, str, Optional[str]]:
         """
-        Level 3: Run task in browser. Attempts Chromium first, auto-falling back to
-        Firefox stealth context if Akamai CDN blocks or challenges Chromium.
+        Level 3: Run task in browser. Fast-fails if Akamai / Kasada edge protection
+        challenges or blocks access, avoiding multi-engine cascading timeouts.
         """
-        engines = ["chromium", "firefox"]
+        engines = ["firefox"]
         last_error = None
-        last_status = "scraper_error"
+        last_status = "no_products_found"
 
         for engine in engines:
             page, context = None, None
             try:
-                page, context = self.browser_manager.new_page(engine=engine)
+                page, context = self.browser_manager.new_page(engine=engine, filter_routes=True)
                 result = task_callable(page)
-                if result:
+                if result is not None:
+                    if isinstance(result, list):
+                        if len(result) > 0:
+                            return result, "success", None
+                        return [], "no_products_found", None
+                    if isinstance(result, dict):
+                        if result:
+                            return result, "success", None
+                        return None, "no_products_found", None
                     return result, "success", None
+                return None, "no_products_found", None
             except Exception as exc:
                 err_str = str(exc).lower()
                 last_error = str(exc)
                 if "timeout" in err_str:
                     last_status = "timeout"
-                elif "access denied" in err_str or "forbidden" in err_str or "403" in err_str:
+                elif "access denied" in err_str or "forbidden" in err_str or "403" in err_str or "challenge" in err_str:
                     last_status = "blocked"
-                    logger.warning(f"[MeeshoClient] {engine} blocked by edge protection; trying fallback engine...")
+                    logger.warning(f"[MeeshoClient] {engine} blocked by edge protection ({exc}); trying fallback.")
+                    continue
                 else:
                     last_status = "scraper_error"
             finally:

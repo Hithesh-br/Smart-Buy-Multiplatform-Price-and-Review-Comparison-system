@@ -157,6 +157,138 @@ def parse_json_ld(html_content: str) -> List[Dict[str, Any]]:
     return products
 
 
+def parse_meesho_catalog_item(c: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Parses a single catalog product dictionary from Meesho's products/search API or hydration state.
+    Extracts authentic fields:
+    title, price, mrp, rating, review_count, image, url, product_id, specifications.
+    Never invents missing values.
+    """
+    if not isinstance(c, dict):
+        return None
+
+    # Title: hero_product_name is the most descriptive real title
+    title = (
+        c.get("hero_product_name")
+        or c.get("name")
+        or c.get("title")
+        or ""
+    ).strip()
+
+    slug = c.get("slug") or c.get("original_slug") or ""
+    pid = str(c.get("product_id") or c.get("id") or c.get("catalogId") or "").strip()
+
+    generic_titles = (
+        "designer water bottles", "essential water bottles", "fancy water bottles",
+        "water bottles", "lunch boxes & water bottles", "others", "casual"
+    )
+    if (not title or len(title) < 5 or title.lower() in generic_titles) and slug:
+        recovered = extract_title_from_slug(slug)
+        if recovered:
+            title = recovered
+
+    if not title or len(title) < 3:
+        return None
+
+    # Price
+    price_val = (
+        c.get("min_product_price")
+        or c.get("min_catalog_price")
+        or c.get("price")
+        or c.get("discounted_price")
+    )
+    price_num, price_str = parse_price_value(price_val)
+    if not price_num or price_num <= 0:
+        return None
+
+    # MRP
+    mrp_val = c.get("mrp") or c.get("original_price") or price_num
+    mrp_num, mrp_str = parse_price_value(mrp_val)
+
+    # Reviews & Rating
+    reviews_summary = c.get("catalog_reviews_summary") or {}
+    rating = None
+    review_count = 0
+    if isinstance(reviews_summary, dict):
+        rating_val = reviews_summary.get("average_rating") or reviews_summary.get("rating")
+        if rating_val:
+            try:
+                rating = round(float(rating_val), 1)
+            except Exception:
+                pass
+        review_count = int(reviews_summary.get("review_count") or reviews_summary.get("rating_count") or 0)
+    else:
+        rating, review_count = parse_rating_and_reviews(c.get("rating"), c.get("reviews") or c.get("review_count"))
+
+    # Images
+    images = c.get("images") or c.get("product_images") or []
+    image_url = ""
+    if isinstance(images, list) and images:
+        image_url = images[0]
+    elif isinstance(c.get("image"), str):
+        image_url = c.get("image")
+    elif isinstance(c.get("image_url"), str):
+        image_url = c.get("image_url")
+
+    # URL
+    if slug and pid:
+        url = f"https://www.meesho.com/{slug}/p/{pid}"
+    elif slug:
+        url = f"https://www.meesho.com/{slug}"
+    else:
+        url = c.get("url") or f"https://www.meesho.com/p/{pid}"
+
+    # Specifications from full_details & product_attributes
+    specifications: Dict[str, str] = {}
+    fd = c.get("full_details")
+    if isinstance(fd, str):
+        for line in fd.split("\n"):
+            line = line.strip()
+            if ":" in line:
+                k, v = line.split(":", 1)
+                k_clean = k.strip()
+                v_clean = v.strip()
+                if k_clean and v_clean and v_clean.lower() not in ("none", "null", "n/a"):
+                    specifications[k_clean] = v_clean
+    elif isinstance(fd, dict):
+        for k, v in fd.items():
+            if v and str(v).strip().lower() not in ("none", "null", "n/a"):
+                specifications[str(k).strip()] = str(v).strip()
+
+    pa = c.get("product_attributes")
+    if isinstance(pa, list):
+        for attr in pa:
+            if isinstance(attr, str) and ":" in attr:
+                k, v = attr.split(":", 1)
+                k_clean = k.strip()
+                v_clean = v.strip()
+                if k_clean and v_clean and v_clean.lower() not in ("none", "null", "n/a"):
+                    specifications[k_clean] = v_clean
+
+    brand = specifications.get("Brand") or c.get("brand")
+
+    return {
+        "product_id": pid,
+        "title": title,
+        "product_name": title,
+        "price": price_str or f"₹{price_num:,}",
+        "price_num": price_num,
+        "mrp": mrp_str or f"₹{mrp_num:,}",
+        "mrp_num": mrp_num or price_num,
+        "rating": rating,
+        "review_count": review_count,
+        "image": image_url,
+        "image_url": image_url,
+        "url": url,
+        "product_url": url,
+        "specifications": specifications,
+        "brand": brand,
+        "availability": "In Stock",
+        "in_stock": True,
+        "source": "meesho_catalog"
+    }
+
+
 def parse_next_data(html_content: str) -> List[Dict[str, Any]]:
     """Extract products from __NEXT_DATA__ or embedded hydration state."""
     products = []
@@ -166,34 +298,22 @@ def parse_next_data(html_content: str) -> List[Dict[str, Any]]:
         if script and script.string:
             data = json.loads(script.string)
             props = data.get("props", {}).get("pageProps", {})
-            raw_products = props.get("initialState", {}).get("search", {}).get("products") or props.get("products")
-            if isinstance(raw_products, list):
-                for p in raw_products:
-                    if isinstance(p, dict):
-                        p_id = p.get("id") or p.get("product_id")
-                        title = p.get("name") or p.get("title")
-                        slug = p.get("slug") or p.get("url")
-                        if slug and not title:
-                            title = extract_title_from_slug(slug)
-                        price = p.get("price") or p.get("discounted_price")
-                        mrp = p.get("mrp") or p.get("original_price")
-                        rating = p.get("rating") or p.get("average_rating")
-                        reviews = p.get("rating_count") or p.get("reviews_count")
-                        image = p.get("image") or p.get("images", [None])[0]
+            init_st = props.get("initialState", {})
 
-                        url = f"https://www.meesho.com/{slug}/p/{p_id}" if slug and p_id else (slug or "")
-                        if title and price:
-                            products.append({
-                                "product_id": str(p_id or ""),
-                                "title": title,
-                                "price": price,
-                                "mrp": mrp,
-                                "rating": rating,
-                                "review_count": reviews,
-                                "image": image,
-                                "url": url,
-                                "source": "next_data"
-                            })
+            # Try modern Next.js searchListing.listing.products
+            raw_products = (
+                init_st.get("searchListing", {}).get("listing", {}).get("products")
+                or init_st.get("plpListing", {}).get("listing", {}).get("products")
+                or init_st.get("search", {}).get("products")
+                or props.get("products")
+                or []
+            )
+
+            if isinstance(raw_products, list) and raw_products:
+                for p in raw_products:
+                    item = parse_meesho_catalog_item(p)
+                    if item:
+                        products.append(item)
     except Exception as e:
         logger.debug(f"[MeeshoParser] Next.js data parse error: {e}")
     return products

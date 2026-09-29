@@ -11,6 +11,10 @@ Production Entry Point:
 
 import os
 import logging
+from playwright_bootstrap import configure_playwright_environment
+
+configure_playwright_environment()
+
 from flask import Flask, session
 from dotenv import load_dotenv
 load_dotenv()

@@ -72,7 +72,7 @@ class AmazonClient:
     def execute_browser_task(self, task_callable) -> Tuple[Any, str, Optional[str]]:
         """Execute task on Playwright Chromium browser."""
         try:
-            page, context = self.browser_manager.new_page(engine="chromium")
+            page, context = self.browser_manager.new_page(engine="chromium", filter_routes=True)
             try:
                 result = task_callable(page)
                 return result, "success", None

@@ -344,7 +344,7 @@
 
             <!-- Navbar search bar -->
             <form action="/search" method="GET" class="d-flex mx-lg-3 search-glow-container p-1 rounded-pill shadow-sm search-navbar-black position-relative" style="max-width:320px; flex:1;">
-                <input type="text" name="q" value="{{ query }}" class="form-control border-0 px-3 py-1 shadow-none bg-transparent autocomplete-input" placeholder="Search Product..." style="height:36px;" autocomplete="off" aria-label="Search Product">
+                <input type="text" name="q" value="{{ query }}" class="form-control border-0 px-3 py-1 shadow-none bg-transparent autocomplete-input" placeholder="Search product name or paste URL..." style="height:36px;" autocomplete="off" aria-label="Search Product">
                 <button type="submit" class="btn btn-primary rounded-pill d-flex align-items-center justify-content-center" style="height:36px; width:36px; padding:0;" onclick="showLoading()"><i class="fas fa-search"></i></button>
                 <div class="autocomplete-dropdown d-none"></div>
             </form>
@@ -411,21 +411,23 @@
             <!-- Independent Marketplace Status Badges -->
             <div class="d-flex align-items-center gap-2 flex-wrap">
                 {% for p_name in ['Amazon', 'Flipkart', 'Meesho'] %}
-                {% set stat_obj = platform_status.get(p_name, {}) if platform_status else {} %}
+                {% set stat_obj = (marketplace_status.get(p_name) or marketplace_status.get(p_name|lower) or platform_status.get(p_name) or platform_status.get(p_name|lower) or {}) if (marketplace_status or platform_status) else {} %}
                 {% set p_cnt = (platform_results.get(p_name, [])|length) if platform_results else (stat_obj.get('count', 0)) %}
-                {% set p_code = stat_obj.get('status', '')|lower %}
-                <div class="d-flex align-items-center gap-1 border px-2 py-1 rounded-pill bg-white shadow-xs" style="font-size:0.78rem;">
+                {% set p_code = (stat_obj.get('status', '')|string)|lower %}
+                <div id="status-pill-{{ p_name|lower }}" class="d-flex align-items-center gap-1 border px-2 py-1 rounded-pill bg-white shadow-xs" style="font-size:0.78rem;">
                     <span class="fw-bold {% if p_name == 'Amazon' %}text-warning{% elif p_name == 'Flipkart' %}text-primary{% else %}text-danger{% endif %}">{{ p_name }}:</span>
-                    {% if p_cnt > 0 %}
-                    <span class="badge bg-success text-white rounded-pill px-2 py-0"><i class="fas fa-check me-1"></i>Found ({{ p_cnt }})</span>
+                    {% if p_code in ('partial', 'partial_data') and p_cnt > 0 %}
+                    <span class="badge bg-info text-white rounded-pill px-2 py-0"><i class="fas fa-adjust me-1"></i>Partial ({{ p_cnt }})</span>
+                    {% elif p_cnt > 0 or p_code == 'found' %}
+                    <span class="badge bg-success text-white rounded-pill px-2 py-0"><i class="fas fa-check me-1"></i>Found{% if p_cnt > 0 %} ({{ p_cnt }}){% endif %}</span>
                     {% elif p_code in ('blocked', 'access_blocked') %}
                     <span class="badge bg-danger text-white rounded-pill px-2 py-0"><i class="fas fa-shield-alt me-1"></i>Blocked</span>
-                    {% elif p_code == 'timeout' %}
+                    {% elif p_code in ('timeout', 'timed_out') %}
                     <span class="badge bg-warning text-dark rounded-pill px-2 py-0"><i class="fas fa-clock me-1"></i>Timeout</span>
-                    {% elif p_code in ('scraper_error', 'api_error') %}
-                    <span class="badge bg-danger text-white rounded-pill px-2 py-0"><i class="fas fa-exclamation-triangle me-1"></i>API Error</span>
+                    {% elif p_code in ('scraper_error', 'api_error', 'error') %}
+                    <span class="badge bg-danger text-white rounded-pill px-2 py-0"><i class="fas fa-exclamation-triangle me-1"></i>Error</span>
                     {% else %}
-                    <span class="badge bg-secondary text-white rounded-pill px-2 py-0"><i class="fas fa-search me-1"></i>0 Found</span>
+                    <span class="badge bg-secondary text-white rounded-pill px-2 py-0"><i class="fas fa-search me-1"></i>No Results</span>
                     {% endif %}
                 </div>
                 {% endfor %}
@@ -598,14 +600,14 @@
                         </span>
                         {% endif %}
                     </div>
-                    {% if bq and bq.has_sufficient_data %}
+                    {% if bq and bq.has_sufficient_data and bq.quality_score is defined and bq.quality_score is not none %}
                     <div class="d-flex align-items-baseline gap-2 mb-1">
-                        <span class="fs-4 fw-extrabold text-primary" style="color:#7c3aed !important;">{{ bq.quality_score|round|int }}</span>
+                        <span class="fs-4 fw-extrabold text-primary" style="color:#7c3aed !important;">{{ (bq.quality_score|default(0))|round|int }}</span>
                         <span class="text-muted small">/ 100 Quality Score</span>
                     </div>
                     <div class="mb-2">
                         <span class="badge bg-primary-subtle text-primary border border-primary px-2 py-0.5 rounded-pill" style="font-size:0.68rem;">
-                            <i class="fas fa-shield-alt me-1"></i>Confidence: {{ bq.data_confidence|round|int }}%
+                            <i class="fas fa-shield-alt me-1"></i>Confidence: {{ (bq.data_confidence|default(0))|round|int }}%
                         </span>
                     </div>
                     <div class="small fw-semibold text-dark text-truncate mb-2" title="{{ bq.title }}">{{ bq.title }}</div>
@@ -916,13 +918,13 @@
                 <div class="card-header bg-dark text-white py-3 px-4 d-flex align-items-center justify-content-between flex-wrap gap-2">
                     <div class="d-flex align-items-center gap-2">
                         <i class="fas fa-balance-scale text-warning fs-5"></i>
-                        <h5 class="mb-0 fw-bold">PRODUCT SPECIFICATION COMPARISON</h5>
+                        <h5 class="mb-0 fw-bold">PRODUCT SPECIFICATION &amp; QUALITY COMPARISON</h5>
                         {% if category %}
                         <span class="badge bg-primary text-white rounded-pill px-2 py-1 ms-2 small text-uppercase">{{ category }}</span>
                         {% endif %}
                     </div>
-                    <div class="small text-muted">
-                        Live comparison of matched canonical product specifications
+                    <div class="small fw-semibold text-warning">
+                        <i class="fas fa-arrow-circle-right me-1"></i>Quality Comparison → Feature Comparison → Review Evidence → Price Comparison
                     </div>
                 </div>
 
@@ -973,9 +975,29 @@
                         </thead>
                         <tbody>
                             <!-- Resolution of Platform Products with Robust Fallback -->
-                            {% set amz_item = comparison_data.amazon or comparison_data.Amazon or (best_per_platform.get('Amazon') if best_per_platform else None) or (platform_results.Amazon[0] if (platform_results and platform_results.get('Amazon')) else None) %}
-                            {% set fk_item = comparison_data.flipkart or comparison_data.Flipkart or (best_per_platform.get('Flipkart') if best_per_platform else None) or (platform_results.Flipkart[0] if (platform_results and platform_results.get('Flipkart')) else None) %}
-                            {% set mee_item = comparison_data.meesho or comparison_data.Meesho or (best_per_platform.get('Meesho') if best_per_platform else None) or (platform_results.Meesho[0] if (platform_results and platform_results.get('Meesho')) else None) %}
+                            {% set amz_item = comparison_data.amazon or comparison_data.Amazon or (best_per_platform.get('Amazon') if best_per_platform else None) %}
+                            {% set fk_item = comparison_data.flipkart or comparison_data.Flipkart or (best_per_platform.get('Flipkart') if best_per_platform else None) %}
+                            {% set mee_item = comparison_data.meesho or comparison_data.Meesho or (best_per_platform.get('Meesho') if best_per_platform else None) %}
+
+                            <!-- Platform Status Row -->
+                            <tr class="table-light border-bottom">
+                                <td class="fw-bold text-start ps-4 text-dark small text-uppercase"><i class="fas fa-signal me-2 text-primary"></i>Platform Status</td>
+                                <td id="table-stat-amazon">
+                                    <span class="badge {{ amz_stat.badge_class or 'bg-secondary text-white' }} px-3 py-1 rounded-pill small">
+                                        <i class="{{ amz_stat.icon or 'fas fa-info-circle' }} me-1"></i>{{ amz_stat.label or 'Not Available' }}
+                                    </span>
+                                </td>
+                                <td id="table-stat-flipkart">
+                                    <span class="badge {{ fk_stat.badge_class or 'bg-secondary text-white' }} px-3 py-1 rounded-pill small">
+                                        <i class="{{ fk_stat.icon or 'fas fa-info-circle' }} me-1"></i>{{ fk_stat.label or 'Not Available' }}
+                                    </span>
+                                </td>
+                                <td id="table-stat-meesho">
+                                    <span class="badge {{ mee_stat.badge_class or 'bg-secondary text-white' }} px-3 py-1 rounded-pill small">
+                                        <i class="{{ mee_stat.icon or 'fas fa-info-circle' }} me-1"></i>{{ mee_stat.label or 'Not Available' }}
+                                    </span>
+                                </td>
+                            </tr>
 
                             <!-- Product Preview Image Row -->
                             <tr class="table-light">
@@ -1009,75 +1031,177 @@
                                 </td>
                             </tr>
 
-                            <!-- Categorized Specification Rows with Distinct Preference Dividers -->
+                            <!-- ═════════ 5 PRIORITIZED COMPARISON SECTIONS ═════════ -->
                             {% set is_inv = ('', 'N/A', 'NA', 'Not Available', 'Unknown', 'null', 'None', 'Scraping unavailable', 'No matching product', 'No matching product found', '—', '-', 'generic') %}
-                            {% set quality_field_names = ('Quality Score', 'Quality Band', 'Data Confidence', 'Build Material', 'Warranty', 'Seller', 'Rating', 'Reviews', 'Total Reviews', 'Quality Highlights') %}
-                            {% set price_field_names = ('Price', 'MRP', 'Discount', 'Value for Money Index', 'Value for Money') %}
-                            {% set identity_field_names = ('Product Name', 'Brand', 'Model', 'Product Type') %}
+                            {% set s1_names = ('Product Name', 'Brand', 'Model', 'Model Number', 'Product Type', 'Variant', 'Color') %}
+                            {% set s2_qual_names = ('Quality Score', 'Quality Band', 'Data Confidence', 'Evidence Coverage', 'Quality Highlights', 'Quality Basis') %}
+                            {% set s3_review_names = ('Rating', 'Customer Rating', 'Reviews', 'Review Count', 'Total Reviews', 'Review Evidence', 'Buyer Trust') %}
+                            {% set s4_price_names = ('Price', 'MRP', 'Discount', 'Unit Price', 'Price per unit', 'Price Per Unit', 'Value for Money', 'Value for Money Index', 'Availability') %}
+                            {% set s5_purchase_names = ('Seller', 'Warranty', 'Return Policy', 'Return Information', 'Country of Origin') %}
 
-                            {# Flag tracker for section dividers #}
-                            {% set ns = namespace(shown_quality_hdr=false, shown_price_hdr=false, shown_tech_hdr=false) %}
-
+                            {# --- Section 1: Product Identity --- #}
+                            <tr class="table-dark bg-dark bg-opacity-75 border-top border-bottom border-dark">
+                                <td colspan="4" class="text-start ps-4 py-2 fw-bold text-white small text-uppercase" style="letter-spacing: 0.5px;">
+                                    <i class="fas fa-id-card text-info me-2"></i>Section 1 – Product Identity
+                                </td>
+                            </tr>
                             {% for row in specifications_matrix %}
                                 {% set r_name = (row.name or row.specification or row.field or '')|string|trim %}
-                                {% set amz_val = row.amazon %}
-                                {% set fk_val = row.flipkart %}
-                                {% set mee_val = row.meesho %}
-                                {% set has_amz = amz_val and amz_val not in is_inv and not ('temporarily unavailable' in amz_val|string|lower or 'scraping unavailable' in amz_val|string|lower or 'no matching product' in amz_val|string|lower) %}
-                                {% set has_fk = fk_val and fk_val not in is_inv and not ('temporarily unavailable' in fk_val|string|lower or 'scraping unavailable' in fk_val|string|lower or 'no matching product' in fk_val|string|lower) %}
-                                {% set has_mee = mee_val and mee_val not in is_inv and not ('temporarily unavailable' in mee_val|string|lower or 'scraping unavailable' in mee_val|string|lower or 'no matching product' in mee_val|string|lower) %}
-
-                                {% if (has_amz or has_fk or has_mee) and r_name not in ('Buy Link', 'link', 'url', 'product_url') %}
-
-                                    {# Render Section 1: Quality of Product (First Preference) Header #}
-                                    {% if r_name in quality_field_names and not ns.shown_quality_hdr %}
-                                        {% set ns.shown_quality_hdr = true %}
-                                        <tr class="table-primary bg-primary bg-opacity-10 border-top border-bottom border-primary border-opacity-25">
-                                            <td colspan="4" class="text-start ps-4 py-2 fw-bold text-primary small text-uppercase" style="letter-spacing: 0.5px;">
-                                                <i class="fas fa-award me-2"></i>1. Product Quality &amp; Trust Evidence (First Preference)
-                                            </td>
-                                        </tr>
+                                {% if r_name in s1_names %}
+                                    {% set amz_val = row.amazon %}
+                                    {% set fk_val = row.flipkart %}
+                                    {% set mee_val = row.meesho %}
+                                    {% set has_amz = amz_val and amz_val not in is_inv and not ('temporarily unavailable' in amz_val|string|lower or 'scraping unavailable' in amz_val|string|lower or 'no matching product' in amz_val|string|lower) %}
+                                    {% set has_fk = fk_val and fk_val not in is_inv and not ('temporarily unavailable' in fk_val|string|lower or 'scraping unavailable' in fk_val|string|lower or 'no matching product' in fk_val|string|lower) %}
+                                    {% set has_mee = mee_val and mee_val not in is_inv and not ('temporarily unavailable' in mee_val|string|lower or 'scraping unavailable' in mee_val|string|lower or 'no matching product' in mee_val|string|lower) %}
+                                    {% if has_amz or has_fk or has_mee or amz_item or fk_item or mee_item %}
+                                    <tr>
+                                        <td class="fw-semibold text-start ps-4 text-dark"><i class="fas fa-cube text-muted me-2"></i>{{ r_name }}</td>
+                                        <td class="text-start ps-3">{{ amz_val if has_amz else ((amz_item.title or amz_item.product_name) if (r_name == 'Product Name' and amz_item) else (amz_item.brand if (r_name == 'Brand' and amz_item and amz_item.brand) else (amz_item.model if (r_name == 'Model' and amz_item and amz_item.model) else ('Exact Product Not Found' if r_name == 'Product Name' else 'Not Available')))) }}</td>
+                                        <td class="text-start ps-3">{{ fk_val if has_fk else ((fk_item.title or fk_item.product_name) if (r_name == 'Product Name' and fk_item) else (fk_item.brand if (r_name == 'Brand' and fk_item and fk_item.brand) else (fk_item.model if (r_name == 'Model' and fk_item and fk_item.model) else ('Exact Product Not Found' if r_name == 'Product Name' else 'Not Available')))) }}</td>
+                                        <td class="text-start ps-3">{{ mee_val if has_mee else ((mee_item.title or mee_item.product_name) if (r_name == 'Product Name' and mee_item) else (mee_item.brand if (r_name == 'Brand' and mee_item and mee_item.brand) else (mee_item.model if (r_name == 'Model' and mee_item and mee_item.model) else ('Exact Product Not Found' if r_name == 'Product Name' else 'Not Available')))) }}</td>
+                                    </tr>
                                     {% endif %}
+                                {% endif %}
+                            {% endfor %}
 
-                                    {# Render Section 2: Price of Product (Next Preference) Header #}
-                                    {% if r_name in price_field_names and not ns.shown_price_hdr %}
-                                        {% set ns.shown_price_hdr = true %}
-                                        <tr class="table-success bg-success bg-opacity-10 border-top border-bottom border-success border-opacity-25">
-                                            <td colspan="4" class="text-start ps-4 py-2 fw-bold text-success small text-uppercase" style="letter-spacing: 0.5px;">
-                                                <i class="fas fa-tag me-2"></i>2. Product Price &amp; Value Analysis (Next Preference)
-                                            </td>
-                                        </tr>
-                                    {% endif %}
-
-                                    {# Render Section 3: Technical Specifications Header #}
-                                    {% if r_name not in identity_field_names and r_name not in quality_field_names and r_name not in price_field_names and not ns.shown_tech_hdr %}
-                                        {% set ns.shown_tech_hdr = true %}
-                                        <tr class="table-light border-top border-bottom border-secondary border-opacity-25">
-                                            <td colspan="4" class="text-start ps-4 py-2 fw-bold text-secondary small text-uppercase" style="letter-spacing: 0.5px;">
-                                                <i class="fas fa-sliders-h me-2"></i>3. Product Technical Specifications
-                                            </td>
-                                        </tr>
-                                    {% endif %}
-
+                            {# --- Section 2: Quality & Technical Specifications (Quality First) --- #}
+                            <tr class="table-primary bg-primary bg-opacity-10 border-top border-bottom border-primary border-opacity-25">
+                                <td colspan="4" class="text-start ps-4 py-2 fw-bold text-primary small text-uppercase" style="letter-spacing: 0.5px;">
+                                    <i class="fas fa-award text-primary me-2"></i>Section 2 – Quality and Category Specifications (Priority 1 &amp; 2)
+                                </td>
+                            </tr>
+                            {% for row in specifications_matrix %}
+                                {% set r_name = (row.name or row.specification or row.field or '')|string|trim %}
+                                {% if r_name not in s1_names and r_name not in s3_review_names and r_name not in s4_price_names and r_name not in s5_purchase_names and r_name not in ('Buy Link', 'link', 'url', 'product_url') %}
+                                    {% set amz_val = row.amazon %}
+                                    {% set fk_val = row.flipkart %}
+                                    {% set mee_val = row.meesho %}
+                                    {% set has_amz = amz_val and amz_val not in is_inv and not ('temporarily unavailable' in amz_val|string|lower or 'scraping unavailable' in amz_val|string|lower or 'no matching product' in amz_val|string|lower) %}
+                                    {% set has_fk = fk_val and fk_val not in is_inv and not ('temporarily unavailable' in fk_val|string|lower or 'scraping unavailable' in fk_val|string|lower or 'no matching product' in fk_val|string|lower) %}
+                                    {% set has_mee = mee_val and mee_val not in is_inv and not ('temporarily unavailable' in mee_val|string|lower or 'scraping unavailable' in mee_val|string|lower or 'no matching product' in mee_val|string|lower) %}
+                                    {% if has_amz or has_fk or has_mee %}
                                     <tr>
                                         <td class="fw-semibold text-start ps-4 text-dark">
                                             {% if r_name in ('Quality Score', 'Quality Band', 'Quality Highlights') %}
-                                                <i class="fas fa-award text-primary me-1"></i>
-                                            {% elif r_name in ('Price', 'MRP', 'Discount', 'Value for Money Index') %}
-                                                <i class="fas fa-coins text-success me-1"></i>
+                                            <i class="fas fa-award text-primary me-2"></i>
+                                            {% elif r_name in ('Data Confidence', 'Evidence Coverage') %}
+                                            <i class="fas fa-shield-alt text-info me-2"></i>
+                                            {% else %}
+                                            <i class="fas fa-sliders-h text-secondary me-2"></i>
                                             {% endif %}
                                             {{ r_name }}
                                         </td>
-                                        <td class="{% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Amazon' %}fw-bold text-success bg-success bg-opacity-10{% elif r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">
-                                            {{ amz_val if has_amz else '—' }}
-                                        </td>
-                                        <td class="{% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Flipkart' %}fw-bold text-success bg-success bg-opacity-10{% elif r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">
-                                            {{ fk_val if has_fk else '—' }}
-                                        </td>
-                                        <td class="{% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Meesho' %}fw-bold text-success bg-success bg-opacity-10{% elif r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">
-                                            {{ mee_val if has_mee else '—' }}
-                                        </td>
+                                        <td class="text-start ps-3 {% if r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">{{ amz_val if has_amz else ((amz_item.quality_score|round|int ~ '/100 (' ~ (amz_item.quality_band or 'High Quality') ~ ')') if (r_name == 'Quality Score' and amz_item and amz_item.quality_score) else ((amz_item.data_confidence|round|int ~ '% Verified Evidence') if (r_name in ('Data Confidence', 'Evidence Coverage') and amz_item and amz_item.data_confidence) else 'Not Available')) }}</td>
+                                        <td class="text-start ps-3 {% if r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">{{ fk_val if has_fk else ((fk_item.quality_score|round|int ~ '/100 (' ~ (fk_item.quality_band or 'High Quality') ~ ')') if (r_name == 'Quality Score' and fk_item and fk_item.quality_score) else ((fk_item.data_confidence|round|int ~ '% Verified Evidence') if (r_name in ('Data Confidence', 'Evidence Coverage') and fk_item and fk_item.data_confidence) else 'Not Available')) }}</td>
+                                        <td class="text-start ps-3 {% if r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">{{ mee_val if has_mee else ((mee_item.quality_score|round|int ~ '/100 (' ~ (mee_item.quality_band or 'High Quality') ~ ')') if (r_name == 'Quality Score' and mee_item and mee_item.quality_score) else ((mee_item.data_confidence|round|int ~ '% Verified Evidence') if (r_name in ('Data Confidence', 'Evidence Coverage') and mee_item and mee_item.data_confidence) else 'Not Available')) }}</td>
                                     </tr>
+                                    {% endif %}
+                                {% endif %}
+                            {% endfor %}
+
+                            {# --- Section 3: Ratings and Reviews --- #}
+                            <tr class="table-warning bg-warning bg-opacity-10 border-top border-bottom border-warning border-opacity-25">
+                                <td colspan="4" class="text-start ps-4 py-2 fw-bold text-dark small text-uppercase" style="letter-spacing: 0.5px;">
+                                    <i class="fas fa-star text-warning me-2"></i>Section 3 – Ratings and Review Evidence (Priority 3)
+                                </td>
+                            </tr>
+                            {% for row in specifications_matrix %}
+                                {% set r_name = (row.name or row.specification or row.field or '')|string|trim %}
+                                {% if r_name in s3_review_names %}
+                                    {% set amz_val = row.amazon %}
+                                    {% set fk_val = row.flipkart %}
+                                    {% set mee_val = row.meesho %}
+                                    {% set has_amz = amz_val and amz_val not in is_inv and not ('temporarily unavailable' in amz_val|string|lower or 'scraping unavailable' in amz_val|string|lower or 'no matching product' in amz_val|string|lower) %}
+                                    {% set has_fk = fk_val and fk_val not in is_inv and not ('temporarily unavailable' in fk_val|string|lower or 'scraping unavailable' in fk_val|string|lower or 'no matching product' in fk_val|string|lower) %}
+                                    {% set has_mee = mee_val and mee_val not in is_inv and not ('temporarily unavailable' in mee_val|string|lower or 'scraping unavailable' in mee_val|string|lower or 'no matching product' in mee_val|string|lower) %}
+                                    {% if not has_amz and amz_item %}
+                                        {% if r_name in ('Rating', 'Customer Rating') and (amz_item.rating or amz_item.rating_num) %}
+                                            {% set amz_val = ('★ ' ~ (amz_item.rating or amz_item.rating_num)) %}
+                                            {% set has_amz = true %}
+                                        {% elif r_name in ('Reviews', 'Review Count', 'Total Reviews', 'Review Evidence') and (amz_item.reviews or amz_item.review_count) %}
+                                            {% set amz_val = ((amz_item.reviews or amz_item.review_count)|string ~ ' reviews') %}
+                                            {% set has_amz = true %}
+                                        {% endif %}
+                                    {% endif %}
+                                    {% if not has_fk and fk_item %}
+                                        {% if r_name in ('Rating', 'Customer Rating') and (fk_item.rating or fk_item.rating_num) %}
+                                            {% set fk_val = ('★ ' ~ (fk_item.rating or fk_item.rating_num)) %}
+                                            {% set has_fk = true %}
+                                        {% elif r_name in ('Reviews', 'Review Count', 'Total Reviews', 'Review Evidence') and (fk_item.reviews or fk_item.review_count) %}
+                                            {% set fk_val = ((fk_item.reviews or fk_item.review_count)|string ~ ' reviews') %}
+                                            {% set has_fk = true %}
+                                        {% endif %}
+                                    {% endif %}
+                                    {% if not has_mee and mee_item %}
+                                        {% if r_name in ('Rating', 'Customer Rating') and (mee_item.rating or mee_item.rating_num) %}
+                                            {% set mee_val = ('★ ' ~ (mee_item.rating or mee_item.rating_num)) %}
+                                            {% set has_mee = true %}
+                                        {% elif r_name in ('Reviews', 'Review Count', 'Total Reviews', 'Review Evidence') and (mee_item.reviews or mee_item.review_count) %}
+                                            {% set mee_val = ((mee_item.reviews or mee_item.review_count)|string ~ ' reviews') %}
+                                            {% set has_mee = true %}
+                                        {% endif %}
+                                    {% endif %}
+                                    {% if has_amz or has_fk or has_mee %}
+                                    <tr>
+                                        <td class="fw-semibold text-start ps-4 text-dark"><i class="fas fa-comment-dots text-warning me-2"></i>{{ r_name }}</td>
+                                        <td class="text-start ps-3">{{ amz_val if has_amz else 'Not Available' }}</td>
+                                        <td class="text-start ps-3">{{ fk_val if has_fk else 'Not Available' }}</td>
+                                        <td class="text-start ps-3">{{ mee_val if has_mee else 'Not Available' }}</td>
+                                    </tr>
+                                    {% endif %}
+                                {% endif %}
+                            {% endfor %}
+
+                            {# --- Section 4: Price and Value --- #}
+                            <tr class="table-success bg-success bg-opacity-10 border-top border-bottom border-success border-opacity-25">
+                                <td colspan="4" class="text-start ps-4 py-2 fw-bold text-success small text-uppercase" style="letter-spacing: 0.5px;">
+                                    <i class="fas fa-coins text-success me-2"></i>Section 4 – Price and Economic Value (Priority 4 &amp; 5)
+                                </td>
+                            </tr>
+                            {% for row in specifications_matrix %}
+                                {% set r_name = (row.name or row.specification or row.field or '')|string|trim %}
+                                {% if r_name in s4_price_names %}
+                                    {% set amz_val = row.amazon %}
+                                    {% set fk_val = row.flipkart %}
+                                    {% set mee_val = row.meesho %}
+                                    {% set has_amz = amz_val and amz_val not in is_inv and not ('temporarily unavailable' in amz_val|string|lower or 'scraping unavailable' in amz_val|string|lower or 'no matching product' in amz_val|string|lower) %}
+                                    {% set has_fk = fk_val and fk_val not in is_inv and not ('temporarily unavailable' in fk_val|string|lower or 'scraping unavailable' in fk_val|string|lower or 'no matching product' in fk_val|string|lower) %}
+                                    {% set has_mee = mee_val and mee_val not in is_inv and not ('temporarily unavailable' in mee_val|string|lower or 'scraping unavailable' in mee_val|string|lower or 'no matching product' in mee_val|string|lower) %}
+                                    {% if has_amz or has_fk or has_mee %}
+                                    <tr>
+                                        <td class="fw-semibold text-start ps-4 text-dark"><i class="fas fa-tag text-success me-2"></i>{{ r_name }}</td>
+                                        <td class="text-start ps-3 {% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Amazon' %}fw-bold text-success bg-success bg-opacity-10{% endif %}">{{ amz_val if has_amz else 'Not Available' }}</td>
+                                        <td class="text-start ps-3 {% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Flipkart' %}fw-bold text-success bg-success bg-opacity-10{% endif %}">{{ fk_val if has_fk else 'Not Available' }}</td>
+                                        <td class="text-start ps-3 {% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Meesho' %}fw-bold text-success bg-success bg-opacity-10{% endif %}">{{ mee_val if has_mee else 'Not Available' }}</td>
+                                    </tr>
+                                    {% endif %}
+                                {% endif %}
+                            {% endfor %}
+
+                            {# --- Section 5: Purchase Information --- #}
+                            <tr class="table-secondary bg-secondary bg-opacity-10 border-top border-bottom border-secondary border-opacity-25">
+                                <td colspan="4" class="text-start ps-4 py-2 fw-bold text-secondary small text-uppercase" style="letter-spacing: 0.5px;">
+                                    <i class="fas fa-truck text-secondary me-2"></i>Section 5 – Purchase, Warranty &amp; Seller Information
+                                </td>
+                            </tr>
+                            {% for row in specifications_matrix %}
+                                {% set r_name = (row.name or row.specification or row.field or '')|string|trim %}
+                                {% if r_name in s5_purchase_names %}
+                                    {% set amz_val = row.amazon %}
+                                    {% set fk_val = row.flipkart %}
+                                    {% set mee_val = row.meesho %}
+                                    {% set has_amz = amz_val and amz_val not in is_inv and not ('temporarily unavailable' in amz_val|string|lower or 'scraping unavailable' in amz_val|string|lower or 'no matching product' in amz_val|string|lower) %}
+                                    {% set has_fk = fk_val and fk_val not in is_inv and not ('temporarily unavailable' in fk_val|string|lower or 'scraping unavailable' in fk_val|string|lower or 'no matching product' in fk_val|string|lower) %}
+                                    {% set has_mee = mee_val and mee_val not in is_inv and not ('temporarily unavailable' in mee_val|string|lower or 'scraping unavailable' in mee_val|string|lower or 'no matching product' in mee_val|string|lower) %}
+                                    {% if has_amz or has_fk or has_mee %}
+                                    <tr>
+                                        <td class="fw-semibold text-start ps-4 text-dark"><i class="fas fa-shield-alt text-secondary me-2"></i>{{ r_name }}</td>
+                                        <td class="text-start ps-3">{{ amz_val if has_amz else 'Not Available' }}</td>
+                                        <td class="text-start ps-3">{{ fk_val if has_fk else 'Not Available' }}</td>
+                                        <td class="text-start ps-3">{{ mee_val if has_mee else 'Not Available' }}</td>
+                                    </tr>
+                                    {% endif %}
                                 {% endif %}
                             {% endfor %}
 
@@ -1239,46 +1363,51 @@
                                 <span class="fw-bold fs-6">{{ platform }}</span>
                                 {% set p_stat_header = platform_status.get(platform, {}).get('status', 'unavailable') if platform_status else 'unavailable' %}
                                 {% if items|length > 0 %}
-                                <span class="badge bg-white text-dark ms-2 small">{{ items|length }} Found</span>
+                                <span id="platform-header-badge-{{ platform|lower }}" class="badge bg-white text-dark ms-2 small">{{ items|length }} Found</span>
                                 {% elif p_stat_header in ('access_blocked', 'blocked') %}
-                                <span class="badge bg-danger-subtle text-danger border border-danger ms-2 small"><i class="fas fa-shield-alt me-1"></i>Blocked</span>
+                                <span id="platform-header-badge-{{ platform|lower }}" class="badge bg-danger-subtle text-danger border border-danger ms-2 small"><i class="fas fa-shield-alt me-1"></i>Blocked</span>
                                 {% elif p_stat_header == 'timeout' %}
-                                <span class="badge bg-warning-subtle text-warning border border-warning ms-2 small"><i class="fas fa-clock me-1"></i>Timed Out</span>
+                                <span id="platform-header-badge-{{ platform|lower }}" class="badge bg-warning-subtle text-warning border border-warning ms-2 small"><i class="fas fa-clock me-1"></i>Timeout</span>
                                 {% elif p_stat_header == 'no_products_found' %}
-                                <span class="badge bg-light text-muted border ms-2 small"><i class="fas fa-search me-1"></i>0 Matches</span>
+                                <span id="platform-header-badge-{{ platform|lower }}" class="badge bg-light text-muted border ms-2 small"><i class="fas fa-search me-1"></i>0 Matches</span>
                                 {% else %}
-                                <span class="badge bg-danger-subtle text-danger border border-danger ms-2 small"><i class="fas fa-exclamation-triangle me-1"></i>Unavailable</span>
+                                <span id="platform-header-badge-{{ platform|lower }}" class="badge bg-danger-subtle text-danger border border-danger ms-2 small"><i class="fas fa-exclamation-triangle me-1"></i>Error</span>
                                 {% endif %}
                             </div>
 
                             <!-- Vertical Product Cards Column -->
-                            <div class="card-body p-3">
+                            <div class="card-body p-3" id="platform-body-{{ platform|lower }}">
                                 {% if platform_status and platform_status.get(platform) and not platform_status[platform].available %}
                                 {% set p_stat = platform_status[platform].get('status', 'unavailable') %}
                                 <div class="alert {% if p_stat in ('access_blocked', 'blocked') %}alert-danger{% elif p_stat == 'no_products_found' %}alert-info{% elif p_stat == 'timeout' %}alert-warning{% else %}alert-danger{% endif %} border-0 shadow-sm rounded-4 text-center py-3 mb-3">
-                                    <i class="fas {% if p_stat in ('access_blocked', 'blocked') %}fa-shield-alt{% elif p_stat == 'no_products_found' %}fa-search{% elif p_stat == 'timeout' %}fa-clock{% else %}fa-exclamation-circle{% endif %} me-1"></i>
-                                    <strong>
+                                    <i class="fas {% if p_stat in ('access_blocked', 'blocked') %}fa-shield-alt text-danger{% elif p_stat == 'no_products_found' %}fa-search text-secondary{% elif p_stat == 'timeout' %}fa-clock text-warning{% else %}fa-exclamation-circle text-danger{% endif %} fa-2x mb-2 d-block"></i>
+                                    <strong class="d-block mb-1">
                                         {% if p_stat in ('access_blocked', 'blocked') %}
-                                        {{ platform }} blocked automated access
+                                        {{ platform }} Access Restricted
                                         {% elif p_stat == 'no_products_found' %}
-                                        No matching {{ platform }} products found
+                                        No Matching {{ platform }} Products
                                         {% elif p_stat == 'timeout' %}
-                                        {{ platform }} request timed out
+                                        {{ platform }} Request Timed Out
                                         {% else %}
-                                        {{ platform }} could not be reached
+                                        {{ platform }} Scraper Error
                                         {% endif %}
                                     </strong>
-                                    <div class="small text-muted mt-1">
+                                    <div class="small text-muted mb-2">
                                         {% if p_stat in ('access_blocked', 'blocked') %}
-                                        Marketplace security controls restricted live access.
+                                        Automated access was restricted by platform security.
                                         {% elif p_stat == 'no_products_found' %}
-                                        No matching live products found for this query.
+                                        No live listings found matching "{{ query }}".
                                         {% elif p_stat == 'timeout' %}
-                                        Live search request exceeded deadline. Other platforms remain active.
+                                        The request exceeded the configured time limit. Other platforms remain active.
                                         {% else %}
                                         Temporary scraper connection issue. Other platforms remain active.
                                         {% endif %}
                                     </div>
+                                    {% if p_stat in ('timeout', 'scraper_error', 'unavailable', 'blocked') or platform_status[platform].get('retry_available') %}
+                                    <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 py-1 shadow-xs fw-semibold mt-1" onclick="retryPlatform('{{ platform }}', '{{ query }}')">
+                                        <i class="fas fa-redo me-1"></i> Retry {{ platform }}
+                                    </button>
+                                    {% endif %}
                                 </div>
                                 {% endif %}
 
@@ -1289,20 +1418,25 @@
                                     <!-- Badges -->
                                     <div class="d-flex flex-wrap gap-1 mb-2 align-items-center">
                                         {% if is_best %}<span class="badge bg-success"><i class="fas fa-tag me-1"></i>Lowest Price</span>{% endif %}
-                                        {% if item.get('match_status') == 'EXACT_MATCH' or item.get('match_type') == 'EXACT' %}
+                                        {% set m_stat = item.get('match_status_label') or item.get('match_status') %}
+                                        {% if m_stat in ('Exact Match', 'EXACT_MATCH', 'Exact') %}
                                         <span class="badge bg-success" style="font-size:0.72rem;"><i class="fas fa-check-double me-1"></i>Exact Match</span>
-                                        {% elif item.get('match_status') == 'VARIANT_MATCH' or item.get('match_type') == 'VARIANT' %}
-                                        <span class="badge bg-info text-dark" style="font-size:0.72rem;"><i class="fas fa-layer-group me-1"></i>Variant</span>
-                                        {% elif item.get('match_status') == 'PRICE/IDENTITY UNVERIFIED' %}
-                                        <span class="badge bg-danger text-white" style="font-size:0.72rem;" title="Price anomaly - identity unverified"><i class="fas fa-exclamation-triangle me-1"></i>Unverified</span>
-                                        {% elif item.get('match_status') == 'SIMILAR_PRODUCT' or item.get('match_type') == 'SIMILAR' %}
-                                        <span class="badge bg-secondary" style="font-size:0.72rem;">Similar</span>
+                                        {% elif m_stat in ('Partial Match', 'VARIANT_MATCH', 'Variant') %}
+                                        <span class="badge bg-info text-dark" style="font-size:0.72rem;"><i class="fas fa-layer-group me-1"></i>Partial Match</span>
+                                        {% elif m_stat in ('Similar Product', 'SIMILAR_PRODUCT', 'Similar') %}
+                                        <span class="badge bg-secondary" style="font-size:0.72rem;"><i class="fas fa-search me-1"></i>Similar Product</span>
+                                        {% elif m_stat in ('Different Product – Not Comparable', 'DIFFERENT_PRODUCT', 'ACCESSORY_REJECT', 'PRICE/IDENTITY UNVERIFIED') %}
+                                        <span class="badge bg-danger text-white" style="font-size:0.72rem;"><i class="fas fa-ban me-1"></i>Different Product – Not Comparable</span>
+                                        {% elif m_stat in ('Insufficient Data', 'INSUFFICIENT_DATA') %}
+                                        <span class="badge bg-warning text-dark" style="font-size:0.72rem;"><i class="fas fa-exclamation-triangle me-1"></i>Insufficient Data</span>
                                         {% endif %}
-                                        {% if item.get('quality_score') %}
-                                        <span class="badge bg-primary-subtle text-primary border border-primary" style="font-size:0.68rem;" title="Bayesian Quality Score"><i class="fas fa-award me-1"></i>{{ item.quality_score|round|int }}/100</span>
+                                        {% if item.get('quality_score') and item.get('has_sufficient_data', True) %}
+                                        <span class="badge bg-primary-subtle text-primary border border-primary" style="font-size:0.68rem;" title="Specification Quality Score"><i class="fas fa-award me-1"></i>{{ item.quality_score|round|int }}/100</span>
+                                        {% elif item.get('has_sufficient_data') is false %}
+                                        <span class="badge bg-secondary-subtle text-muted border" style="font-size:0.68rem;"><i class="fas fa-info-circle me-1"></i>Score N/A</span>
                                         {% endif %}
-                                        {% if item.get('data_confidence') %}
-                                        <span class="badge bg-light text-secondary border" style="font-size:0.68rem;" title="Data Confidence"><i class="fas fa-shield-alt me-1"></i>{{ item.data_confidence|round|int }}%</span>
+                                        {% if item.get('data_confidence') or item.get('evidence_coverage') %}
+                                        <span class="badge bg-light text-secondary border" style="font-size:0.68rem;" title="Evidence Coverage"><i class="fas fa-shield-alt me-1"></i>{{ (item.evidence_coverage or item.data_confidence)|round|int }}%</span>
                                         {% endif %}
                                         {% if item.get('is_best_rated') %}<span class="badge bg-warning text-dark"><i class="fas fa-star me-1"></i>Best Rated</span>{% endif %}
                                         {% if item.get('in_stock') %}
@@ -1335,53 +1469,63 @@
                                     </div>
                                     {% endif %}
 
-                                    <!-- Quality Points (First Preference Quality Display) -->
+                                    <!-- Quality Box (Specification-based Quality First) -->
                                     <div class="quality-points-box p-2 my-2 rounded-3 text-start" style="background: rgba(14, 165, 233, 0.05); border: 1px dashed rgba(14, 165, 233, 0.35);">
                                         <div class="d-flex align-items-center justify-content-between mb-1">
                                             <span class="fw-bold text-primary small" style="font-size: 0.72rem;">
-                                                <i class="fas fa-shield-alt me-1"></i>Quality Points
+                                                <i class="fas fa-award me-1"></i>Specification Quality
                                             </span>
-                                            {% if item.quality_score %}
+                                            {% if item.has_sufficient_data and item.quality_score is defined and item.quality_score is not none and item.quality_score > 0 %}
                                             <span class="badge bg-primary text-white" style="font-size: 0.65rem;">
-                                                {{ item.quality_score|round|int }}/100
+                                                {{ (item.quality_score|default(0))|round|int }}/100
+                                            </span>
+                                            {% else %}
+                                            <span class="badge bg-secondary text-white" style="font-size: 0.65rem;">
+                                                Not Available
                                             </span>
                                             {% endif %}
                                         </div>
-                                        <ul class="list-unstyled mb-0" style="font-size: 0.73rem; line-height: 1.4;">
-                                            {% set q_pts = item.quality_points or [] %}
-                                            {% if not q_pts %}
-                                                {% set q_pts = [] %}
-                                                {% if item.quality_score %}
-                                                    {% set _ = q_pts.append("Quality Score: " ~ (item.quality_score|round|int) ~ "/100 (" ~ (item.quality_band or 'Standard Quality') ~ ")") %}
-                                                {% endif %}
-                                                {% if item.quality_attributes and item.quality_attributes.material and item.quality_attributes.material != 'Standard Durable Material' %}
-                                                    {% set _ = q_pts.append("Build: " ~ item.quality_attributes.material) %}
-                                                {% elif item.material and item.material != 'N/A' %}
-                                                    {% set _ = q_pts.append("Build: " ~ item.material) %}
-                                                {% endif %}
-                                                {% if item.warranty and item.warranty != 'N/A' %}
-                                                    {% set _ = q_pts.append("Warranty: " ~ item.warranty) %}
-                                                {% elif item.quality_attributes and item.quality_attributes.warranty %}
-                                                    {% set _ = q_pts.append("Warranty: " ~ item.quality_attributes.warranty) %}
-                                                {% endif %}
-                                                {% if item.rating and item.rating != 'N/A' and item.rating != '0' %}
-                                                    {% set _ = q_pts.append("Buyer Trust: ★ " ~ item.rating ~ " (" ~ (item.reviews or 'Verified') ~ " reviews)") %}
-                                                {% elif item.reviews and item.reviews != 'N/A' and item.reviews != '0' %}
-                                                    {% set _ = q_pts.append("Buyer Trust: " ~ item.reviews ~ " verified reviews") %}
-                                                {% endif %}
-                                                {% if item.positive_themes %}
-                                                    {% for p_th in item.positive_themes[:2] %}
-                                                        {% set _ = q_pts.append("Highlight: " ~ p_th) %}
-                                                    {% endfor %}
-                                                {% endif %}
+
+                                        {% if item.has_sufficient_data and item.quality_score is defined and item.quality_score is not none and item.quality_score > 0 %}
+                                        <div class="text-muted small mb-1" style="font-size: 0.7rem;">
+                                            <strong>Evidence Coverage:</strong> {{ ((item.evidence_coverage or item.data_confidence or 0)|default(0))|round|int }}%
+                                        </div>
+                                        <div class="small fw-semibold text-dark mb-1" style="font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.3px;">
+                                            Quality Basis:
+                                        </div>
+                                        <ul class="list-unstyled mb-1" style="font-size: 0.72rem; line-height: 1.35;">
+                                            {% set q_basis = (item.quality_report.quality_basis if item.quality_report and item.quality_report.quality_basis else []) %}
+                                            {% if q_basis %}
+                                                {% for b_item in q_basis[:4] %}
+                                                <li class="d-flex align-items-baseline mb-0.5">
+                                                    {% if b_item.status == 'verified' %}
+                                                    <i class="fas fa-check text-success me-1 flex-shrink-0" style="font-size: 0.65rem;"></i>
+                                                    <span class="text-dark">{{ b_item.label }}</span>
+                                                    {% else %}
+                                                    <i class="fas fa-exclamation-triangle text-warning me-1 flex-shrink-0" style="font-size: 0.65rem;"></i>
+                                                    <span class="text-muted">{{ b_item.label }}</span>
+                                                    {% endif %}
+                                                </li>
+                                                {% endfor %}
+                                            {% else %}
+                                                <li class="text-success d-flex align-items-baseline mb-0.5">
+                                                    <i class="fas fa-check text-success me-1 flex-shrink-0" style="font-size: 0.65rem;"></i>
+                                                    <span>Verified Specifications</span>
+                                                </li>
                                             {% endif %}
-                                            {% for pt in q_pts[:3] %}
-                                            <li class="text-dark d-flex align-items-baseline mb-0.5">
-                                                <i class="fas fa-check-circle text-success me-1 flex-shrink-0" style="font-size: 0.65rem;"></i>
-                                                <span class="text-truncate" title="{{ pt }}">{{ pt }}</span>
-                                            </li>
-                                            {% endfor %}
                                         </ul>
+                                        {% else %}
+                                        <div class="text-muted small my-1" style="font-size: 0.72rem;">
+                                            <span class="text-danger fw-semibold"><i class="fas fa-exclamation-circle me-1"></i>Reason:</span>
+                                            {{ (item.quality_report.insufficient_reason if item.quality_report and item.quality_report.insufficient_reason else 'Insufficient verified specifications') }}
+                                        </div>
+                                        {% endif %}
+
+                                        {% if item.rank_explanation %}
+                                        <div class="mt-1 pt-1 border-top border-secondary border-opacity-25 text-muted" style="font-size: 0.68rem; font-style: italic;">
+                                            <i class="fas fa-info-circle text-primary me-1"></i>{{ item.rank_explanation }}
+                                        </div>
+                                        {% endif %}
                                     </div>
 
                                     <!-- Price Row -->
@@ -1460,6 +1604,7 @@
                                             data-link="{{ item.link or item.product_url or item.url }}"
                                             data-quality-score="{{ item.quality_score or 50 }}"
                                             data-quality-band="{{ item.quality_band or 'Standard Quality' }}"
+                                            data-category="{{ (item.specs.category if item.specs and item.specs.category else (detected_category or '')) }}"
                                             data-specs='{{ item.specs | tojson if item.specs else "{}" }}'
                                             data-points='{{ (item.quality_points or []) | tojson }}'>
                                         <i class="fas fa-balance-scale me-1.5"></i><span>Add to Compare</span>
@@ -1499,7 +1644,7 @@
                             <span class="badge bg-primary text-white rounded-pill px-2.5 py-1 small">Independent Evaluation</span>
                         </div>
                         <div class="small text-muted">
-                            Multi-criteria scoring: Specs (30%), Ratings (25%), Build (20%), Performance (15%), Warranty &amp; Seller (10%)
+                            Priority Order: 1. Verified Specifications &bull; 2. Feature Completeness &bull; 3. Ratings &amp; Reviews &bull; 4. Warranty &amp; Availability &bull; 5. Price &amp; Value
                         </div>
                     </div>
 
@@ -1623,13 +1768,13 @@
 
                                     <!-- Estimated Quality Score -->
                                     <td>
-                                        {% if q_item.has_sufficient_data and q_item.quality_score is not none %}
+                                        {% if q_item.has_sufficient_data and q_item.quality_score is defined and q_item.quality_score is not none %}
                                         <div class="d-flex flex-column align-items-center">
                                             <div class="fw-extrabold text-primary fs-5" style="color:#7c3aed !important;">
-                                                {{ q_item.quality_score|round|int }}<small class="text-muted fs-6">/100</small>
+                                                {{ (q_item.quality_score|default(0))|round|int }}<small class="text-muted fs-6">/100</small>
                                             </div>
                                             <div class="quality-score-bar-bg my-1" style="max-width:90px;">
-                                                <div class="quality-score-bar-fill" style="width: {{ [q_item.quality_score, 100]|min }}%;"></div>
+                                                <div class="quality-score-bar-fill" style="width: {{ [(q_item.quality_score|default(0)), 100]|min }}%;"></div>
                                             </div>
                                             <span class="small text-muted" style="font-size:0.68rem;">{{ q_item.quality_band or 'High Quality' }}</span>
                                         </div>
@@ -1865,9 +2010,9 @@
 
                                     <!-- 1. Quality Score (First Preference) -->
                                     <td style="background:rgba(14,165,233,0.03);">
-                                        {% if item.quality_score is not none and item.get('has_sufficient_data', True) %}
+                                        {% if item.quality_score is defined and item.quality_score is not none and item.quality_score != '' and item.get('has_sufficient_data', True) %}
                                         <span class="badge bg-primary-subtle text-primary border border-primary px-2 py-1 rounded-pill fw-bold d-inline-block" style="font-size:0.75rem;">
-                                            <i class="fas fa-award me-1"></i>{{ item.quality_score|round|int }}/100
+                                            <i class="fas fa-award me-1"></i>{{ (item.quality_score|default(0))|round|int }}/100
                                         </span>
                                         <div class="small text-muted mt-1" style="font-size:0.68rem;">{{ item.quality_band or 'Standard Quality' }}</div>
                                         {% else %}
@@ -1957,9 +2102,9 @@
 
                                     <!-- Value for Money Index -->
                                     <td style="background:rgba(16,185,129,0.03);">
-                                        {% if item.vfm_index %}
+                                        {% if item.vfm_index is defined and item.vfm_index is not none and item.vfm_index != '' %}
                                         <span class="badge bg-success-subtle text-success border border-success fw-bold" style="font-size:0.75rem;">
-                                            {{ item.vfm_index|round|int }}/100
+                                            {{ (item.vfm_index|default(0))|round|int }}/100
                                         </span>
                                         {% else %}
                                         <span class="text-muted small">Balanced</span>
@@ -2024,6 +2169,7 @@
                                                 data-link="{{ item.link or item.product_url or item.url }}"
                                                 data-quality-score="{{ item.quality_score or 50 }}"
                                                 data-quality-band="{{ item.quality_band or 'Standard Quality' }}"
+                                                data-category="{{ (item.specs.category if item.specs and item.specs.category else (detected_category or '')) }}"
                                                 data-specs='{{ item.specs | tojson if item.specs else "{}" }}'
                                                 data-points='{{ (item.quality_points or []) | tojson }}'
                                                 style="font-size: 0.68rem;">
@@ -2144,6 +2290,7 @@
                                 data-link="{{ item.link or item.product_url or item.url }}"
                                 data-quality-score="{{ item.quality_score or 50 }}"
                                 data-quality-band="{{ item.quality_band or 'Standard Quality' }}"
+                                data-category="{{ (item.specs.category if item.specs and item.specs.category else (detected_category or '')) }}"
                                 data-specs='{{ item.specs | tojson if item.specs else "{}" }}'
                                 data-points='{{ (item.quality_points or []) | tojson }}'
                                 style="font-size: 0.72rem;">
@@ -2213,14 +2360,14 @@
                                             <span class="fs-3 fw-extrabold text-success" style="font-weight: 800;">{{ p_info.price_formatted or p_info.price or p_info.formatted_price }}</span>
                                         </div>
                                         <div class="text-end">
-                                            {% if p_info.quality_score %}
+                                            {% if p_info.quality_score is defined and p_info.quality_score is not none and p_info.quality_score %}
                                             <span class="badge bg-primary-subtle text-primary border border-primary px-2 py-1" style="font-size:0.75rem;" title="Product Quality Score">
-                                                <i class="fas fa-award me-1"></i>Quality: {{ p_info.quality_score|round|int }}/100
+                                                <i class="fas fa-award me-1"></i>Quality: {{ (p_info.quality_score|default(0))|round|int }}/100
                                             </span>
                                             {% endif %}
-                                            {% if p_info.data_confidence %}
+                                            {% if p_info.data_confidence is defined and p_info.data_confidence is not none and p_info.data_confidence %}
                                             <span class="badge bg-light text-secondary border px-2 py-1 d-block mt-1" style="font-size:0.7rem;" title="Data Confidence">
-                                                <i class="fas fa-shield-alt me-1"></i>{{ p_info.data_confidence|round|int }}% Conf.
+                                                <i class="fas fa-shield-alt me-1"></i>{{ (p_info.data_confidence|default(0))|round|int }}% Conf.
                                             </span>
                                             {% endif %}
                                         </div>
@@ -2312,6 +2459,7 @@
                                         data-link="{{ p_info.link }}"
                                         data-quality-score="{{ p_info.quality_score or 50 }}"
                                         data-quality-band="{{ p_info.quality_score_label or 'Standard Quality' }}"
+                                        data-category="{{ (p_info.product.specs.category if p_info.product and p_info.product.specs and p_info.product.specs.category else (detected_category or '')) }}"
                                         data-specs='{{ p_info.product.specs | tojson if (p_info.product and p_info.product.specs) else "{}" }}'
                                         data-points='{{ (p_info.product.quality_points or []) | tojson if p_info.product else "[]" }}'>
                                     <i class="fas fa-balance-scale me-1.5"></i><span>Add to Compare</span>
@@ -2658,6 +2806,189 @@ function updateThemeIcon(isDark) {
         updateThemeIcon(true);
     }
 })();
+
+async function retryPlatform(platform, query) {
+    const platKey = platform.toLowerCase();
+    const bodyEl = document.getElementById('platform-body-' + platKey);
+    const badgeEl = document.getElementById('platform-header-badge-' + platKey);
+    const pillEl = document.getElementById('status-pill-' + platKey);
+    const tableStatEl = document.getElementById('table-stat-' + platKey);
+
+    if (badgeEl) {
+        badgeEl.className = 'badge bg-warning text-dark ms-2 small';
+        badgeEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1" style="width:10px;height:10px;"></span>Loading...';
+    }
+    if (pillEl) {
+        pillEl.innerHTML = `<span class="fw-bold text-dark">${platform}:</span> <span class="badge bg-warning text-dark rounded-pill px-2 py-0"><span class="spinner-border spinner-border-sm me-1" style="width:10px;height:10px;"></span>Loading</span>`;
+    }
+    if (bodyEl) {
+        bodyEl.innerHTML = `
+            <div class="text-center py-5">
+                <div class="spinner-border text-primary mb-2" role="status"></div>
+                <div class="fw-semibold text-dark">Connecting to ${platform}...</div>
+                <small class="text-muted">Fetching live products & specifications</small>
+            </div>
+        `;
+    }
+
+    try {
+        const resp = await fetch(`/api/search/platform?platform=${encodeURIComponent(platform)}&q=${encodeURIComponent(query)}&fresh=1`);
+        const data = await resp.json();
+
+        if (data.status === 'success' && data.products && data.products.length > 0) {
+            // Update pills & badges
+            if (badgeEl) {
+                badgeEl.className = 'badge bg-white text-dark ms-2 small';
+                badgeEl.innerText = `${data.products.length} Found`;
+            }
+            if (pillEl) {
+                pillEl.innerHTML = `<span class="fw-bold text-dark">${platform}:</span> <span class="badge bg-success text-white rounded-pill px-2 py-0"><i class="fas fa-check me-1"></i>Found (${data.products.length})</span>`;
+            }
+            if (tableStatEl) {
+                tableStatEl.innerHTML = `<span class="badge bg-success text-white px-3 py-1 rounded-pill small"><i class="fas fa-check-circle me-1"></i>Found</span>`;
+            }
+
+            // Render product cards
+            let cardsHtml = '';
+            data.products.forEach(item => {
+                const isBest = item.is_lowest_price ? 'best-price-card' : '';
+                const mStat = item.match_status_label || item.match_status || 'Found';
+                let mBadge = '';
+                if (mStat === 'Exact Match') {
+                    mBadge = '<span class="badge bg-success" style="font-size:0.72rem;"><i class="fas fa-check-double me-1"></i>Exact Match</span>';
+                } else if (mStat === 'Partial Match') {
+                    mBadge = '<span class="badge bg-info text-dark" style="font-size:0.72rem;"><i class="fas fa-layer-group me-1"></i>Partial Match</span>';
+                } else {
+                    mBadge = `<span class="badge bg-secondary" style="font-size:0.72rem;">${mStat}</span>`;
+                }
+
+                const qualScore = item.quality_score && item.has_sufficient_data !== false
+                    ? `<span class="badge bg-primary-subtle text-primary border border-primary" style="font-size:0.68rem;"><i class="fas fa-award me-1"></i>${Math.round(item.quality_score)}/100</span>`
+                    : '<span class="badge bg-secondary-subtle text-muted border" style="font-size:0.68rem;"><i class="fas fa-info-circle me-1"></i>Score N/A</span>';
+
+                const escTitle = (item.title || '').replace(/"/g, '&quot;');
+                const specsJson = JSON.stringify(item.specs || {}).replace(/"/g, '&quot;');
+                const pointsJson = JSON.stringify(item.quality_points || []).replace(/"/g, '&quot;');
+
+                cardsHtml += `
+                <div class="product-card mb-3 ${isBest}">
+                    <div class="d-flex flex-wrap gap-1 mb-2 align-items-center">
+                        ${mBadge}
+                        ${qualScore}
+                        ${item.in_stock ? '<span class="badge" style="background:rgba(16,185,129,0.12); color:#059669; font-size:0.68rem;"><i class="fas fa-check-circle me-1"></i>In Stock</span>' : ''}
+                    </div>
+                    <div class="product-image-container">
+                        <img src="${item.image || ''}" alt="${escTitle}" class="product-img" loading="lazy" onerror="this.style.display='none'">
+                    </div>
+                    <h6 class="fw-semibold text-dark mb-1" style="font-size:0.88rem; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; height:2.7em;">
+                        ${item.title}
+                    </h6>
+                    <div class="mt-2">
+                        <div class="d-flex align-items-baseline gap-2 flex-wrap">
+                            <span class="price-current">${item.price || 'N/A'}</span>
+                            ${item.original_price ? `<span class="price-original">${item.original_price}</span>` : ''}
+                            ${item.discount ? `<span class="price-discount">${item.discount}</span>` : ''}
+                        </div>
+                        <div class="d-flex align-items-center gap-2 mt-1">
+                            ${item.rating ? `<span class="rating-tag small"><i class="fas fa-star text-warning"></i> ${item.rating}</span>` : ''}
+                            ${item.seller ? `<small class="text-muted text-truncate" style="max-width:110px;"><i class="fas fa-store me-1"></i>${item.seller}</small>` : ''}
+                        </div>
+                    </div>
+                    <a href="javascript:void(0)" data-url="${item.link || item.product_url || '#'}" data-platform="${platform}" data-product-name="${escTitle}" data-price="${item.price || ''}" onclick="triggerBuyRedirect(this)" class="btn btn-primary btn-sm w-100 mt-3 rounded-pill py-2 fw-bold d-flex align-items-center justify-content-center">
+                        <i class="fas fa-shopping-cart me-2"></i>Buy on ${platform}
+                    </a>
+                    <button type="button"
+                            class="btn btn-outline-primary btn-sm w-100 mt-1.5 rounded-pill py-1.5 fw-semibold d-flex align-items-center justify-content-center btn-add-compare"
+                            onclick="toggleCompareProduct(this)"
+                            data-id="${item.product_id || escTitle}"
+                            data-title="${escTitle}"
+                            data-platform="${platform}"
+                            data-price="${item.price || 'N/A'}"
+                            data-price-num="${item.price_num || 0}"
+                            data-mrp="${item.original_price || item.mrp || item.price || 'N/A'}"
+                            data-discount="${item.discount || ''}"
+                            data-rating="${item.rating || 'N/A'}"
+                            data-reviews="${item.reviews || '0'}"
+                            data-image="${item.image || ''}"
+                            data-link="${item.link || item.product_url || '#'}"
+                            data-quality-score="${item.quality_score || 50}"
+                            data-quality-band="${item.quality_band || 'Standard Quality'}"
+                            data-category="${(item.specs && item.specs.category) || (item.category || '')}"
+                            data-specs="${specsJson}"
+                            data-points="${pointsJson}">
+                        <i class="fas fa-balance-scale me-1.5"></i><span>Add to Compare</span>
+                    </button>
+                </div>
+                `;
+            });
+            if (bodyEl) bodyEl.innerHTML = cardsHtml;
+        } else {
+            const errStat = (data.platform_status && data.platform_status.status) || 'timeout';
+            let statTitle = `${platform} Request Timed Out`;
+            let statDesc = 'The request exceeded the configured time limit. Other platforms remain active.';
+            let iconClass = 'fa-clock text-warning';
+            let badgeClass = 'bg-warning-subtle text-warning border border-warning';
+            let pillClass = 'bg-warning text-dark';
+            let statLabel = 'Timeout';
+
+            if (errStat === 'blocked') {
+                statTitle = `${platform} Access Restricted`;
+                statDesc = 'Automated access was restricted by platform security.';
+                iconClass = 'fa-shield-alt text-danger';
+                badgeClass = 'bg-danger-subtle text-danger border border-danger';
+                pillClass = 'bg-danger text-white';
+                statLabel = 'Blocked';
+            } else if (errStat === 'no_products_found') {
+                statTitle = `No Matching ${platform} Products Found`;
+                statDesc = `No live listing matched "${query}".`;
+                iconClass = 'fa-search text-secondary';
+                badgeClass = 'bg-light text-muted border';
+                pillClass = 'bg-secondary text-white';
+                statLabel = '0 Found';
+            }
+
+            if (badgeEl) {
+                badgeEl.className = `badge ${badgeClass} ms-2 small`;
+                badgeEl.innerText = statLabel;
+            }
+            if (pillEl) {
+                pillEl.innerHTML = `<span class="fw-bold text-dark">${platform}:</span> <span class="badge ${pillClass} rounded-pill px-2 py-0">${statLabel}</span>`;
+            }
+            if (tableStatEl) {
+                tableStatEl.innerHTML = `<span class="badge ${pillClass} px-3 py-1 rounded-pill small">${statLabel}</span>`;
+            }
+            if (bodyEl) {
+                bodyEl.innerHTML = `
+                    <div class="alert alert-warning border-0 shadow-sm rounded-4 text-center py-3 mb-3">
+                        <i class="fas ${iconClass} fa-2x mb-2 d-block"></i>
+                        <strong class="d-block mb-1">${statTitle}</strong>
+                        <div class="small text-muted mb-2">${statDesc}</div>
+                        <button type="button" class="btn btn-outline-dark btn-sm rounded-pill px-3 py-1 shadow-xs fw-semibold mt-1" onclick="retryPlatform('${platform}', '${query.replace(/'/g, "\\'")}')">
+                            <i class="fas fa-redo me-1"></i> Retry ${platform}
+                        </button>
+                    </div>
+                `;
+            }
+        }
+    } catch (err) {
+        if (badgeEl) {
+            badgeEl.className = 'badge bg-danger-subtle text-danger border border-danger ms-2 small';
+            badgeEl.innerText = 'Error';
+        }
+        if (bodyEl) {
+            bodyEl.innerHTML = `
+                <div class="alert alert-danger border-0 shadow-sm rounded-4 text-center py-3 mb-3">
+                    <i class="fas fa-exclamation-triangle text-danger fa-2x mb-2 d-block"></i>
+                    <strong class="d-block mb-1">${platform} Error</strong>
+                    <div class="small text-muted mb-2">Network or connection error. Please try again.</div>
+                    <button type="button" class="btn btn-outline-danger btn-sm rounded-pill px-3 py-1 shadow-xs fw-semibold mt-1" onclick="retryPlatform('${platform}', '${query.replace(/'/g, "\\'")}')">
+                        <i class="fas fa-redo me-1"></i> Retry ${platform}
+                    </button>
+                </div>
+            `;
+        }
+    }
+}
 </script>
     <!-- ════════════════════════════════════════════════════════════════
          FLOATING BOTTOM COMPARE DOCK (UP TO 3 PRODUCTS)

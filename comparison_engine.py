@@ -23,6 +23,7 @@ from url_detector import validate_and_detect_url
 from product_normalizer import normalize_canonical_product
 from product_matcher import (
     generate_search_query_from_product,
+    generate_search_query_cascade,
     compute_weighted_match_score,
     match_canonical_against_platform_results
 )
@@ -32,7 +33,15 @@ from scrapers.meesho_scraper import MeeshoScraper
 from scrapers.scraper_result import ScrapeStatus
 from search.matching_service import get_category_spec_keys, extract_normalized_specs
 
+import os
+
 logger = logging.getLogger("smartbuy.comparison_engine")
+
+PLATFORM_TIMEOUTS = {
+    "amazon": int(os.getenv("AMAZON_TIMEOUT_SEC", "35")),
+    "flipkart": int(os.getenv("FLIPKART_TIMEOUT_SEC", "25")),
+    "meesho": int(os.getenv("MEESHO_TIMEOUT_SEC", "35")),
+}
 
 _scrapers = {
     "amazon": AmazonScraper(),
@@ -159,13 +168,40 @@ def build_url_specifications_matrix(
     """
     Builds the 3-column dynamic specification comparison matrix (Specification | Amazon | Flipkart | Meesho).
     Displays ONLY real extracted values; hides rows where all marketplaces have no data;
-    Missing values display '—'.
+    Missing values display '—' or 'Temporarily unavailable' if platform status is blocked/unavailable.
     """
     from search.specs_extractor import build_dynamic_specifications
     from search.category_detector import detect_category
 
     category = canonical.get('category') or detect_category(title=canonical.get('title', ''), query=canonical.get('title', '')) or 'default'
-    return build_dynamic_specifications(matches, category)
+    rows = build_dynamic_specifications(matches, category)
+
+    # Include Category row if canonical specifies category and not already present
+    cat_val = canonical.get('category')
+    if cat_val and not any(r.get('name') == 'Category' for r in rows):
+        fk_cat = (matches.get('flipkart') or {}).get('category') or cat_val
+        mee_cat = (matches.get('meesho') or {}).get('category') or cat_val
+        insert_idx = min(4, len(rows))
+        rows.insert(insert_idx, {
+            'field': 'Category',
+            'specification': 'Category',
+            'name': 'Category',
+            'amazon': cat_val.title() if matches.get('amazon') else '—',
+            'flipkart': fk_cat.title() if matches.get('flipkart') else '—',
+            'meesho': mee_cat.title() if matches.get('meesho') else '—'
+        })
+
+    # Apply platform_status (e.g. unavailable, timeout, blocked)
+    if platform_status:
+        for plat in ('amazon', 'flipkart', 'meesho'):
+            p_cap = plat.capitalize()
+            p_stat = platform_status.get(p_cap) or platform_status.get(plat) or {}
+            is_unavail = not p_stat.get('available', True) or str(p_stat.get('status', '')).lower() in ('unavailable', 'blocked', 'timeout', 'scraper_error')
+            if is_unavail and not matches.get(plat):
+                for r in rows:
+                    r[plat] = 'Temporarily unavailable'
+
+    return rows
 
 
 def compare_by_product_url_stream(
@@ -244,6 +280,8 @@ def compare_by_product_url_stream(
 
     source_product['is_source'] = True
     source_product['match_type'] = "EXACT MATCH"
+    source_product['match_status'] = "EXACT_MATCH"
+    source_product['match_status_label'] = "Exact Match Found"
     source_product['match_score'] = 100.0
 
     yield {
@@ -254,10 +292,21 @@ def compare_by_product_url_stream(
         "message": f"Extracted '{source_product['title'][:40]}' ({source_product['price']})"
     }
 
+    # Section 30: Structured Backend Logging
+    logger.info("=" * 60)
+    logger.info(f"[URL INPUT] {url}")
+    logger.info(f"[DETECTED PLATFORM] {source_platform_name}")
+    logger.info(f"[CANONICAL PRODUCT] {source_product.get('title')}")
+    logger.info(f"[BRAND] {source_product.get('brand')}")
+    logger.info(f"[MODEL] {source_product.get('model')}")
+    logger.info(f"[PRODUCT TYPE] {source_product.get('product_type')}")
+    logger.info(f"[CAPACITY] {source_product.get('capacity') or source_product.get('storage')}")
+
     # ── Steps 3-5: Search other platforms concurrently ──────────────────────
     target_platforms = [p for p in ["amazon", "flipkart", "meesho"] if p != source_platform]
     search_query = generate_search_query_from_product(source_product)
-    logger.info(f"[URL_SEARCH] Searching targets {target_platforms} with generated query: '{search_query}'")
+    cascade_queries = generate_search_query_cascade(source_product)
+    logger.info(f"[URL_SEARCH] Searching targets {target_platforms} with primary query: '{search_query}' and cascade: {cascade_queries}")
 
     raw_candidates: Dict[str, List[Dict[str, Any]]] = {p: [] for p in ["amazon", "flipkart", "meesho"]}
     raw_candidates[source_platform] = [source_product]
@@ -274,17 +323,59 @@ def compare_by_product_url_stream(
 
     def _scrape_target(plat):
         s_obj = _scrapers[plat]
-        items, stat, err = s_obj.search_products(search_query)
-        stat_val = stat.value if hasattr(stat, "value") else str(stat)
-        return plat, items, stat_val, err
+        best_items = []
+        best_match_score = 0
+        last_stat = "no_match"
+        last_err = None
+        can_brand = str(source_product.get('brand') or '').strip().lower()
+        can_model = str(source_product.get('model') or '').strip().lower()
+        core_tokens = [w for w in (source_product.get('title') or '').lower().split() if len(w) > 3][:4]
+
+        for q in cascade_queries:
+            logger.info(f"[{plat.upper()} SEARCH QUERY] {q}")
+            items, stat, err = s_obj.search_products(q)
+            stat_val = stat.value if hasattr(stat, "value") else str(stat)
+            logger.info(f"[{plat.upper()} RESULTS] Returned {len(items or [])} offers (status: {stat_val})")
+            last_stat = stat_val
+            last_err = err
+            if items:
+                match_score = 0
+                for it in items:
+                    t_it = str(it.get('title') or '').lower()
+                    if can_brand and can_brand in t_it:
+                        match_score += 2
+                    if can_model and can_model in t_it:
+                        match_score += 3
+                    if any(tok in t_it for tok in core_tokens):
+                        match_score += 1
+
+                if not best_items or match_score > best_match_score:
+                    best_items = items
+                    best_match_score = match_score
+
+                # Stop early if high-confidence match found
+                has_exact_candidate = False
+                for it in items:
+                    t_it = str(it.get('title') or '').lower()
+                    if can_brand and can_brand in t_it:
+                        if not can_model or can_model in t_it:
+                            has_exact_candidate = True
+                            break
+                if has_exact_candidate or match_score >= 12:
+                    break
+
+            if stat_val in ("blocked", "timeout"):
+                break
+        return plat, best_items, last_stat, last_err
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         future_map = {executor.submit(_scrape_target, p): p for p in target_platforms}
         for future in as_completed(future_map):
             plat = future_map[future]
             p_cap = plat.capitalize()
+            plat_timeout = PLATFORM_TIMEOUTS.get(plat.lower(), 20)
             try:
-                p_name, items, stat_val, err_msg = future.result(timeout=40)
+                p_name, items, stat_val, err_msg = future.result(timeout=plat_timeout)
                 raw_candidates[p_name] = items or []
                 platform_status[p_cap]["count"] = len(items or [])
                 platform_status[p_cap]["available"] = bool(items)
@@ -298,6 +389,20 @@ def compare_by_product_url_stream(
                     "name": f"{p_cap} checked",
                     "status": "done" if items else ("warning" if stat_val in ('blocked', 'timeout', 'scraper_error') else "done"),
                     "message": f"{len(items or [])} offers found" if items else ("Temporarily unavailable" if stat_val in ('blocked', 'timeout', 'scraper_error') else "No matching offers")
+                }
+            except TimeoutError:
+                logger.error(f"[URL_SEARCH] {plat} timed out after configured limit ({plat_timeout}s).")
+                platform_status[p_cap]["status"] = "timeout"
+                platform_status[p_cap]["available"] = False
+                platform_status[p_cap]["error"] = f"Request timed out after {plat_timeout}s"
+
+                step_num = 3 if plat == "amazon" else (4 if plat == "flipkart" else 5)
+                yield {
+                    "step": step_num,
+                    "step_id": f"{plat}_checked",
+                    "name": f"{p_cap} checked",
+                    "status": "warning",
+                    "message": f"Request timed out ({plat_timeout}s)"
                 }
             except Exception as exc:
                 logger.error(f"[URL_SEARCH] Error searching {plat}: {exc}")
@@ -350,6 +455,15 @@ def compare_by_product_url_stream(
     # Ensure source platform match is anchored to source product
     matched_results[source_platform] = source_product
 
+    # Fallback to top raw candidate if a platform has offers but no exact match
+    for p in ["amazon", "flipkart", "meesho"]:
+        if not matched_results.get(p) and raw_candidates.get(p):
+            top_cand = raw_candidates[p][0]
+            if top_cand.get("match_status") not in ("EXACT_MATCH", "VARIANT_MATCH") and not top_cand.get("is_source"):
+                top_cand["match_status"] = "SIMILAR_PRODUCT"
+                top_cand["match_status_label"] = "Similar Product"
+            matched_results[p] = top_cand
+
     similar_by_platform: Dict[str, List[Dict[str, Any]]] = {
         p: [item for item in raw_candidates.get(p, []) if item != matched_results.get(p)]
         for p in ["amazon", "flipkart", "meesho"]
@@ -358,13 +472,17 @@ def compare_by_product_url_stream(
     matching_breakdown: Dict[str, Any] = {}
     for plat in ["amazon", "flipkart", "meesho"]:
         m_item = matched_results.get(plat)
+        m_score = m_item.get("match_score", 0) if m_item else 0
+        logger.info(f"[{plat.upper()} MATCH SCORE] {m_score}")
         matching_breakdown[plat] = {
             "has_exact_match": bool(m_item and m_item.get("match_status") == "EXACT_MATCH"),
             "has_variant_match": bool(m_item and m_item.get("match_status") == "VARIANT_MATCH"),
-            "match_score": m_item.get("match_score", 0) if m_item else 0,
+            "match_score": m_score,
             "match_type": m_item.get("match_status", "Exact product not found") if m_item else "Exact product not found",
             "similar_count": len(similar_by_platform.get(plat, []))
         }
+
+    logger.info(f"[FINAL MATCH] Amazon: {'Matched' if matched_results.get('amazon') else 'Not Found'}, Flipkart: {'Matched' if matched_results.get('flipkart') else 'Not Found'}, Meesho: {'Matched' if matched_results.get('meesho') else 'Not Found'}")
 
     yield {
         "step": 6,
@@ -376,7 +494,7 @@ def compare_by_product_url_stream(
 
     # ── Step 7: Best Deal & Comparison Matrix ───────────────────────────────
     best_deal = pipeline_data.get("best_deal")
-    spec_matrix = pipeline_data.get("specifications_matrix") or build_url_specifications_matrix(source_product, matched_results, platform_status, best_deal)
+    spec_matrix = build_url_specifications_matrix(source_product, matched_results, platform_status, best_deal)
     top_verified_offers = pipeline_data.get("top_verified_offers", {})
     validated_products = pipeline_data.get("validated_products", [])
 
@@ -414,6 +532,35 @@ def compare_by_product_url_stream(
         "savings_info": pipeline_data.get("savings_info"),
         "scraped_at": now_iso
     }
+
+    # Section 22: Diagnostic Pipeline Logging
+    best_prod_name = best_deal.get('title') or best_deal.get('product_name') if best_deal else "N/A"
+    best_q_score = best_deal.get('quality_score') if best_deal else "N/A"
+    logger.info("=" * 60)
+    logger.info("[SMARTBUY PIPELINE TRACE - DIRECT URL SEARCH]")
+    logger.info(f"USER INPUT: {url}")
+    logger.info(f"INPUT TYPE: Product URL")
+    logger.info(f"DETECTED PLATFORM: {source_platform_name} ({source_platform})")
+    logger.info(f"URL NORMALIZATION: {canonical_url}")
+    logger.info(f"SCRAPER SELECTED: {source_platform_name} URL Extractor -> Concurrent Targets: {target_platforms}")
+    logger.info(f"REQUEST START: {source_platform_name}")
+    logger.info(f"REQUEST RESULT: SUCCESS | Title: '{source_product.get('title', '')[:40]}' | Price: {source_product.get('price')} | Image: {source_product.get('image_url', '')[:50]}...")
+    logger.info(f"RAW PRODUCT DATA: Extracted {len(source_product.get('specifications') or {})} specs")
+    logger.info(f"IMAGE EXTRACTION: {source_product.get('image_url')}")
+    logger.info(f"SPECIFICATION EXTRACTION: {list((source_product.get('specifications') or {}).keys())[:6]}")
+    logger.info(f"NORMALIZED PRODUCT: '{source_product.get('title')}'")
+    logger.info(f"CATEGORY DETECTION: {source_product.get('category', 'General')}")
+    for p_cap, p_st in platform_status.items():
+        m_item = matched_results.get(p_cap.lower())
+        m_status = m_item.get('match_status', 'No Match') if m_item else 'No Match'
+        logger.info(f"[{p_cap.upper()}] Status: {p_st.get('status', 'unknown').upper()} | Match: {m_status} | Offers: {p_st.get('count', 0)}")
+        if p_st.get('status') in ('timeout', 'blocked', 'scraper_error'):
+            logger.warning(f"[{p_cap.upper()}] Request: FAILED | Reason: {p_st.get('error', 'error')} | Final status: {p_st.get('status', 'error').upper()}")
+    logger.info(f"PRODUCT MATCHING: {sum(1 for m in matched_results.values() if m)} matched products")
+    logger.info(f"COMPARISON: {len(spec_matrix)} category specification rows rendered")
+    logger.info(f"QUALITY SCORE: {best_q_score} (Best Deal: {best_deal.get('platform') if best_deal else 'None'})")
+    logger.info(f"FRONTEND: READY")
+    logger.info("=" * 60)
 
     set_cached_url_comparison(canonical_url, final_payload)
     return final_payload

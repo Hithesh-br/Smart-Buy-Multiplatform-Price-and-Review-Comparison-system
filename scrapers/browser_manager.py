@@ -12,14 +12,19 @@ import time
 import logging
 import threading
 from typing import Optional
+
+from playwright_bootstrap import configure_playwright_environment
+
+configure_playwright_environment()
+
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
 logger = logging.getLogger("smartbuy.browser_manager")
 
-PAGE_TIMEOUT = int(os.getenv("PAGE_TIMEOUT", "30000"))
-NAVIGATION_TIMEOUT = int(os.getenv("NAVIGATION_TIMEOUT", "30000"))
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
-RETRY_DELAYS = [2, 5, 10]
+PAGE_TIMEOUT = int(os.getenv("PAGE_TIMEOUT", "18000"))
+NAVIGATION_TIMEOUT = int(os.getenv("NAVIGATION_TIMEOUT", "18000"))
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))
+RETRY_DELAYS = [1, 3]
 
 DEFAULT_VIEWPORT = {"width": 1366, "height": 768}
 DEFAULT_USER_AGENT = (
@@ -27,9 +32,37 @@ DEFAULT_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 FIREFOX_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) "
-    "Gecko/20100101 Firefox/125.0"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) "
+    "Gecko/20100101 Firefox/146.0"
 )
+
+BLOCKED_RESOURCE_TYPES = {"image", "media", "font"}
+BLOCKED_DOMAINS = [
+    "demdex.net", "omtrdc.net", "analytics", "criteo", "doubleclick.net",
+    "nr-data.net", "adsystem", "adnxs.com", "scorecardresearch", "facebook.net",
+    "clarity.ms", "googlesyndication.com", "google-analytics.com", "amazon-adsystem.com",
+    "bat.bing.com", "connect.facebook.net", "hotjar.com"
+]
+
+
+def _filter_route(route):
+    """Abort binary media, web fonts, and heavy tracking pixels while preserving HTML & scripts."""
+    try:
+        req = route.request
+        url = req.url.lower()
+        if req.resource_type in BLOCKED_RESOURCE_TYPES:
+            route.abort()
+            return
+        for domain in BLOCKED_DOMAINS:
+            if domain in url:
+                route.abort()
+                return
+        route.continue_()
+    except Exception:
+        try:
+            route.abort()
+        except Exception:
+            pass
 
 
 class BrowserManager:
@@ -66,6 +99,8 @@ class BrowserManager:
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-infobars',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
                     '--window-position=0,0',
                     '--ignore-certifcate-errors',
                     '--ignore-certifcate-errors-spki-list',
@@ -82,9 +117,9 @@ class BrowserManager:
             )
         return state.firefox_browser
 
-    def new_page(self, engine: str = "chromium") -> tuple[Page, BrowserContext]:
+    def new_page(self, engine: str = "chromium", filter_routes: bool = True) -> tuple[Page, BrowserContext]:
         """
-        Creates a new isolated browser context and page.
+        Creates a new isolated browser context and page with optional route aborting.
         Caller is responsible for calling context.close() when finished.
         """
         browser = self.get_firefox_browser() if engine == "firefox" else self.get_chromium_browser()
@@ -102,11 +137,22 @@ class BrowserManager:
         page.set_default_navigation_timeout(NAVIGATION_TIMEOUT)
         page.set_default_timeout(PAGE_TIMEOUT)
 
+        if filter_routes:
+            try:
+                page.route("**/*", _filter_route)
+            except Exception as e:
+                logger.debug(f"[BrowserManager] Could not set route filter: {e}")
+
         # Mask automation properties
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            window.chrome = { runtime: {} };
-        """)
+        if engine == "firefox":
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            """)
+        else:
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {} };
+            """)
 
         return page, context
 

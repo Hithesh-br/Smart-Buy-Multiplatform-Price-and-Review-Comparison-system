@@ -145,6 +145,20 @@ def normalize_brand(brand: Optional[str]) -> Optional[str]:
         return "True Elements"
     elif b_lower in ("farmley"):
         return "Farmley"
+    elif b_lower in ("milton", "milton india"):
+        return "Milton"
+    elif b_lower in ("cello"):
+        return "Cello"
+    elif b_lower in ("speedex"):
+        return "Speedex"
+    elif b_lower in ("borosil"):
+        return "Borosil"
+    elif b_lower in ("pigeon"):
+        return "Pigeon"
+    elif b_lower in ("prestige"):
+        return "Prestige"
+    elif b_lower in ("reginald", "reginald men"):
+        return "Reginald Men"
 
     return b_clean.title() if len(b_clean) > 2 else b_clean.upper()
 
@@ -191,6 +205,8 @@ def normalize_weight(text: Optional[str]) -> Optional[str]:
     m_ml = re.search(r'(\d+(?:\.\d+)?)\s*(ml|millilitres?)\b', raw)
     if m_ml:
         val = float(m_ml.group(1))
+        if val >= 1000:
+            return f"{val/1000:g}L"
         return f"{val:g}ml"
 
     return None

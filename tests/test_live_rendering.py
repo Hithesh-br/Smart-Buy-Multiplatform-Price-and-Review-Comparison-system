@@ -2,6 +2,8 @@ import urllib.request
 import urllib.parse
 import sys
 
+__test__ = False
+
 def test_search(query):
     url = f"http://127.0.0.1:5000/search?q={urllib.parse.quote_plus(query)}"
     print(f"Testing search for '{query}'...")

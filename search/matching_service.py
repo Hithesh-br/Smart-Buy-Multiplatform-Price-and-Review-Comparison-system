@@ -37,7 +37,9 @@ ACCESSORY_KEYWORDS = {
     'lens protector', 'lens protectors', 'skin', 'skins', 'guard', 'guards', 'cable', 'cables',
     'charging cable', 'charging cables', 'strap', 'straps', 'band', 'bands', 'pouch', 'pouches',
     'sleeve', 'sleeves', 'bumper', 'bumpers', 'stand', 'stands', 'holder', 'holders', 'mount',
-    'mounts', 'stylus', 'ear tips', 'silicone case', 'flip cover', 'wallet case', 'camera glass'
+    'mounts', 'stylus', 'ear tips', 'silicone case', 'flip cover', 'wallet case', 'camera glass',
+    'gasket', 'gaskets', 'sealing ring', 'safety valve', 'weight valve', 'whistle', 'cooker handle',
+    'mixer jar', 'grinder jar', 'mixer blade', 'coupler', 'kettle base', 'inlet pipe', 'drain hose'
 }
 
 INVALID_MODELS = {
@@ -143,8 +145,22 @@ def is_accessory(title: str, query: str = "") -> bool:
     t_lower = title.lower()
     q_lower = query.lower()
 
-    if any(k in q_lower for k in ['case', 'cover', 'glass', 'guard', 'cable', 'strap', 'protector', 'skin', 'pouch', 'holder']):
+    if any(k in q_lower for k in ['case', 'cover', 'glass', 'guard', 'cable', 'strap', 'protector', 'skin', 'pouch', 'holder', 'gasket', 'sealing ring', 'whistle', 'jar', 'blade', 'coupler']):
         return False
+
+    # Appliance parts check against complete appliance queries
+    if "cooker" in q_lower and not any(k in q_lower for k in ('gasket', 'ring', 'whistle', 'valve', 'handle')):
+        if re.search(r'\b(gasket|sealing\s*ring|safety\s*valve|weight\s*valve|whistle|cooker\s*handle)\b', t_lower):
+            return True
+    if ("mixer" in q_lower or "grinder" in q_lower) and not any(k in q_lower for k in ('jar', 'blade', 'coupler', 'lid')):
+        if re.search(r'\b(mixer\s*jar|grinder\s*jar|chutney\s*jar|mixer\s*blade|coupler)\b', t_lower):
+            return True
+    if "kettle" in q_lower and not any(k in q_lower for k in ('base', 'cord')):
+        if re.search(r'\b(kettle\s*base|power\s*base|kettle\s*cord)\b', t_lower):
+            return True
+    if "washing machine" in q_lower and not any(k in q_lower for k in ('pipe', 'hose', 'cover', 'stand')):
+        if re.search(r'\b(inlet\s*pipe|drain\s*hose|pulsator|lint\s*filter|machine\s*cover)\b', t_lower):
+            return True
 
     # Home textiles containing 'cover' (pillow covers, cushion covers, sofa covers, bedsheet) are not phone accessories
     if any(k in t_lower for k in ['bedsheet', 'pillow cover', 'pillow covers', 'cushion cover', 'sofa cover', 'bed cover']):

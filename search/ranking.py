@@ -51,22 +51,92 @@ def _parse_review_count(item: dict) -> int:
     return int(safe_number(item.get('reviews')))
 
 
-def rank_products(products: list) -> list:
+def rank_products(products: list, query: str = "") -> list:
     """
-    Primary ranking algorithm — multi-criteria sort:
-      1. Highest similarity score (desc)
-      2. Lowest price (asc)
-      3. Highest rating (desc)
-      4. Most reviews (desc)
+    Quality-First Smart Ranking Algorithm:
+      Priority 1: Specification-based quality score
+      Priority 2: Feature completeness and evidence coverage
+      Priority 3: Rating and review evidence (supporting social proof)
+      Priority 4: Warranty, seller credibility, and availability
+      Priority 5: Price and economic value for money (never beats higher quality)
     """
-    def sort_key(item):
-        sim      = safe_number(item.get('similarity_score'))
-        price    = _parse_price_num(item) or 9_999_999
-        rating   = _parse_rating(item)
-        reviews  = _parse_review_count(item)
-        return (-sim, price, -rating, -reviews)
+    if not products:
+        return []
 
-    return sorted(products, key=sort_key)
+    def sort_key(item):
+        # 1. Match status priority (Exact/Variant matches beat loose similar matches, rejected at bottom)
+        status = str(item.get("match_status", "")).upper()
+        if "EXACT" in status:
+            m_score = 4
+        elif "VARIANT" in status:
+            m_score = 3
+        elif "SIMILAR" in status:
+            m_score = 2
+        elif "REJECT" in status:
+            m_score = 0
+        else:
+            m_score = 1
+
+        # 2. Quality Score (Priority 1: Specification-based quality)
+        has_suff = item.get("has_sufficient_data")
+        raw_q = item.get("quality_score")
+        if raw_q is None:
+            raw_q = item.get("quality_report", {}).get("raw_quality_score") if isinstance(item.get("quality_report"), dict) else None
+        q_val = safe_number(raw_q)
+        if has_suff is False or q_val <= 0:
+            q_val = -1.0  # Products with insufficient specs cannot outrank verified products
+
+        # 3. Evidence Coverage / Feature Completeness (Priority 2)
+        coverage = safe_number(item.get("evidence_coverage") or item.get("data_confidence"))
+
+        # 4. Rating & Reviews (Priority 3: supporting evidence)
+        rating = _parse_rating(item)
+        reviews = _parse_review_count(item)
+
+        # 5. Availability (Priority 4)
+        avail = 1 if "in stock" in str(item.get("availability", "in stock")).lower() else 0
+
+        # 6. Price (Priority 5: lower price is preferred among equivalent quality)
+        price = _parse_price_num(item) or 9_999_999
+
+        return (m_score, q_val, coverage, rating, reviews, avail, -price)
+
+    sorted_list = sorted(products, key=sort_key, reverse=True)
+
+    # Attach transparent ranking explanations
+    if sorted_list:
+        top_prod = sorted_list[0]
+        top_q = safe_number(top_prod.get("quality_score"))
+        top_cov = safe_number(top_prod.get("evidence_coverage") or top_prod.get("data_confidence"))
+        top_p = _parse_price_num(top_prod) or 0
+
+        for idx, item in enumerate(sorted_list):
+            item_q = safe_number(item.get("quality_score"))
+            item_cov = safe_number(item.get("evidence_coverage") or item.get("data_confidence"))
+            item_p = _parse_price_num(item) or 0
+            has_suff = item.get("has_sufficient_data", True)
+
+            if idx == 0:
+                if has_suff and item_q > 0:
+                    item["rank_explanation"] = f"Ranked #1 based on superior verified specifications ({item_q:.0f}/100 quality score, {item_cov:.0f}% evidence coverage)."
+                else:
+                    item["rank_explanation"] = "Ranked #1 based on verified product match."
+            else:
+                if not has_suff:
+                    item["rank_explanation"] = "Insufficient specification data for confident quality ranking."
+                elif item.get("match_status") == "VARIANT_MATCH":
+                    item["rank_explanation"] = "Not an identical match: different product variant or configuration."
+                elif item_q < top_q and item_p < top_p:
+                    item["rank_explanation"] = f"Lower price, but fewer verified specifications ({item_cov:.0f}% coverage vs {top_cov:.0f}%)."
+                elif item_q < top_q:
+                    item["rank_explanation"] = f"Lower specification quality score ({item_q:.0f}/100 vs {top_q:.0f}/100)."
+                elif item.get("rating") and safe_number(item.get("rating")) > safe_number(top_prod.get("rating")) and item_cov < top_cov:
+                    item["rank_explanation"] = "Higher rating, but insufficient technical specification data."
+                else:
+                    item["rank_explanation"] = "Comparable specifications with competitive platform pricing."
+
+    return sorted_list
+
 
 
 def sort_by_price(products: list) -> list:

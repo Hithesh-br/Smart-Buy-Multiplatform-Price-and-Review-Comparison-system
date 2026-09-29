@@ -25,9 +25,12 @@ KNOWN_BRANDS = [
     'Himalaya', 'Nivea', 'Dove', 'L\'Oreal', 'Biotique', 'Plum', 'Garnier', 'Head & Shoulders',
     'True Elements', 'Nutty Gritties', 'Neuherbs', 'Sorich Organics', 'Saffola', 'Tata', 'Fortune',
     'Aashirvaad', 'Daawat', 'India Gate', 'Catch', 'Everest', 'MDH', 'Cadbury', 'Nestle', 'Nescafe',
+    'Avogro', 'Nutraj', 'Happilo', 'Farmley', 'Tulsi', 'Carnival', 'Wonderland', 'Solimo', 'Vedaka',
+    'GreenFinity', 'Naturoz', 'Bajaj', 'Parachute', 'Dabur', 'Patanjali', 'MONK&METAL', 'Monk & Metal',
+    'Reginald Men', 'Reginald',
     'Nike', 'Adidas', 'Puma', 'Reebok', 'Campus', 'Bata', 'Sparx', 'Woodland', 'Red Tape',
     'Skybags', 'American Tourister', 'Safari', 'Wildcraft', 'Lavie', 'Baggit', 'Caprese',
-    'Milton', 'Cello', 'Prestige', 'Hawkins', 'Pigeon', 'Bajaj', 'Philips', 'Havells', 'Crompton'
+    'Milton', 'Cello', 'Prestige', 'Hawkins', 'Pigeon', 'Philips', 'Havells', 'Crompton'
 ]
 
 COMMON_COLORS = [
@@ -39,6 +42,157 @@ COMMON_MATERIALS = [
     'Cotton', 'Leather', 'Denim', 'Silk', 'Polyester', 'Georgette', 'Chiffon',
     'Linen', 'Wool', 'Nylon', 'Stainless Steel', 'Plastic', 'Ceramic', 'Glass', 'Wood'
 ]
+
+
+def extract_specific_product_type(text: str, category: str = "") -> str:
+    """
+    Extracts the granular, specific product type from query or title.
+    Examples:
+    - 'Avogro Premium Pistachios 500GM' -> 'pistachios'
+    - 'Bajaj 100% Pure Coconut Oil 1 litre' -> 'coconut_oil'
+    - 'Stainless Steel Water Bottle' -> 'water_bottle'
+    - 'Reginald Men Hydrating Face & Beard Wash' -> 'face_wash'
+    - 'Royal Oscar Fish Food' -> 'fish_food'
+    - 'Avishi Pigerry Pig Health Supplement' -> 'pig_supplement'
+    """
+    t_low = str(text or "").lower()
+
+    # Animal / Pet Products
+    if re.search(r'\b(pigs?\s*supplement|pigerry|swine|pig\s*feed)\b', t_low):
+        return "pig_supplement"
+    if re.search(r'\b(fish\s*food|fish\s*feed|aquarium\s*food|pellet\s*fish\s*food)\b', t_low):
+        return "fish_food"
+    if re.search(r'\b(dog\s*food|puppy\s*food)\b', t_low):
+        return "dog_food"
+    if re.search(r'\b(cat\s*food|kitten\s*food)\b', t_low):
+        return "cat_food"
+    if re.search(r'\b(animal\s*feed|cattle\s*feed|poultry\s*feed)\b', t_low):
+        return "animal_feed"
+
+    # Grocery: Dry fruits, nuts & edible oils
+    if re.search(r'\b(pistachio|pistachios|pista)\b', t_low):
+        return "pistachios"
+    if re.search(r'\b(almond|almonds|badam)\b', t_low):
+        return "almonds"
+    if re.search(r'\b(cashew|cashews|kaju)\b', t_low):
+        return "cashews"
+    if re.search(r'\b(walnut|walnuts|akhrot)\b', t_low):
+        return "walnuts"
+    if re.search(r'\b(raisin|raisins|kishmish)\b', t_low):
+        return "raisins"
+    if re.search(r'\b(dates|khajoor)\b', t_low):
+        return "dates"
+    if re.search(r'\b(makhana|fox\s*nuts?)\b', t_low):
+        return "makhana"
+    if re.search(r'\b(chia\s*seeds?)\b', t_low):
+        return "chia_seeds"
+    if re.search(r'\b(flax\s*seeds?)\b', t_low):
+        return "flax_seeds"
+    if re.search(r'\b(coconut\s*oil)\b', t_low):
+        return "coconut_oil"
+    if re.search(r'\b(mustard\s*oil|sarson\s*tel)\b', t_low):
+        return "mustard_oil"
+    if re.search(r'\b(olive\s*oil)\b', t_low):
+        return "olive_oil"
+
+    # Personal Care & Beauty
+    if re.search(r'\b(face\s*(?:and|&)?\s*(?:\w+\s*)?wash|facewash|beard\s*wash|facial\s*cleanser)\b', t_low):
+        return "face_wash"
+    if re.search(r'\b(soap|soaps|bathing\s*bar)\b', t_low):
+        return "soap"
+    if re.search(r'\b(shampoo|hair\s*wash)\b', t_low):
+        return "shampoo"
+    if re.search(r'\b(sunscreen|sunblock)\b', t_low):
+        return "sunscreen"
+    if re.search(r'\b(face\s*cream|moisturizer|moisturiser|day\s*cream|night\s*cream)\b', t_low):
+        return "face_cream"
+    if re.search(r'\b(serum|face\s*serum)\b', t_low):
+        return "serum"
+    if re.search(r'\b(lipstick|lip\s*gloss|lip\s*balm)\b', t_low):
+        return "lipstick"
+    if re.search(r'\b(foundation|compact|bb\s*cream)\b', t_low):
+        return "foundation"
+
+    # Home & Kitchen
+    if re.search(r'\b(water\s*bottle|water\s*bottles|steel\s*bottle|flask|thermos|sipper)\b', t_low) or (re.search(r'\bbottles?\b', t_low) and any(w in t_low for w in ('steel', 'water', 'stainless', 'copper', 'insulated', 'vacuum', 'sipper'))):
+        return "water_bottle"
+    if re.search(r'\b(pressure\s*cooker|cooker)\b', t_low):
+        return "pressure_cooker"
+    if re.search(r'\b(mixer\s*grinder|mixer|grinder|blender)\b', t_low):
+        return "mixer_grinder"
+    if re.search(r'\b(electric\s*kettle|kettle)\b', t_low):
+        return "electric_kettle"
+    if re.search(r'\b(refrigerator|fridge)\b', t_low):
+        return "refrigerator"
+    if re.search(r'\b(washing\s*machine|washer)\b', t_low):
+        return "washing_machine"
+    if re.search(r'\b(microwave)\b', t_low):
+        return "microwave"
+
+    # Electronics
+    if re.search(r'\b(smartwatch|smart\s*watch)\b', t_low):
+        return "smartwatch"
+    if re.search(r'\b(phone|smartphone|mobile)\b', t_low):
+        return "phone"
+    if re.search(r'\b(laptop|notebook|macbook)\b', t_low):
+        return "laptop"
+    if re.search(r'\b(tablet|ipad)\b', t_low):
+        return "tablet"
+    if re.search(r'\b(pen\s*drive|pendrive|usb\s*flash\s*drive|flash\s*drive)\b', t_low):
+        return "pen_drive"
+    if re.search(r'\b(earphone|earphones|earbuds|airpods|neckband|tws)\b', t_low):
+        return "earphones"
+    if re.search(r'\b(headphone|headphones|headset)\b', t_low):
+        return "headphones"
+    if re.search(r'\b(charger|adapter|power\s*adapter)\b', t_low):
+        return "charger"
+    if re.search(r'\b(tv|television)\b', t_low):
+        return "television"
+
+    # Footwear & Clothing
+    if re.search(r'\b(shoe|shoes|sneaker|sneakers|boots?|loafers?|running\s*shoes)\b', t_low):
+        return "shoes"
+    if re.search(r'\b(slipper|slippers|flip\s*flop|chappals?|slides?)\b', t_low):
+        return "slippers"
+    if re.search(r'\b(shirt|shirts|tshirt|t-shirt)\b', t_low):
+        return "shirt"
+    if re.search(r'\b(saree|sari)\b', t_low):
+        return "saree"
+
+    return category or "other"
+
+
+NON_BRAND_TERMS = {
+    # Demographics & Genders
+    'men', 'man', 'mens', "men's", 'women', 'woman', 'womens', "women's",
+    'kids', 'kid', "kids'", 'boy', 'boys', "boys'", 'girl', 'girls', "girls'",
+    'baby', 'babies', 'infant', 'infants', 'adult', 'adults', 'unisex', 'male', 'female',
+    'ladies', 'lady', 'gent', 'gents',
+    # Apparel & Footwear items
+    'jeans', 'shirt', 'shirts', 'tshirt', 't-shirt', 'tee', 'tees', 'top', 'tops',
+    'dress', 'dresses', 'saree', 'sari', 'kurta', 'kurtas', 'kurti', 'kurtis',
+    'pant', 'pants', 'trousers', 'trouser', 'jacket', 'jackets', 'hoodie', 'hoodies',
+    'sweater', 'sweaters', 'shoes', 'shoe', 'sneakers', 'sneaker', 'sandals', 'sandal',
+    'slippers', 'slipper', 'boots', 'boot', 'loafers', 'flats', 'heels', 'shorts',
+    'leggings', 'trackpants', 'joggers', 'socks', 'innerwear', 'briefs', 'bra',
+    # Fabrics & Materials
+    'cotton', 'denim', 'linen', 'silk', 'wool', 'leather', 'nylon', 'polyester',
+    'fleece', 'chiffon', 'georgette', 'khadi', 'velvet', 'satin', 'stretchable', 'stretch',
+    'stainless', 'steel', 'plastic', 'glass', 'ceramic', 'copper', 'metal', 'wood', 'wooden',
+    # Styles, Cuts & Fits
+    'baggy', 'slim', 'skinny', 'loose', 'relaxed', 'straight', 'flared', 'regular',
+    'oversized', 'casual', 'formal', 'party', 'ethnic', 'western', 'printed', 'plain',
+    'solid', 'striped', 'checked', 'cargo', 'high', 'mid', 'low', 'waist', 'rise',
+    # Common Product Types & Tech
+    'smartwatch', 'smart', 'watch', 'phone', 'smartphone', 'mobile', 'laptop', 'tablet',
+    'pen', 'drive', 'pendrive', 'face', 'wash', 'facewash', 'soap', 'shampoo', 'cream',
+    'moisturizer', 'moisturiser', 'sunscreen', 'serum', 'lotion', 'bottle', 'flask',
+    'cooker', 'kettle', 'mixer', 'grinder', 'blender', 'oil', 'earphones', 'earbuds',
+    'headphones', 'neckband', 'speaker', 'speakers', 'charger', 'adapter', 'cable',
+    'case', 'cover', 'guard', 'protector', 'seeds', 'nuts', 'dry', 'fruit', 'fruits',
+    'pack', 'combo', 'set', 'pure', 'organic', 'natural', 'fresh', 'premium', 'best',
+    'buy', 'online', 'new', 'original', 'cheap', 'top', 'good', 'color', 'size'
+}
 
 
 def parse_query_entities(query: str) -> Dict[str, Any]:
@@ -86,10 +240,10 @@ def parse_query_entities(query: str) -> Dict[str, Any]:
     if not clean_q:
         return entities
 
-    # 1. Detect Category
+    # 1. Detect Category & Specific Product Type
     category = detect_category(query=clean_q)
     entities["category"] = category
-    entities["product_type"] = category
+    entities["product_type"] = extract_specific_product_type(clean_q, category)
 
     # Check if query is explicitly asking for an accessory
     acc_match = re.search(r'\b(case|cases|cover|covers|backcover|tempered\s*glass|screen\s*guard|strap|skin|pouch|sleeve|bag|holder)\b', q_lower)
@@ -106,6 +260,22 @@ def parse_query_entities(query: str) -> Dict[str, Any]:
             if re.search(pattern, q_lower):
                 entities["brand"] = b
                 break
+
+    # If brand not in KNOWN_BRANDS, dynamically extract leading brand token if not a generic term
+    if not entities["brand"]:
+        tokens = clean_q.split()
+        if tokens:
+            t0 = tokens[0]
+            t0_low = t0.lower()
+            if t0_low not in NON_BRAND_TERMS and len(t0) > 1 and t0[0].isupper():
+                if len(tokens) >= 2 and tokens[1].lower() in ('men', 'metal', 'naturals', 'organics', 'foods', 'pure', 'gold') and f"{t0_low} {tokens[1].lower()}" not in NON_BRAND_TERMS:
+                    entities["brand"] = f"{tokens[0]} {tokens[1]}"
+                else:
+                    entities["brand"] = t0
+
+    # Safety check: if brand somehow ended up as a non-brand term, reset to None
+    if entities["brand"] and str(entities["brand"]).strip().lower() in NON_BRAND_TERMS:
+        entities["brand"] = None
 
     # 3. Extract Network (5G / 4G)
     if re.search(r'\b5g\b', q_lower):

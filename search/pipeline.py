@@ -26,17 +26,33 @@ from typing import Dict, Any, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 from search.query_parser import parse_query_entities
-from search.product_matcher import evaluate_product_match, check_suspicious_price, is_accessory_conflict
-from search.specs_extractor import build_category_spec_matrix, compute_marketplace_statuses
-from search.quality_scorer import compute_quality_and_confidence, get_detailed_quality_report, calculate_value_for_money_index
+from search.product_matcher import (
+    evaluate_product_match, check_suspicious_price, is_accessory_conflict,
+    validate_product_for_comparison, get_match_status_label
+)
+from search.specs_extractor import (
+    build_category_spec_matrix, compute_marketplace_statuses,
+    enrich_products_with_specs
+)
+from search.quality_scorer import (
+    compute_quality_and_confidence, get_detailed_quality_report,
+    calculate_value_for_money_index
+)
 from search.category_detector import detect_category
+from search.ranking import rank_products
 
 def _enrich_product_quality(item: Dict[str, Any], q_rep: Dict[str, Any], min_price: Optional[float] = None) -> None:
     item["quality_report"] = q_rep
-    item["quality_score"] = q_rep.get("raw_quality_score") or 50.0
-    item["data_confidence"] = q_rep.get("data_confidence") or 50.0
+    item["quality_score"] = q_rep.get("quality_score")
+    item["raw_quality_score"] = q_rep.get("raw_quality_score") or 0.0
+    item["data_confidence"] = q_rep.get("data_confidence") or 0.0
+    item["evidence_coverage"] = q_rep.get("evidence_coverage") or 0.0
+    item["evidence_coverage_label"] = q_rep.get("evidence_coverage_label") or f"{item['evidence_coverage']:.0f}% Coverage"
+    item["quality_basis"] = q_rep.get("quality_basis") or []
+    item["quality_evidence"] = q_rep.get("quality_evidence") or item["quality_basis"]
     item["has_sufficient_data"] = q_rep.get("has_sufficient_data", True)
-    item["quality_score_label"] = q_rep.get("quality_score_label")
+    item["quality_score_label"] = q_rep.get("quality_score_label") or ("Not Available" if not item["has_sufficient_data"] else f"{item['quality_score']:.0f}/100")
+    item["quality_status_badge"] = q_rep.get("quality_status_badge", "badge bg-primary text-white")
     item["quality_band"] = q_rep.get("quality_band", "Standard Quality")
     item["quality_attributes"] = q_rep.get("quality_attributes", {})
     item["positive_themes"] = q_rep.get("review_signals", {}).get("positive_themes", [])
@@ -44,7 +60,12 @@ def _enrich_product_quality(item: Dict[str, Any], q_rep: Dict[str, Any], min_pri
 
     # Extract quality points list for rich UI rendering
     points = []
-    points.append(f"Quality Score: {item['quality_score']:.0f}/100 ({item['quality_band']})")
+    if item["has_sufficient_data"] and item["quality_score"] is not None:
+        points.append(f"Quality Score: {item['quality_score']:.0f}/100 ({item['quality_band']})")
+        points.append(f"Evidence Coverage: {item['evidence_coverage']:.0f}%")
+    else:
+        points.append("Quality Score: Not Available (Insufficient Data)")
+        points.append(f"Evidence Coverage: {item['evidence_coverage']:.0f}%")
     
     q_mat = item["quality_attributes"].get("material") or item.get("material")
     if q_mat and q_mat != "Standard Durable Material":
@@ -67,11 +88,12 @@ def _enrich_product_quality(item: Dict[str, Any], q_rep: Dict[str, Any], min_pri
     item["quality_points"] = points
 
     p_num = item.get("price_num")
+    score_for_vfm = item["quality_score"] if item["quality_score"] is not None else item["raw_quality_score"]
     if p_num and p_num > 0:
         base_p = min_price if (min_price and min_price > 0) else p_num
-        item["vfm_index"] = calculate_value_for_money_index(item["quality_score"], p_num, base_p)
+        item["vfm_index"] = calculate_value_for_money_index(score_for_vfm, p_num, base_p)
     else:
-        item["vfm_index"] = round(item["quality_score"] * 0.8, 1)
+        item["vfm_index"] = round(score_for_vfm * 0.8, 1)
 
 
 def run_comparison_pipeline(
@@ -90,7 +112,7 @@ def run_comparison_pipeline(
 
     # 1. Query Understanding / Target Entity Extraction
     if is_url_search and source_product:
-        pack_q = source_product.get("pack_quantity")
+        pack_q = source_product.get("pack_quantity") or source_product.get("pack_count")
         pack_cnt = None
         if pack_q is not None:
             try:
@@ -99,13 +121,22 @@ def run_comparison_pipeline(
                     pack_cnt = int(m_p.group(0))
             except (ValueError, TypeError):
                 pack_cnt = None
+        src_title = source_product.get("title") or source_product.get("product_name") or ""
+        if not pack_cnt and src_title:
+            m_pk = re.search(r'\b(?:pack[\s-]*(?:of[\s-]*)?|pack-)(\d+)\b', src_title, re.I)
+            if m_pk:
+                pack_cnt = int(m_pk.group(1))
+
+        from search.query_parser import extract_specific_product_type
+        detected_prod_type = source_product.get("product_type") or extract_specific_product_type(src_title, source_product.get("category") or detected_cat)
 
         target_info = {
             "raw_query": clean_q,
+            "title": src_title,
             "brand": source_product.get("brand"),
             "model": source_product.get("model"),
             "category": source_product.get("category") or detected_cat,
-            "product_type": source_product.get("category") or detected_cat,
+            "product_type": detected_prod_type,
             "ram": source_product.get("ram"),
             "storage": source_product.get("storage"),
             "network": source_product.get("network"),
@@ -129,15 +160,29 @@ def run_comparison_pipeline(
 
     for platform_key in ("Amazon", "Flipkart", "Meesho"):
         raw_items = raw_platform_results.get(platform_key) or raw_platform_results.get(platform_key.lower()) or []
+        # Pre-enrich raw items with category-specific specifications and normalization
+        enrich_products_with_specs(raw_items, clean_q)
+
         for item in raw_items:
             if not isinstance(item, dict):
                 continue
             item["platform"] = platform_key
             all_raw_candidates.append(item)
 
-            # Evaluate match status
-            status, score, breakdown, reasons = evaluate_product_match(target_info, item)
+            if item.get("is_source"):
+                is_valid = True
+                status = "EXACT_MATCH"
+                status_label = "Exact Match Found"
+                score = 100.0
+                breakdown = {"overall": 100.0}
+                reasons = ["Primary canonical product from source URL"]
+            else:
+                # Evaluate product matching using strict validation
+                is_valid, status_label, reason = validate_product_for_comparison(target_info, item)
+                status, score, breakdown, reasons = evaluate_product_match(target_info, item)
+
             item["match_status"] = status
+            item["match_status_label"] = status_label
             item["match_score"] = score
             item["match_breakdown"] = breakdown
             item["match_reasons"] = reasons
@@ -146,39 +191,38 @@ def run_comparison_pipeline(
             q_rep = get_detailed_quality_report(item, detected_cat)
             _enrich_product_quality(item, q_rep)
 
-            if status == "REJECTED":
+            # Ensure canonical 22-field product schema (Section 14)
+            item["product_name"] = item.get("title") or item.get("product_name") or "Not Available"
+            item["brand"] = item.get("brand") or "Not Available"
+            item["model"] = item.get("model") or "Not Available"
+            item["category"] = item.get("category") or detected_cat
+            item["product_type"] = item.get("product_type") or detected_cat
+            if not isinstance(item.get("variant"), dict):
+                item["variant"] = {
+                    "model": item.get("model"),
+                    "color": item.get("color"),
+                    "size": item.get("size"),
+                    "volume": item.get("volume"),
+                    "storage": item.get("storage"),
+                    "ram": item.get("ram")
+                }
+            item["availability"] = item.get("availability") or ("In Stock" if item.get("in_stock", True) else "Out of Stock")
+            item["seller"] = item.get("seller") or "Not Available"
+            item["image_url"] = item.get("image") or item.get("image_url") or ""
+            item["product_url"] = item.get("product_url") or item.get("link") or ""
+            if "specifications" not in item or not item["specifications"]:
+                item["specifications"] = item.get("specs", {}).get("category_specs") if isinstance(item.get("specs"), dict) else {}
+            item["scraping_status"] = item.get("scrape_status") or "success"
+            if "scraped_at" not in item:
+                import datetime
+                item["scraped_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+            if status == "REJECTED" or (not is_valid and status not in ("EXACT_MATCH", "VARIANT_MATCH", "SIMILAR_PRODUCT", "RELATED_PRODUCT")):
                 rejected_products.append(item)
             else:
                 validated_products_by_platform[platform_key].append(item)
 
-    # 2b. Platform Fallback Rescue: ensure no platform is left empty if scraper returned candidates
-    for platform_key in ("Amazon", "Flipkart", "Meesho"):
-        if not validated_products_by_platform[platform_key]:
-            raw_items = raw_platform_results.get(platform_key) or raw_platform_results.get(platform_key.lower()) or []
-            rescued_count = 0
-            for item in raw_items:
-                if not isinstance(item, dict):
-                    continue
-                # Skip true accessory conflicts
-                if is_accessory_conflict(target_info.get("category", "other"), item.get("title", "")):
-                    continue
-                p_val = item.get("price_num")
-                if not p_val or p_val <= 0:
-                    continue
-                item["platform"] = platform_key
-                item["match_status"] = "SIMILAR_PRODUCT"
-                item["match_score"] = item.get("match_score") or 65.0
-                q_rep_res = get_detailed_quality_report(item, detected_cat)
-                _enrich_product_quality(item, q_rep_res)
-                validated_products_by_platform[platform_key].append(item)
-                rescued_count += 1
-                if rescued_count >= 15:
-                    break
-            if rescued_count > 0:
-                logger.info(f"[{platform_key}] Rescued {rescued_count} category/similar products to ensure platform coverage.")
-
     # 3. Suspicious Price Protection (Section 17)
-    # Check all validated products against median price of exact/variant matches
     all_candidates_for_median = [
         p for plat_items in validated_products_by_platform.values() for p in plat_items
     ]
@@ -186,15 +230,17 @@ def run_comparison_pipeline(
         is_suspicious, susp_reason = check_suspicious_price(p, all_candidates_for_median)
         if is_suspicious:
             p["match_status"] = "PRICE/IDENTITY UNVERIFIED"
+            p["match_status_label"] = "Insufficient Data"
             p["match_reasons"].append(susp_reason)
             title_str = str(p.get('title') or '')
             logger.warning(f"[{p.get('platform')}] Flagged suspicious price: '{title_str[:35]}' ({p.get('price')}): {susp_reason}")
 
-    # validated_products is the SINGLE SOURCE OF TRUTH
+    # validated_products is the SINGLE SOURCE OF TRUTH (Ranked by Quality First, Price Second)
     all_validated_products = [
         p for plat_items in validated_products_by_platform.values() for p in plat_items
-        if p.get("match_status") != "REJECTED"
+        if p.get("match_status") in ("EXACT_MATCH", "VARIANT_MATCH", "SIMILAR_PRODUCT", "RELATED_PRODUCT")
     ]
+    all_validated_products = rank_products(all_validated_products, clean_q)
 
     # 4. Determine Best Validated Match per Platform for Specification Matrix & Deal Calculation
     best_match_per_platform: Dict[str, Optional[Dict[str, Any]]] = {
@@ -204,21 +250,65 @@ def run_comparison_pipeline(
     }
     for plat in ("Amazon", "Flipkart", "Meesho"):
         plat_items = validated_products_by_platform.get(plat) or []
-        # Filter for Exact Match or allowed Variant Match with verified price
+        # Filter for Exact Match or allowed Variant Match with verified price (or is_source)
         exact_or_variant = [
             it for it in plat_items
-            if it.get("match_status") in ("EXACT_MATCH", "VARIANT_MATCH") and it.get("price_num") and it["price_num"] > 0
+            if (it.get("match_status") in ("EXACT_MATCH", "VARIANT_MATCH") or it.get("is_source")) and ((it.get("price_num") and it["price_num"] > 0) or it.get("is_source"))
         ]
         if exact_or_variant:
-            # Sort by match score desc, then price asc
-            exact_or_variant.sort(key=lambda x: (-x.get("match_score", 0), x.get("price_num", 9999999)))
+            # Sort by is_source first, match score desc, quality score desc, then price asc
+            exact_or_variant.sort(key=lambda x: (
+                0 if x.get("is_source") else 1,
+                -x.get("match_score", 0),
+                -(x.get("quality_score") or 0),
+                x.get("price_num", 9999999) if (x.get("price_num") and x["price_num"] > 0) else 9999999
+            ))
             best_match_per_platform[plat] = exact_or_variant[0]
-        elif plat_items:
-            # Fallback to highest scoring similar product if no exact match
-            similar_items = [it for it in plat_items if it.get("price_num") and it["price_num"] > 0]
-            if similar_items:
-                similar_items.sort(key=lambda x: (-x.get("match_score", 0), x.get("price_num", 9999999)))
-                best_match_per_platform[plat] = similar_items[0]
+        else:
+            # Fallback to the top valid comparable candidate on this platform with verified price (or is_source)
+            valid_candidates = [
+                it for it in plat_items
+                if it.get("match_status") not in ("REJECTED", "PRICE/IDENTITY UNVERIFIED") and ((it.get("price_num") and it["price_num"] > 0) or it.get("is_source"))
+            ]
+            if valid_candidates:
+                valid_candidates.sort(key=lambda x: (
+                    0 if x.get("is_source") else 1,
+                    -x.get("match_score", 0),
+                    -(x.get("quality_score") or 0),
+                    x.get("price_num", 9999999) if (x.get("price_num") and x["price_num"] > 0) else 9999999
+                ))
+                chosen = valid_candidates[0]
+                if chosen.get("match_status") not in ("EXACT_MATCH", "VARIANT_MATCH") and not chosen.get("is_source"):
+                    chosen["match_status"] = "SIMILAR_PRODUCT"
+                    chosen["match_status_label"] = "Similar Product"
+                best_match_per_platform[plat] = chosen
+            else:
+                best_match_per_platform[plat] = None
+
+    # Enrich Flipkart best match if needed with authentic specifications from direct URL scrape
+    fk_best = best_match_per_platform.get("Flipkart")
+    if fk_best and fk_best.get("product_url") and len(fk_best.get("specifications") or {}) < 3:
+        try:
+            from scrapers.flipkart.url_scraper import FlipkartUrlScraper
+            scraper = FlipkartUrlScraper()
+            norm_p, stat, _ = scraper.scrape_url(fk_best["product_url"])
+            if stat == "success" and norm_p and norm_p.get("specifications"):
+                fk_best["specifications"] = {**norm_p.get("specifications", {}), **fk_best.get("specifications", {})}
+                if norm_p.get("image") and (not fk_best.get("image") or "svg" in str(fk_best.get("image"))):
+                    fk_best["image"] = norm_p["image"]
+                    fk_best["image_url"] = norm_p["image"]
+                if norm_p.get("weight") and not fk_best.get("weight"):
+                    fk_best["weight"] = norm_p["weight"]
+                if norm_p.get("pack_quantity") and not fk_best.get("pack_quantity"):
+                    fk_best["pack_quantity"] = norm_p["pack_quantity"]
+                if norm_p.get("skin_type") and not fk_best.get("skin_type"):
+                    fk_best["skin_type"] = norm_p["skin_type"]
+                from search.specs_extractor import extract_flipkart_specs, extract_specs, normalize_product_specifications
+                extract_flipkart_specs(fk_best)
+                fk_best['specs'] = extract_specs(fk_best, clean_q)
+                fk_best['normalized_specifications'] = normalize_product_specifications(fk_best, target_info.get("category") or detected_cat)
+        except Exception as e:
+            logger.debug(f"[Pipeline] Flipkart specification enrichment failed: {e}")
 
     # 5. Top Verified Offers (Section 15)
     # Includes exact/variant matches, and falls back to similar offers so each marketplace with products is represented.
@@ -228,8 +318,9 @@ def run_comparison_pipeline(
 
     for plat in ("Amazon", "Flipkart", "Meesho"):
         best_p = best_match_per_platform.get(plat)
-        if best_p and best_p.get("price_num") and best_p["price_num"] > 0:
-            p_fmt = best_p.get("price") or (f"₹{best_p.get('price_num'):,}" if best_p.get("price_num") else "N/A")
+        has_valid_offer = bool(best_p and ((best_p.get("price_num") and best_p["price_num"] > 0) or best_p.get("is_source") or (best_p.get("price") and "unavailable" not in str(best_p.get("price")).lower())))
+        if best_p and has_valid_offer:
+            p_fmt = best_p.get("price") or (f"₹{best_p.get('price_num'):,}" if best_p.get("price_num") else "Price Unavailable")
             q_rep = best_p.get("quality_report") or get_detailed_quality_report(best_p, detected_cat)
             best_p["quality_report"] = q_rep
             offer_data = {
@@ -270,24 +361,50 @@ def run_comparison_pipeline(
             if best_p.get("match_status") in ("EXACT_MATCH", "VARIANT_MATCH"):
                 valid_verified_deals.append(offer_data)
         else:
+            p_stat_obj = platform_status.get(plat) or platform_status.get(plat.lower()) or {}
+            stat_code = str(p_stat_obj.get("status", "")).lower()
+            if stat_code in ("timeout", "timed_out"):
+                fail_title = f"{plat} request timed out."
+                status_label = "Timeout"
+            elif stat_code in ("blocked", "access_blocked"):
+                if plat == "Amazon":
+                    fail_title = "Amazon data could not be verified. Please try again or use an available authorized data source."
+                else:
+                    fail_title = f"{plat} marketplace access restricted."
+                status_label = "Blocked"
+            elif stat_code in ("scraper_error", "api_error", "error"):
+                fail_title = f"{plat} scraper connection error."
+                status_label = "Error"
+            elif stat_code in ("no_products_found", "no_match") or not best_p:
+                if plat == "Meesho":
+                    fail_title = "No verified matching product found on Meesho."
+                else:
+                    fail_title = f"Exact product not found on {plat}."
+                status_label = "Exact Match Not Found"
+            else:
+                fail_title = f"Exact product not found on {plat}."
+                status_label = "Exact Match Not Found"
+
             top_verified_offers[plat] = {
                 "available": False,
                 "platform": plat,
                 "product": None,
-                "product_name": "No verified match on this marketplace",
-                "title": "No verified match on this marketplace",
-                "price": "N/A",
+                "product_name": "Not Available",
+                "title": fail_title,
+                "price": "Not Available",
                 "price_num": None,
-                "mrp": "N/A",
+                "mrp": "Not Available",
                 "discount": "—",
                 "rating": None,
                 "reviews": None,
-                "quality_score": 0.0,
+                "quality_score": None,
                 "data_confidence": 0.0,
-                "quality_score_label": "Insufficient Data",
+                "quality_score_label": "Not Available",
                 "has_sufficient_data": False,
                 "review_signals": {},
                 "quality_attributes": {},
+                "platform_status": status_label,
+                "status": status_label,
                 "is_overall_best": False
             }
 
@@ -321,23 +438,23 @@ def run_comparison_pipeline(
                 for k, v in list(p["specs"]["category_specs"].items())[:3]:
                     if v and str(v).strip() not in ("N/A", "None", "Not Available", ""):
                         sp_items.append(f"{k}: {v}")
-            main_specs_str = " • ".join(sp_items) if sp_items else "Standard Category Specifications"
+            main_specs_str = " • ".join(sp_items) if sp_items else "Not Available"
 
             # Format quality attributes string and dictionary
             q_attr = q_rep.get("quality_attributes", {})
             q_attr_items = []
-            if q_attr.get("material") and q_attr["material"] != "Standard Durable Material":
+            if q_attr.get("material") and q_attr["material"] not in ("Standard Durable Material", "Not Available"):
                 q_attr_items.append(f"Material: {q_attr['material']}")
-            if q_attr.get("warranty"):
+            if q_attr.get("warranty") and q_attr["warranty"] != "Not Available":
                 q_attr_items.append(f"Warranty: {q_attr['warranty']}")
-            if q_attr.get("seller"):
+            if q_attr.get("seller") and q_attr["seller"] != "Not Available":
                 q_attr_items.append(f"Seller: {q_attr['seller']}")
-            quality_attr_str = " | ".join(q_attr_items) if q_attr_items else (q_attr.get("warranty") or "Standard Quality Features")
+            quality_attr_str = " | ".join(q_attr_items) if q_attr_items else "Not Available"
 
             q_attr_dict = {
-                "Warranty": q_attr.get("warranty") or "Standard 1 Year",
-                "Material/Build": q_attr.get("material") or "Standard Build",
-                "Seller/Delivery": q_attr.get("seller") or "Verified Marketplace Seller",
+                "Warranty": q_attr.get("warranty") if q_attr.get("warranty") and q_attr.get("warranty") != "Not Available" else "Not Available",
+                "Material/Build": q_attr.get("material") if q_attr.get("material") and q_attr.get("material") not in ("Standard Build", "Standard Durable Material", "Not Available") else "Not Available",
+                "Seller/Delivery": q_attr.get("seller") or "Not Available",
                 "Condition": q_attr.get("condition") or "Brand New"
             }
 
@@ -371,41 +488,70 @@ def run_comparison_pipeline(
                 "link": offer["link"],
                 "product_url": offer["link"],
                 "image": offer["image"],
+                "platform_status": "Found",
+                "status": "Found",
                 "available": True
             }
             quality_comparison_table.append(row_entry)
         else:
+            p_stat_obj = platform_status.get(plat) or platform_status.get(plat.lower()) or {}
+            stat_code = str(p_stat_obj.get("status", "")).lower()
+            if stat_code in ("timeout", "timed_out"):
+                fail_title = f"{plat} request timed out."
+                status_label = "Timeout"
+            elif stat_code in ("blocked", "access_blocked"):
+                if plat == "Amazon":
+                    fail_title = "Amazon data could not be verified. Please try again or use an available authorized data source."
+                else:
+                    fail_title = f"{plat} marketplace access restricted."
+                status_label = "Blocked"
+            elif stat_code in ("scraper_error", "api_error", "error"):
+                fail_title = f"{plat} scraper connection error."
+                status_label = "Error"
+            elif stat_code in ("no_products_found", "no_match") or not best_p:
+                fail_title = f"Exact product not found on {plat}."
+                status_label = "Exact Product Not Found"
+            else:
+                fail_title = f"Exact product not found on {plat}."
+                status_label = "Exact Product Not Found"
+
             quality_comparison_table.append({
                 "platform": plat,
-                "product_name": "No verified match on this marketplace",
+                "title": fail_title,
+                "product_name": "Not Available",
                 "model": "—",
-                "price": "N/A",
+                "price": "Not Available",
                 "price_num": None,
-                "mrp": "N/A",
+                "mrp": "Not Available",
                 "discount": "—",
                 "rating": None,
                 "rating_display": "—",
                 "review_count": None,
                 "review_count_display": "—",
                 "main_specs": {},
-                "main_specifications": "No specification data available",
+                "main_specifications": fail_title,
                 "quality_attributes": {
                     "Warranty": "—",
                     "Material/Build": "—",
                     "Seller/Delivery": "—",
                     "Condition": "—"
                 },
-                "quality_attributes_str": "Listing unavailable on this platform",
+                "quality_attributes_str": fail_title,
+                "quality_score": None,
                 "estimated_quality_score": None,
-                "estimated_quality_label": "Insufficient Data",
+                "estimated_quality_label": "Not Available",
+                "quality_band": "Not Comparable",
+                "quality_highlights": "Different product / Not Available",
                 "has_sufficient_data": False,
                 "data_confidence": 0.0,
-                "data_confidence_label": "0% Data Availability",
+                "data_confidence_label": "Not Available",
                 "quality_badge": "badge bg-secondary text-white",
                 "positive_themes": [],
                 "negative_themes": [],
                 "link": "#",
                 "image": "",
+                "platform_status": status_label,
+                "status": status_label,
                 "available": False
             })
 
@@ -418,7 +564,8 @@ def run_comparison_pipeline(
         "value_for_money": None
     }
 
-    active_offers = [d for d in all_available_deals if d.get("price_num") and d["price_num"] > 0]
+    # Best Price & Ranking must operate ONLY on verified same-product deals (Section 17 & 21)
+    active_offers = [d for d in valid_verified_deals if d.get("price_num") and d["price_num"] > 0]
     if active_offers:
         min_price_val = min(d["price_num"] for d in active_offers)
         
@@ -448,6 +595,7 @@ def run_comparison_pipeline(
                 "quality_score": top_quality_deal["quality_score"],
                 "quality_label": top_quality_deal.get("quality_score_label") or f"{top_quality_deal['quality_score']}/100",
                 "data_confidence": top_quality_deal["data_confidence"],
+                "has_sufficient_data": True,
                 "price": top_quality_deal["price"],
                 "link": top_quality_deal["link"],
                 "image": top_quality_deal["image"],
@@ -459,7 +607,8 @@ def run_comparison_pipeline(
                 "title": "Insufficient Data for Score",
                 "quality_score": None,
                 "quality_label": "Insufficient Data",
-                "data_confidence": max(d.get("data_confidence", 0) for d in active_offers),
+                "data_confidence": max((d.get("data_confidence", 0) for d in active_offers), default=0.0),
+                "has_sufficient_data": False,
                 "price": "N/A",
                 "link": "#",
                 "image": "",
@@ -517,7 +666,7 @@ def run_comparison_pipeline(
         scored_vfm = []
         for d in active_offers:
             vfm_idx = calculate_value_for_money_index(
-                d.get("quality_score", 50.0),
+                d.get("quality_score") or 50.0,
                 d.get("price_num"),
                 min_price_val
             )
@@ -537,43 +686,58 @@ def run_comparison_pipeline(
             "reasons": f"Best balance of quality ({best_vfm_deal.get('quality_score', 0)}/100) and pricing ({best_vfm_deal['price']}) on {best_vfm_deal['platform']}."
         }
 
-    # 8. Best Deal Engine (Value Algorithm + Savings)
+    # 8. Best Deal Engine (Quality First, Price Second + Verified Identity)
     best_deal: Optional[Dict[str, Any]] = None
     no_deal_message: Optional[str] = None
     savings_info: Optional[Dict[str, Any]] = None
 
-    # Check cross-platform match requirements
-    candidate_deals = valid_verified_deals if valid_verified_deals else all_available_deals
+    # Only include deals that have verified identity, valid pricing, and sufficient specification evidence
+    candidate_deals = [
+        d for d in valid_verified_deals 
+        if d.get("available") and d.get("price_num") and d.get("price_num") > 0 
+        and d.get("has_sufficient_data") and d.get("match_status") in ("EXACT_MATCH", "VARIANT_MATCH")
+    ]
     verified_platforms_count = len(valid_verified_deals)
     has_cross_platform_match = len(candidate_deals) >= 2
 
     if candidate_deals:
-        # Calculate Best Value score for each deal
         min_p = min(d["price_num"] for d in candidate_deals if d["price_num"])
+        max_qual = max((float(d.get("quality_score") or 0.0) for d in candidate_deals), default=0.0)
         scored_deals = []
+
+        def deal_priority_key(d):
+            m_prio = 2 if d.get("match_status") == "EXACT_MATCH" else 1
+            q_val = float(d.get("quality_score") or 0.0)
+            # Tier: Offers within 5 points of top quality have equivalent specifications
+            is_top_tier_spec = 1 if (max_qual - q_val) <= 5.0 else 0
+            p_val = d.get("price_num") or 9_999_999
+            avail = 1 if "in stock" in str(d.get("availability", "")).lower() else 0
+            return (m_prio, is_top_tier_spec, avail, -p_val, q_val)
 
         for d in candidate_deals:
             p_val = d["price_num"]
-            prod = d["product"]
-
-            # Deal formula: 35% Price, 25% Quality, 15% Reviews, 15% Seller, 10% Availability
-            price_comp = (min_p / max(1, p_val)) * 35.0
-            qual_comp = (d["quality_score"] / 100.0) * 25.0
-            rev_cnt = d["reviews"] or 0
+            # Quality-first deal formula: 45% Quality, 25% Specs Completeness, 15% Ratings/Reviews, 10% Availability/Seller, 5% Price
+            qual_comp = (float(d.get("quality_score") or 0.0) / 100.0) * 45.0
+            conf_comp = (float(d.get("data_confidence") or 0.0) / 100.0) * 25.0
+            try:
+                rev_cnt = int(str(d.get("reviews") or 0).replace(",", ""))
+            except (ValueError, TypeError):
+                rev_cnt = 0
             rev_comp = min(15.0, (rev_cnt / 500.0) * 15.0 if rev_cnt < 500 else 15.0)
-            avail_comp = 10.0 if d["availability"] == "In Stock" else 0.0
-            match_comp = (d["match_score"] / 100.0) * 15.0
+            avail_comp = 10.0 if "in stock" in str(d.get("availability", "")).lower() else 0.0
+            price_comp = (min_p / max(1, p_val)) * 5.0
 
-            deal_score = round(price_comp + qual_comp + rev_comp + avail_comp + match_comp, 1)
+            deal_score = round(qual_comp + conf_comp + rev_comp + avail_comp + price_comp, 1)
 
             scored_deals.append({
                 "deal_data": d,
                 "deal_score": deal_score,
-                "price_num": p_val
+                "price_num": p_val,
+                "sort_key": deal_priority_key(d)
             })
 
-        # Pick deal with highest overall deal score
-        scored_deals.sort(key=lambda x: (-x["deal_score"], x["price_num"]))
+        # Pick deal prioritizing exact match, top-tier specifications, then best price
+        scored_deals.sort(key=lambda x: (x["sort_key"], x["deal_score"]), reverse=True)
         winner_deal = scored_deals[0]["deal_data"]
         winner_deal["is_overall_best"] = True
 
@@ -594,9 +758,9 @@ def run_comparison_pipeline(
 
         reasons = [
             f"Verified {winner_deal['match_status']} on {winner_deal['platform']}",
-            f"Verified Price: {winner_deal['price']}",
-            f"Product Quality Score: {winner_deal['quality_score']}/100",
-            f"{winner_deal['availability']}"
+            f"Quality Score: {winner_deal['quality_score']}/100 based on verified specifications",
+            f"Evidence Coverage: {winner_deal['data_confidence']}%",
+            f"Price: {winner_deal['price']}"
         ]
         if winner_deal.get("rating"):
             w_rev = winner_deal.get("reviews")
@@ -631,7 +795,7 @@ def run_comparison_pipeline(
             "reason_text": " • ".join(reasons)
         }
     else:
-        no_deal_message = "No exact cross-platform match available"
+        no_deal_message = "No verified cross-platform match with sufficient specification data available"
 
     # 9. Pairwise Matching Status Summary
     match_pairs = {}
@@ -669,6 +833,7 @@ def run_comparison_pipeline(
         "top_verified_offers": top_verified_offers,
         "top_prices": top_verified_offers,
         "specifications_matrix": specification_matrix,
+        "specification_matrix": specification_matrix,
         "quality_comparison_table": quality_comparison_table,
         "comparison_summary": comparison_summary,
         "best_deal": best_deal,

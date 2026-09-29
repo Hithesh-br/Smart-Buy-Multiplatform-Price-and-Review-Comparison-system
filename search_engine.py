@@ -39,11 +39,59 @@ from scrapers.scraper_logger import log_scraper_event
 logger = logging.getLogger("smartbuy.search_engine")
 logging.basicConfig(level=logging.INFO)
 
+import os
+
+PLATFORM_TIMEOUTS = {
+    "amazon": int(os.getenv("AMAZON_TIMEOUT_SEC", "35")),
+    "flipkart": int(os.getenv("FLIPKART_TIMEOUT_SEC", "25")),
+    "meesho": int(os.getenv("MEESHO_TIMEOUT_SEC", "35")),
+}
+
 _scrapers_instances = {
     "Amazon": AmazonScraper(),
     "Flipkart": FlipkartScraper(),
     "Meesho": MeeshoScraper(),
 }
+
+
+def log_pipeline_diagnostic(
+    user_input: str,
+    input_type: str,
+    detected_platform: Optional[str],
+    url_normalization: Optional[str],
+    scraper_selected: str,
+    platform_status: Dict[str, Any],
+    raw_results: Dict[str, Any],
+    category: str,
+    validated_products: List[Any],
+    best_deal: Optional[Dict[str, Any]]
+):
+    """Logs the standardized SmartBuy verification pipeline trace per Section 22."""
+    best_prod_name = best_deal.get('title') or best_deal.get('product_name') if best_deal else "N/A"
+    best_q_score = best_deal.get('quality_score') if best_deal else "N/A"
+
+    logger.info("=" * 60)
+    logger.info("[SMARTBUY PIPELINE TRACE]")
+    logger.info(f"USER INPUT: {user_input}")
+    logger.info(f"INPUT TYPE: {input_type}")
+    logger.info(f"DETECTED PLATFORM: {detected_platform or 'All Platforms (Product Search)'}")
+    logger.info(f"URL NORMALIZATION: {url_normalization or 'N/A'}")
+    logger.info(f"SCRAPER SELECTED: {scraper_selected}")
+    for p_name, stat in platform_status.items():
+        p_items = raw_results.get(p_name, [])
+        first_item = p_items[0] if p_items else {}
+        first_img = first_item.get('image_url') or first_item.get('image') or 'None'
+        first_specs = len(first_item.get('specifications') or {}) if isinstance(first_item, dict) else 0
+        p_stat_val = stat.get('status', 'unknown')
+        logger.info(f"[{p_name.upper()}] Status: {p_stat_val.upper()} | Items: {len(p_items)} | Raw Title: '{first_item.get('title', 'N/A')[:40]}' | Image: {first_img[:50]}... | Specs: {first_specs}")
+        if p_stat_val in ('timeout', 'blocked', 'scraper_error'):
+            logger.warning(f"[{p_name.upper()}] Request: FAILED | Reason: {stat.get('error', p_stat_val)} | Final status: {p_stat_val.upper()}")
+    logger.info(f"CATEGORY DETECTION: {category}")
+    logger.info(f"PRODUCT MATCHING: {len(validated_products)} products validated")
+    logger.info(f"COMPARISON: Complete")
+    logger.info(f"QUALITY SCORE: {best_q_score} (Best Deal: '{best_prod_name[:40]}')")
+    logger.info(f"FRONTEND: READY")
+    logger.info("=" * 60)
 
 
 def fetch_all_products_parallel(query: str, bypass_fresh: bool = False) -> tuple[dict, dict]:
@@ -57,12 +105,14 @@ def fetch_all_products_parallel(query: str, bypass_fresh: bool = False) -> tuple
     raw_results = {name: [] for name in _scrapers_instances}
     platform_status = {
         name: {
+            "platform": name,
             "status": "unavailable",
             "available": False,
             "error": None,
             "count": 0,
             "duration": 0.0,
-            "source": "live"
+            "source": "live",
+            "retry_available": True
         } for name in _scrapers_instances
     }
 
@@ -75,10 +125,12 @@ def fetch_all_products_parallel(query: str, bypass_fresh: bool = False) -> tuple
             if cached_entry and cached_entry.get("results"):
                 items = cached_entry["results"]
                 raw_results[name] = items
+                platform_status[name]["platform"] = name
                 platform_status[name]["available"] = True
                 platform_status[name]["count"] = len(items)
                 platform_status[name]["status"] = cached_entry.get("scrape_status", "success")
                 platform_status[name]["source"] = "cache"
+                platform_status[name]["retry_available"] = False
                 logger.info(f"[{name.upper()}] Loaded {len(items)} items from platform cache")
                 continue
 
@@ -107,15 +159,18 @@ def fetch_all_products_parallel(query: str, bypass_fresh: bool = False) -> tuple
 
         for future in as_completed(future_to_platform):
             platform = future_to_platform[future]
+            p_timeout = PLATFORM_TIMEOUTS.get(platform.lower(), 35)
             try:
-                p_name, items, status_code, err_msg, src, dur = future.result(timeout=45)
+                p_name, items, status_code, err_msg, src, dur = future.result(timeout=p_timeout)
                 raw_results[p_name] = items or []
+                platform_status[p_name]["platform"] = p_name
                 platform_status[p_name]["count"] = len(items or [])
                 platform_status[p_name]["available"] = bool(items)
-                platform_status[p_name]["status"] = status_code
+                platform_status[p_name]["status"] = status_code if items else (status_code if status_code != "success" else "no_products_found")
                 platform_status[p_name]["error"] = err_msg
                 platform_status[p_name]["duration"] = dur
                 platform_status[p_name]["source"] = src
+                platform_status[p_name]["retry_available"] = not bool(items)
 
                 # Store in isolated platform cache if items were found
                 if items:
@@ -124,21 +179,96 @@ def fetch_all_products_parallel(query: str, bypass_fresh: bool = False) -> tuple
                 log_scraper_event(p_name, query, status_code, retry=0, products_count=len(items or []), duration=dur)
                 logger.info(f"[{p_name.upper()}] source={src} status={status_code} products={len(items or [])} duration={dur}s")
             except TimeoutError:
-                logger.error(f"[{platform.upper()}] Scraper timed out after 45s.")
+                logger.error(f"[{platform.upper()}] Scraper timed out after configured limit ({p_timeout}s).")
                 raw_results[platform] = []
+                platform_status[platform]["platform"] = platform
                 platform_status[platform]["status"] = "timeout"
                 platform_status[platform]["available"] = False
-                platform_status[platform]["error"] = f"{platform} request timed out"
+                platform_status[platform]["error"] = f"Request timed out after {p_timeout}s"
+                platform_status[platform]["retry_available"] = True
                 log_scraper_event(platform, query, "timeout", retry=0, products_count=0, error=f"{platform} request timed out")
             except Exception as e:
                 logger.error(f"[{platform.upper()}] Scraper execution exception: {e}")
                 raw_results[platform] = []
+                platform_status[platform]["platform"] = platform
                 platform_status[platform]["status"] = "scraper_error"
                 platform_status[platform]["available"] = False
                 platform_status[platform]["error"] = str(e)
+                platform_status[platform]["retry_available"] = True
                 log_scraper_event(platform, query, "scraper_error", retry=0, products_count=0, error=str(e))
 
     return raw_results, platform_status
+
+
+def fetch_single_platform(platform_name: str, query: str, bypass_fresh: bool = True) -> tuple[list, dict]:
+    """
+    Fetch products for a single platform independently for retry or on-demand refresh.
+    Returns: (items_list, platform_status_dict)
+    """
+    clean_name = None
+    for name in _scrapers_instances:
+        if name.lower() == platform_name.strip().lower():
+            clean_name = name
+            break
+    if not clean_name:
+        return [], {
+            "platform": platform_name,
+            "status": "error",
+            "available": False,
+            "count": 0,
+            "error": f"Unknown platform '{platform_name}'",
+            "retry_available": False
+        }
+
+    # Check cache if not bypass_fresh
+    if not bypass_fresh:
+        cached_entry = get_platform_cached_results(clean_name, query, bypass_fresh=False)
+        if cached_entry and cached_entry.get("results"):
+            items = cached_entry["results"]
+            stat = cached_entry.get("scrape_status", "success")
+            return items, {
+                "platform": clean_name,
+                "status": stat,
+                "available": True,
+                "count": len(items),
+                "error": None,
+                "duration": 0.0,
+                "source": "cache",
+                "retry_available": False
+            }
+
+    scraper_obj = _scrapers_instances[clean_name]
+    start = time.time()
+    try:
+        items, status, err_msg = scraper_obj.search_products(query)
+        dur = round(time.time() - start, 2)
+        stat_val = status.value if hasattr(status, "value") else str(status)
+        final_stat = stat_val if items else (stat_val if stat_val != "success" else "no_products_found")
+        if items:
+            set_platform_cached_results(clean_name, query, items, stat_val)
+        return items or [], {
+            "platform": clean_name,
+            "status": final_stat,
+            "available": bool(items),
+            "count": len(items or []),
+            "error": err_msg,
+            "duration": dur,
+            "source": "live",
+            "retry_available": not bool(items)
+        }
+    except Exception as err:
+        dur = round(time.time() - start, 2)
+        logger.exception(f"[{clean_name}] Single platform search exception: {err}")
+        return [], {
+            "platform": clean_name,
+            "status": "scraper_error",
+            "available": False,
+            "count": 0,
+            "error": str(err),
+            "duration": dur,
+            "source": "live",
+            "retry_available": True
+        }
 
 
 def fetch_all_products_with_fallbacks(query_chain: list[str], bypass_fresh: bool = False) -> tuple[dict, dict]:
@@ -271,14 +401,28 @@ def process_results(query: str, raw_results: dict,
         }
     }
 
-    amz_prod = best_match_per_platform.get("Amazon") or (platform_results.get("Amazon", [None])[0] if platform_results.get("Amazon") else None)
-    fk_prod = best_match_per_platform.get("Flipkart") or (platform_results.get("Flipkart", [None])[0] if platform_results.get("Flipkart") else None)
-    mee_prod = best_match_per_platform.get("Meesho") or (platform_results.get("Meesho", [None])[0] if platform_results.get("Meesho") else None)
+    amz_prod = best_match_per_platform.get("Amazon")
+    fk_prod = best_match_per_platform.get("Flipkart")
+    mee_prod = best_match_per_platform.get("Meesho")
+
+    log_pipeline_diagnostic(
+        user_input=query,
+        input_type="Product Name",
+        detected_platform=None,
+        url_normalization=None,
+        scraper_selected="Multi-Platform Search (Amazon, Flipkart, Meesho)",
+        platform_status=platform_status,
+        raw_results=raw_results,
+        category=detected_cat,
+        validated_products=all_matched,
+        best_deal=best_deal
+    )
 
     comparison = {
         "query": query,
         "matched_products": [p for p in best_match_per_platform.values() if p],
         "specifications": specifications_matrix,
+        "has_match": pipeline_data["has_cross_platform_match"],
         "best_deal": best_deal,
         "amazon": amz_prod,
         "flipkart": fk_prod,
@@ -328,6 +472,6 @@ def process_results(query: str, raw_results: dict,
         "marketplace_status":    marketplace_status,
         "best_deal":             best_deal,
         "match_pairs":           match_pairs,
-        "no_deal_message":       pipeline_data.get("no_deal_message"),
-        "has_cross_platform_match": pipeline_data.get("has_cross_platform_match", False)
+        "has_cross_platform_match": pipeline_data.get("has_cross_platform_match", False),
+        "detected_category":     detected_cat
     }

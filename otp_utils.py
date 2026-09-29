@@ -83,7 +83,7 @@ Your SmartBuy verification OTP is:
 
 {otp_code}
 
-This OTP is valid for 10 minutes.
+This OTP is valid for 1 minutes.
 
 Do not share this OTP with anyone.
 
@@ -101,7 +101,7 @@ SmartBuy Team"""
                 <span style="font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #1e293b;">{otp_code}</span>
             </div>
             <p style="color: #475569; font-size: 14px; line-height: 1.5; text-align: center;">
-                Hello,<br><br>Your SmartBuy verification OTP is: <strong>{otp_code}</strong>.<br>This OTP is valid for 10 minutes.<br>Do not share this OTP with anyone.
+                Hello,<br><br>Your SmartBuy verification OTP is: <strong>{otp_code}</strong>.<br>This OTP is valid for 1 minutes.<br>Do not share this OTP with anyone.
             </p>
             <div style="border-top: 1px solid #f1f5f9; margin-top: 24px; padding-top: 16px; text-align: center;">
                 <p style="color: #94a3b8; font-size: 12px; margin: 0;">Regards,<br><strong>SmartBuy Team</strong></p>
@@ -110,7 +110,7 @@ SmartBuy Team"""
         """
         msg.add_alternative(html_content, subtype='html')
 
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=1) as server:
             server.starttls()
             server.login(smtp_user, smtp_pass)
             server.send_message(msg)
@@ -162,7 +162,7 @@ def send_sms_otp(to_phone: str, otp_code: str, purpose: str = "signup", **kwargs
         from twilio.rest import Client
         client = Client(account_sid, auth_token)
         message = client.messages.create(
-            body=f"Your SmartBuy verification code is: {otp_code}. Valid for 10 minutes.",
+            body=f"Your SmartBuy verification code is: {otp_code}. Valid for 1 minutes.",
             from_=from_phone,
             to=to_phone
         )

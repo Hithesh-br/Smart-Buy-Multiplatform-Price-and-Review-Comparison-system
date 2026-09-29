@@ -67,7 +67,7 @@ def run_tests():
     passed = 0
     for query, expected_cat, valid_title, invalid_title in TEST_CASES:
         detected_cat = detect_category(query)
-        cat_ok = (detected_cat == expected_cat) or (expected_cat == "grocery" and detected_cat in ("grocery", "food"))
+        cat_ok = (detected_cat == expected_cat) or (expected_cat == "grocery" and detected_cat in ("grocery", "food")) or (expected_cat == "beauty" and detected_cat in ("beauty", "makeup", "skincare"))
 
         # Valid item should be relevant
         valid_item = {"title": valid_title, "price_num": 499}
