@@ -15,7 +15,11 @@ from scrapers.scraper_result import ScrapeStatus
 from scrapers.browser_manager import BrowserManager
 
 # Configure dedicated scraper logger
-LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+LOG_DIR = (
+    "/tmp/smartbuy-logs"
+    if os.getenv("VERCEL")
+    else os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
+)
 os.makedirs(LOG_DIR, exist_ok=True)
 SCRAPER_LOG_FILE = os.path.join(LOG_DIR, "scraper.log")
 
