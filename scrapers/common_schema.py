@@ -11,20 +11,131 @@ NEVER invents fake values. NEVER silently converts missing ratings to 0.
 NEVER converts missing brands to "Generic".
 """
 
+import re
 from typing import Dict, Any, Optional, List
 
 
+FLIPKART_FALLBACK_IMAGE = (
+    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'>"
+    "<rect width='200' height='200' fill='#f1f3f6'/>"
+    "<rect x='30' y='30' width='140' height='140' rx='12' fill='#ffffff' stroke='#2874f0' stroke-width='2'/>"
+    "<path d='M70 75 L130 75 L122 135 L78 135 Z' fill='#2874f0'/>"
+    "<path d='M85 75 C85 60 115 60 115 75' stroke='#ff9f00' stroke-width='4' fill='none' stroke-linecap='round'/>"
+    "<text x='100' y='160' font-family='Arial,sans-serif' font-size='13' font-weight='bold' fill='#2874f0' text-anchor='middle'>Flipkart</text>"
+    "</svg>"
+)
+
+AMAZON_FALLBACK_IMAGE = (
+    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'>"
+    "<rect width='200' height='200' fill='#f7f7f7'/>"
+    "<rect x='30' y='30' width='140' height='140' rx='12' fill='#ffffff' stroke='#ff9900' stroke-width='2'/>"
+    "<path d='M65 80 L75 80 L90 120 L125 120 L135 90 L80 90' stroke='#232f3e' stroke-width='4' fill='none' stroke-linecap='round' stroke-linejoin='round'/>"
+    "<circle cx='92' cy='132' r='6' fill='#ff9900'/>"
+    "<circle cx='123' cy='132' r='6' fill='#ff9900'/>"
+    "<text x='100' y='160' font-family='Arial,sans-serif' font-size='13' font-weight='bold' fill='#232f3e' text-anchor='middle'>Amazon</text>"
+    "</svg>"
+)
+
+MEESHO_FALLBACK_IMAGE = (
+    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'>"
+    "<rect width='200' height='200' fill='#fdf2f8'/>"
+    "<rect x='30' y='30' width='140' height='140' rx='12' fill='#ffffff' stroke='#f43397' stroke-width='2'/>"
+    "<path d='M70 75 L130 75 L122 135 L78 135 Z' fill='#f43397'/>"
+    "<path d='M85 75 C85 60 115 60 115 75' stroke='#831843' stroke-width='4' fill='none' stroke-linecap='round'/>"
+    "<text x='100' y='160' font-family='Arial,sans-serif' font-size='13' font-weight='bold' fill='#f43397' text-anchor='middle'>Meesho</text>"
+    "</svg>"
+)
+
+
+def get_platform_fallback_image(platform: str) -> str:
+    """Returns an authentic, platform-branded fallback SVG data URL to avoid broken images."""
+    plat = (platform or "").lower().strip()
+    if "flipkart" in plat:
+        return FLIPKART_FALLBACK_IMAGE
+    if "meesho" in plat:
+        return MEESHO_FALLBACK_IMAGE
+    return AMAZON_FALLBACK_IMAGE
+
+
+def clean_product_image_url(url: Any, platform: str = "") -> Optional[str]:
+    """
+    Cleans, validates, and normalizes product image URLs for a specific platform:
+    - Resolves protocol-relative and root-relative URLs
+    - Replaces Flipkart template parameters {@width}/{@height} with concrete dimensions
+    - Removes srcset descriptors and selects candidate URL
+    - Rejects placeholders, blank 1x1 GIFs, and platform badges (Assured icons, coins)
+    """
+    if not url or not isinstance(url, str):
+        return None
+    u = url.strip()
+    if not u or len(u) < 8:
+        return None
+
+    # Strip srcset descriptor e.g. "https://... 312w" or multiple comma-separated entries
+    if "," in u:
+        u = u.split(",")[0].strip()
+    if " " in u:
+        u = u.split(" ")[0].strip()
+
+    # Rejection of invalid / placeholder strings
+    u_low = u.lower()
+    if any(ph in u_low for ph in ("placeholder", "no_image", "not_available", "none", "null", "blank.gif", "empty")):
+        return None
+    if u_low.startswith("data:image/gif") or u_low.startswith("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"):
+        # 1x1 transparent spacer GIF / PNG
+        return None
+    if any(badge in u_low for badge in ("fa_9e47c1", "plus_aef861", "fk-cp-zion", "static-assets", "supercoin")):
+        return None
+
+    # Protocol-relative URLs
+    if u.startswith("//"):
+        u = "https:" + u
+
+    # Platform-specific root-relative URL expansion
+    plat = (platform or "").lower().strip()
+    if "flipkart" in plat:
+        if u.startswith("/image/"):
+            u = "https://rukminim1.flixcart.com" + u
+        elif u.startswith("/"):
+            u = "https://www.flipkart.com" + u
+        # Replace Flipkart dynamic templates {@width} / {@height}
+        u = re.sub(r'\{@width\}', '312', u)
+        u = re.sub(r'\{@height\}', '312', u)
+    elif "amazon" in plat:
+        if u.startswith("/"):
+            u = "https://www.amazon.in" + u
+    elif "meesho" in plat:
+        if u.startswith("/"):
+            u = "https://images.meesho.com" + u
+
+    # Must be valid http or https or trusted svg data uri
+    if not (u.startswith("http://") or u.startswith("https://") or u.startswith("data:image/svg+xml")):
+        return None
+
+    return u
+
+
 def create_empty_product(platform: str = "unknown") -> Dict[str, Any]:
-    """Create a pristine product dictionary with all 37 authoritative schema fields."""
+    """Create a pristine product dictionary with all authoritative schema fields."""
+    plat = platform.lower().strip() if platform else "unknown"
     return {
-        "platform": platform.lower(),
+        "platform": plat,
         "product_id": "",
-        "product_url": "",
+        "product_name": "",
         "title": "",
         "brand": None,
         "model": None,
+        "model_number": None,
         "category": "other",
         "subcategory": None,
+
+        "product_url": "",
+        "link": "",
+        "url": "",
+
+        "image": "",
+        "image_url": "",
+        "images": [],
 
         "price": "Price Unavailable",
         "price_num": None,
@@ -35,15 +146,16 @@ def create_empty_product(platform: str = "unknown") -> Dict[str, Any]:
 
         "rating": None,
         "review_count": None,
+        "reviews": "0",
 
         "seller": None,
         "seller_rating": None,
         "availability": "In Stock",
+        "in_stock": True,
         "condition": "New",
 
-        "image": "",
-        "images": [],
-
+        "material": None,
+        "capacity": None,
         "color": None,
         "size": None,
 
@@ -55,11 +167,13 @@ def create_empty_product(platform: str = "unknown") -> Dict[str, Any]:
         "unit_price": None,
 
         "specifications": {},
+        "raw_specifications": {},
 
         "warranty": None,
         "return_policy": None,
 
-        "source": "live",
+        "data_source": plat.capitalize() if plat != "unknown" else "Unknown",
+        "source": plat,
         "verified_live": True,
 
         "quality_score": 0.0,
@@ -72,17 +186,27 @@ def create_empty_product(platform: str = "unknown") -> Dict[str, Any]:
 
 def validate_and_build_product(data: Dict[str, Any], platform: str = "") -> Dict[str, Any]:
     """
-    Constructs and validates the 37-field schema from parsed data.
-    Ensures no missing field is omitted, and no fabricated defaults are used.
+    Constructs and validates the authoritative common product schema from parsed data.
+    Ensures:
+    - product_name, image_url, data_source, raw_specifications, material, capacity, color are preserved
+    - Each platform keeps its own isolated data and images without cross-contamination
+    - Fallback images prevent broken image icons on frontend cards, tables, and modals
+    - Missing values are represented cleanly without inventing fake defaults
     """
-    plat = (data.get("platform") or platform or "unknown").lower()
+    plat = (data.get("platform") or platform or "unknown").lower().strip()
     product = create_empty_product(plat)
 
     # Identifiers
     product["platform"] = plat
     product["product_id"] = str(data.get("product_id") or data.get("asin") or "").strip()
     product["product_url"] = str(data.get("product_url") or data.get("url") or data.get("link") or "").strip()
-    product["title"] = str(data.get("title") or data.get("product_name") or data.get("name") or "").strip()
+    product["link"] = product["product_url"]
+    product["url"] = product["product_url"]
+
+    # Product Name / Title
+    title = str(data.get("product_name") or data.get("title") or data.get("name") or "").strip()
+    product["title"] = title
+    product["product_name"] = title
 
     # Brand & Model (strict: no fake 'Generic')
     raw_brand = data.get("brand")
@@ -91,11 +215,13 @@ def validate_and_build_product(data: Dict[str, Any], platform: str = "") -> Dict
     else:
         product["brand"] = None
 
-    raw_model = data.get("model")
+    raw_model = data.get("model") or data.get("model_number")
     if raw_model and str(raw_model).strip().lower() not in ("standard", "general", "none", "n/a", "null", ""):
         product["model"] = str(raw_model).strip()
+        product["model_number"] = str(raw_model).strip()
     else:
         product["model"] = None
+        product["model_number"] = None
 
     product["category"] = str(data.get("category") or data.get("product_type") or "other").lower().strip()
     product["subcategory"] = data.get("subcategory") or None
@@ -150,10 +276,13 @@ def validate_and_build_product(data: Dict[str, Any], platform: str = "") -> Dict
         try:
             rev_int = int(str(raw_rev).replace(",", "").split()[0])
             product["review_count"] = rev_int if rev_int >= 0 else None
+            product["reviews"] = f"{rev_int:,}" if rev_int >= 0 else "0"
         except (ValueError, TypeError, IndexError):
             product["review_count"] = None
+            product["reviews"] = "0"
     else:
         product["review_count"] = None
+        product["reviews"] = "0"
 
     # Seller & Condition
     product["seller"] = data.get("seller") or None
@@ -162,20 +291,30 @@ def validate_and_build_product(data: Dict[str, Any], platform: str = "") -> Dict
     in_stock = data.get("in_stock", True)
     if in_stock is False or "out of stock" in str(data.get("availability", "")).lower():
         product["availability"] = "Out of Stock"
+        product["in_stock"] = False
     else:
         product["availability"] = "In Stock"
+        product["in_stock"] = True
     product["condition"] = data.get("condition") or "New"
 
-    # Images
+    # Product Images with Platform-Specific Validation and Fallbacks
     img = data.get("image") or data.get("image_url") or ""
-    if "unsplash.com" in img or "placeholder" in img:
-        img = ""
-    product["image"] = img
+    cleaned_img = clean_product_image_url(img, plat)
+    if not cleaned_img:
+        cleaned_img = get_platform_fallback_image(plat)
+    product["image"] = cleaned_img
+    product["image_url"] = cleaned_img
+
     imgs = data.get("images")
     if isinstance(imgs, list):
-        product["images"] = [i for i in imgs if i and "placeholder" not in i]
+        cleaned_list = []
+        for i in imgs:
+            c = clean_product_image_url(i, plat)
+            if c and c not in cleaned_list:
+                cleaned_list.append(c)
+        product["images"] = cleaned_list if cleaned_list else [cleaned_img]
     else:
-        product["images"] = [img] if img else []
+        product["images"] = [cleaned_img]
 
     # Variants, quantity, weights
     product["color"] = data.get("color") or None
@@ -187,29 +326,49 @@ def validate_and_build_product(data: Dict[str, Any], platform: str = "") -> Dict
     product["unit"] = data.get("unit") or None
     product["unit_price"] = data.get("unit_price") or None
 
-    # Specifications
+    # Specifications & Raw Specifications
     specs = data.get("specifications")
     if isinstance(specs, dict):
         product["specifications"] = {k: v for k, v in specs.items() if v is not None}
     else:
         product["specifications"] = {}
 
+    raw_specs = data.get("raw_specifications")
+    if isinstance(raw_specs, dict) and raw_specs:
+        product["raw_specifications"] = dict(raw_specs)
+    else:
+        product["raw_specifications"] = dict(product["specifications"])
+
+    # Specific common attribute accessors
+    product["material"] = (
+        data.get("material")
+        or product["specifications"].get("Material")
+        or product["specifications"].get("material")
+        or product["specifications"].get("Body Material")
+    )
+    product["capacity"] = (
+        data.get("capacity")
+        or product["specifications"].get("Capacity")
+        or product["specifications"].get("capacity")
+    )
+    if not product["color"]:
+        product["color"] = (
+            product["specifications"].get("Color")
+            or product["specifications"].get("color")
+            or product["specifications"].get("Colour")
+        )
+
     # Warranty & Return
-    product["warranty"] = data.get("warranty") or None
+    product["warranty"] = data.get("warranty") or product["specifications"].get("Warranty") or None
     product["return_policy"] = data.get("return_policy") or None
 
-    # Metadata & Quality
-    product["source"] = data.get("source") or "live"
+    # Data Source & Provenance
+    product["data_source"] = str(data.get("data_source") or data.get("source") or plat.capitalize()).strip()
+    product["source"] = plat
     product["verified_live"] = bool(data.get("verified_live", True))
     product["quality_score"] = float(data.get("quality_score") or 0.0)
     product["data_confidence"] = float(data.get("data_confidence") or 0.0)
     product["match_status"] = data.get("match_status") or "UNMATCHED"
     product["match_score"] = float(data.get("match_score") or 0.0)
-
-    # Legacy convenience accessors for backwards compatibility with existing UI helpers
-    product["link"] = product["product_url"]
-    product["image_url"] = product["image"]
-    product["reviews"] = f"{product['review_count']:,}" if product["review_count"] else "0"
-    product["in_stock"] = product["availability"] == "In Stock"
 
     return product

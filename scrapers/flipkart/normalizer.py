@@ -35,11 +35,16 @@ def normalize_flipkart_product(raw: Dict[str, Any], query: str = "") -> Optional
     # Brand extraction (no fake 'Generic')
     brand = raw.get('brand')
     if not brand or str(brand).strip().lower() in ('generic', 'unknown', 'none', 'n/a'):
+        brand = raw.get('specifications', {}).get('Brand')
+    if not brand or str(brand).strip().lower() in ('generic', 'unknown', 'none', 'n/a'):
         brand = None
         known_brands = [
             'Apple', 'Samsung', 'Vivo', 'Oppo', 'OnePlus', 'Realme', 'Xiaomi', 'Redmi', 'Motorola',
             'HP', 'Dell', 'Lenovo', 'Asus', 'Acer', 'boAt', 'Noise', 'Boult', 'Fastrack', 'Titan',
             'Pilgrim', 'Ghar', 'Mamaearth', 'Dot & Key', 'The Derma Co', 'Cetaphil', 'Nivea', 'Dove',
+            'Pears', 'Dettol', 'Lifebuoy', 'Lux', 'Cinthol', 'Medimix', 'Fiama', 'Santoor',
+            'Mysore Sandal', 'Godrej', 'Himalaya', 'Patanjali', 'Yardley', 'Biotique', 'Neutrogena',
+            'Garnier', 'L\'Oreal', 'Head & Shoulders', 'Pantene', 'Tresemme', 'Sunsilk',
             'Nike', 'Adidas', 'Puma', 'Bata', 'Skybags', 'Safari', 'American Tourister', 'Aristocrat',
             'Kamiliant', 'VIP', 'Wildcraft', 'Milton', 'Cadbury', 'Nestle', 'Tata'
         ]
@@ -52,7 +57,7 @@ def normalize_flipkart_product(raw: Dict[str, Any], query: str = "") -> Optional
     # Quantity and pack normalization
     qty_info = normalize_quantity_and_pack(
         title=title,
-        weight_val=raw.get('weight'),
+        weight_val=raw.get('weight') or raw.get('subtitle'),
         pack_val=raw.get('pack_quantity')
     )
     unit_price = calculate_standard_unit_price(price_num, qty_info)
@@ -68,7 +73,8 @@ def normalize_flipkart_product(raw: Dict[str, Any], query: str = "") -> Optional
         "category": category,
         "price_num": price_num,
         "weight": qty_info.get("display_quantity") or raw.get("weight"),
-        "pack_quantity": qty_info.get("pack_count", 1),
+        "pack_quantity": qty_info.get("pack_count") or raw.get("pack_quantity") or 1,
+        "quantity": raw.get("quantity") or qty_info.get("total_quantity") or raw.get("subtitle") or qty_info.get("display_quantity"),
         "unit": qty_info.get("unit"),
         "unit_price": unit_price,
         "source": raw.get("source") or "flipkart",

@@ -11,6 +11,7 @@ from url_detector import (
     extract_amazon_asin,
     extract_flipkart_id,
     extract_meesho_id,
+    normalize_product_url,
     validate_and_detect_url as _base_validate_and_detect_url,
 )
 
@@ -36,5 +37,6 @@ __all__ = [
     "extract_amazon_asin",
     "extract_flipkart_id",
     "extract_meesho_id",
+    "normalize_product_url",
     "validate_and_detect_url",
 ]

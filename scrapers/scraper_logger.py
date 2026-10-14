@@ -95,6 +95,12 @@ def log_scraper_event(
     if DEBUG_SCRAPERS:
         status_disp = status.upper()
         if status in ("success", "live"):
-            print(f"[{p_name}] {status_disp} – {products_count} products ({duration or 0:.2f}s)")
+            msg = f"[{p_name}] {status_disp} - {products_count} products ({duration or 0:.2f}s)"
         else:
-            print(f"[{p_name}] {status_disp} – {error or 'No details'} ({duration or 0:.2f}s)")
+            err_text = str(error or "No details").split("\n")[0][:200]
+            err_text = err_text.encode("ascii", errors="replace").decode("ascii")
+            msg = f"[{p_name}] {status_disp} - {err_text} ({duration or 0:.2f}s)"
+        try:
+            print(msg)
+        except Exception:
+            pass

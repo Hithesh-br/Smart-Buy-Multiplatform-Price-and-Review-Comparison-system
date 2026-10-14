@@ -24,7 +24,7 @@ logger = logging.getLogger("smartbuy.marketplace_api")
 
 class MarketplaceAPIService:
     def __init__(self):
-        self.amazon_key = os.getenv("AMAZON_API_KEY", "").strip()
+        self.amazon_key = os.getenv("AMAZON_CREATORS_API_KEY", "").strip() or os.getenv("AMAZON_API_KEY", "").strip()
         self.flipkart_key = os.getenv("FLIPKART_API_KEY", "").strip()
         self.meesho_key = os.getenv("MEESHO_API_KEY", "").strip()
         self.unified_key = os.getenv("PRODUCT_SEARCH_API_KEY", "").strip()
@@ -42,44 +42,65 @@ class MarketplaceAPIService:
     def fetch_amazon(self, query: str) -> Optional[tuple[list[dict], ScrapeStatus, Optional[str]]]:
         if not self.is_configured("amazon"):
             return None
-        logger.info(f"[API] Querying official Amazon API for '{query}'...")
+        logger.info(f"[API] Querying official Amazon Creators API for '{query}'...")
         try:
-            endpoint = os.getenv("AMAZON_API_ENDPOINT", "https://webservices.amazon.in/paapi5/searchitems")
+            # Amazon PA-API 5 is deprecated; use Amazon Creators API
+            endpoint = os.getenv("AMAZON_CREATORS_API_ENDPOINT", "https://creator-api.amazon.in/v1/products/search")
             partner_tag = os.getenv("AMAZON_PARTNER_TAG", "smartbuy-21")
-            payload = {
-                "Keywords": query,
-                "PartnerTag": partner_tag,
-                "PartnerType": "Associates",
-                "Marketplace": "www.amazon.in",
-                "Resources": ["ItemInfo.Title", "Offers.Listings.Price", "Images.Primary.Medium"]
+            token = self.amazon_key or self.unified_key
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "x-api-key": token,
+                "Content-Type": "application/json",
+                "Accept": "application/json"
             }
-            headers = {"Authorization": f"Bearer {self.amazon_key or self.unified_key}"}
+            payload = {
+                "query": query,
+                "partner_tag": partner_tag,
+                "marketplace": "amazon.in",
+                "item_count": 10
+            }
             resp = requests.post(endpoint, json=payload, headers=headers, timeout=8)
             if resp.status_code == 200:
                 data = resp.json()
-                items = data.get("SearchResult", {}).get("Items", [])
+                # Support Creators API schema or SearchResult schema
+                items = data.get("products") or data.get("items") or data.get("SearchResult", {}).get("Items", [])
                 products = []
                 for it in items:
-                    title = it.get("ItemInfo", {}).get("Title", {}).get("DisplayValue", "")
-                    price = it.get("Offers", {}).get("Listings", [{}])[0].get("Price", {}).get("DisplayAmount")
-                    url = it.get("DetailPageURL", "")
-                    img = it.get("Images", {}).get("Primary", {}).get("Medium", {}).get("URL")
+                    asin = it.get("asin") or it.get("ASIN") or ""
+                    title = it.get("title") or it.get("name") or it.get("ItemInfo", {}).get("Title", {}).get("DisplayValue", "")
+                    price = it.get("price") or it.get("amount") or it.get("Offers", {}).get("Listings", [{}])[0].get("Price", {}).get("DisplayAmount")
+                    mrp = it.get("mrp") or it.get("original_price")
+                    url = it.get("product_url") or it.get("url") or it.get("DetailPageURL") or (f"https://www.amazon.in/dp/{asin}" if asin else "")
+                    img = it.get("main_image_url") or it.get("image") or it.get("Images", {}).get("Primary", {}).get("Medium", {}).get("URL")
+                    rating = it.get("rating")
+                    reviews = it.get("review_count") or it.get("reviews")
+                    brand = it.get("brand") or it.get("ItemInfo", {}).get("ByLineInfo", {}).get("Brand", {}).get("DisplayValue")
+                    specs = it.get("specifications") or {}
                     if title:
                         products.append(create_normalized_product(
                             platform="amazon",
                             title=title,
                             price=price,
+                            mrp=mrp,
                             url=url,
                             image=img,
-                            source="api",
+                            rating=rating,
+                            review_count=reviews,
+                            brand=brand,
+                            specifications=specs,
+                            product_id=asin,
+                            source="creators_api",
                             scrape_status=ScrapeStatus.SUCCESS
                         ))
-                return products, ScrapeStatus.SUCCESS, None
+                if products:
+                    return products, ScrapeStatus.SUCCESS, None
+                return [], ScrapeStatus.NO_RESULTS, "No products returned from Amazon Creators API"
             else:
-                logger.warning(f"[API] Amazon API returned {resp.status_code}: {resp.text[:100]}")
+                logger.warning(f"[API] Amazon Creators API returned {resp.status_code}: {resp.text[:100]}")
                 return None
         except Exception as e:
-            logger.warning(f"[API] Amazon API request failed: {e}")
+            logger.warning(f"[API] Amazon Creators API request failed: {e}")
             return None
 
     def fetch_flipkart(self, query: str) -> Optional[tuple[list[dict], ScrapeStatus, Optional[str]]]:

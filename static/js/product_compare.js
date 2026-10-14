@@ -63,6 +63,61 @@
         return compareList.some(p => getProductId(p) === prodId);
     }
 
+    // ── Helper: Category & Product Compatibility Check ─────────────────────
+    function areProductsCompatible(prodA, prodB) {
+        if (!prodA || !prodB) return true;
+        const tA = (prodA.title || "").toLowerCase();
+        const tB = (prodB.title || "").toLowerCase();
+        const cA = (prodA.category || (prodA.specs && prodA.specs.category) || "").toLowerCase();
+        const cB = (prodB.category || (prodB.specs && prodB.specs.category) || "").toLowerCase();
+
+        // 1. Phone vs Phone Accessories (Case, Cover, Glass, Charger)
+        const isPhoneA = /(phone|mobile|smartphone|galaxy|iphone|redmi|realme|vivo|oppo|oneplus)/.test(tA) || /(phone|smartphone|mobile)/.test(cA);
+        const isPhoneB = /(phone|mobile|smartphone|galaxy|iphone|redmi|realme|vivo|oppo|oneplus)/.test(tB) || /(phone|smartphone|mobile)/.test(cB);
+        const isPhoneAccA = /(case|cover|tempered glass|screen guard|lens protector|skin|pouch)/.test(tA);
+        const isPhoneAccB = /(case|cover|tempered glass|screen guard|lens protector|skin|pouch)/.test(tB);
+        if ((isPhoneA && !isPhoneAccA && isPhoneAccB) || (isPhoneB && !isPhoneAccB && isPhoneAccA)) return false;
+
+        // 2. Laptop vs Laptop Accessories (Bag, Sleeve, Charger)
+        const isLaptopA = /(laptop|notebook|macbook|thinkpad|vivobook)/.test(tA) || /laptop/.test(cA);
+        const isLaptopB = /(laptop|notebook|macbook|thinkpad|vivobook)/.test(tB) || /laptop/.test(cB);
+        const isLaptopAccA = /(laptop bag|backpack|sleeve|keyboard cover)/.test(tA);
+        const isLaptopAccB = /(laptop bag|backpack|sleeve|keyboard cover)/.test(tB);
+        if ((isLaptopA && !isLaptopAccA && isLaptopAccB) || (isLaptopB && !isLaptopAccB && isLaptopAccA)) return false;
+
+        // 3. Pressure Cooker vs Cooker Replacement Parts (Gasket, Sealing Ring, Safety Valve, Whistle)
+        const isCookerA = /(cooker|pressure cooker)/.test(tA) || /cooker/.test(cA);
+        const isCookerB = /(cooker|pressure cooker)/.test(tB) || /cooker/.test(cB);
+        const isCookerPartA = /(gasket|sealing ring|safety valve|whistle|cooker handle)/.test(tA);
+        const isCookerPartB = /(gasket|sealing ring|safety valve|whistle|cooker handle)/.test(tB);
+        if ((isCookerA && !isCookerPartA && isCookerPartB) || (isCookerB && !isCookerPartB && isCookerPartA)) return false;
+
+        // 4. Mixer Grinder vs Mixer Jar / Coupler / Blade
+        const isMixerA = /(mixer|grinder)/.test(tA) || /mixer/.test(cA);
+        const isMixerB = /(mixer|grinder)/.test(tB) || /mixer/.test(cB);
+        const isMixerPartA = /(mixer jar|grinder jar|mixer blade|coupler)/.test(tA);
+        const isMixerPartB = /(mixer jar|grinder jar|mixer blade|coupler)/.test(tB);
+        if ((isMixerA && !isMixerPartA && isMixerPartB) || (isMixerB && !isMixerPartB && isMixerPartA)) return false;
+
+        // 5. Cross-Category hard conflicts (e.g. Phone vs Cooker, Laptop vs Face Wash, Shoes vs Phone)
+        if ((isPhoneA && !isPhoneB && !isPhoneAccA) || (isPhoneB && !isPhoneA && !isPhoneAccB)) {
+            if (isLaptopA || isLaptopB || isCookerA || isCookerB || /(shoe|shirt|grocery|seeds|face wash|soap)/.test(tA) || /(shoe|shirt|grocery|seeds|face wash|soap)/.test(tB)) {
+                return false;
+            }
+        }
+        if ((isCookerA && !isCookerB) && (isMixerB || isLaptopB || /(kettle|shoe|shirt|phone|wash)/.test(tB))) return false;
+        if ((isCookerB && !isCookerA) && (isMixerA || isLaptopA || /(kettle|shoe|shirt|phone|wash)/.test(tA))) return false;
+
+        // 6. Beauty cross-category conflicts (Face wash vs Foundation vs Lipstick)
+        const isFaceWashA = /(face wash|facewash|facial cleanser)/.test(tA);
+        const isFaceWashB = /(face wash|facewash|facial cleanser)/.test(tB);
+        const isMakeupA = /(lipstick|foundation|compact|kajal)/.test(tA);
+        const isMakeupB = /(lipstick|foundation|compact|kajal)/.test(tB);
+        if ((isFaceWashA && isMakeupB) || (isFaceWashB && isMakeupA)) return false;
+
+        return true;
+    }
+
     // ── 1. Toggle Product In/Out of Compare ──────────────────────────────────
     window.toggleCompareProduct = function (btnElement) {
         if (!btnElement) return;
@@ -75,6 +130,16 @@
             removeFromCompare(prod.id);
             showToast(`Removed "${truncate(prod.title, 32)}" from comparison.`);
         } else {
+            // Validate category compatibility before adding
+            if (compareList.length > 0) {
+                for (let existing of compareList) {
+                    if (!areProductsCompatible(existing, prod)) {
+                        showToast(`Cannot compare incompatible products or accessories ("${truncate(prod.title, 20)}" vs "${truncate(existing.title, 20)}").`, "warning");
+                        return;
+                    }
+                }
+            }
+
             // Check limit
             if (compareList.length >= MAX_COMPARE_LIMIT) {
                 pendingCandidate = prod;
@@ -95,12 +160,14 @@
             const priceNum = parseFloat(btn.getAttribute("data-price-num")) || parsePriceToNumber(price);
             const mrp = btn.getAttribute("data-mrp") || price;
             const discount = btn.getAttribute("data-discount") || "";
-            const rating = btn.getAttribute("data-rating") || "N/A";
-            const reviews = btn.getAttribute("data-reviews") || "0";
+            let rating = btn.getAttribute("data-rating") || "";
+            let reviews = btn.getAttribute("data-reviews") || "";
             const image = btn.getAttribute("data-image") || "";
             const link = btn.getAttribute("data-link") || btn.getAttribute("data-url") || "#";
             const qualityScore = parseFloat(btn.getAttribute("data-quality-score")) || 50;
             const qualityBand = btn.getAttribute("data-quality-band") || "Standard Quality";
+            // Read category from data attribute; fall back to specs.category
+            const categoryAttr = (btn.getAttribute("data-category") || "").trim();
 
             let specs = {};
             try {
@@ -108,6 +175,33 @@
                 if (rawSpecs) specs = typeof rawSpecs === "string" ? JSON.parse(rawSpecs) : rawSpecs;
             } catch (e) {
                 specs = {};
+            }
+
+            // Fallback for rating & reviews from specs or parent card DOM
+            if (!rating || rating === "N/A" || rating === "0" || rating === "0.0") {
+                if (specs.rating) rating = String(specs.rating);
+                else if (specs.rating_num) rating = String(specs.rating_num);
+                else {
+                    const card = btn.closest(".card, .product-card, [data-platform]");
+                    if (card) {
+                        const starEl = card.querySelector("[class*='star'], [class*='Rating'], [class*='rating'], .badge.bg-success");
+                        if (starEl) {
+                            const m_r = (starEl.textContent || "").match(/([1-5](?:\.\d+)?)/);
+                            if (m_r) rating = m_r[1];
+                        }
+                    }
+                }
+            }
+            if (!reviews || reviews === "0" || reviews === "N/A") {
+                if (specs.reviews) reviews = String(specs.reviews);
+                else if (specs.review_count) reviews = String(specs.review_count);
+                else {
+                    const card = btn.closest(".card, .product-card, [data-platform]");
+                    if (card) {
+                        const m_rev = (card.textContent || "").match(/([\d,]+)\s*(?:reviews?|ratings?)/i);
+                        if (m_rev) reviews = m_rev[1];
+                    }
+                }
             }
 
             let qualityPoints = [];
@@ -118,6 +212,9 @@
                 qualityPoints = [];
             }
 
+            // Resolve category: data-category > specs.category > empty
+            const category = categoryAttr || (specs && specs.category) || "";
+
             return {
                 id: id,
                 title: title,
@@ -126,20 +223,209 @@
                 price_num: priceNum,
                 mrp: mrp,
                 discount: discount,
-                rating: rating,
-                reviews: reviews,
+                rating: rating || "N/A",
+                reviews: reviews || "0",
                 image: image,
                 link: link,
                 quality_score: qualityScore,
                 quality_band: qualityBand,
                 specs: specs,
                 quality_points: qualityPoints,
+                category: category,
                 added_at: Date.now()
             };
         } catch (e) {
             console.error("[Compare] Error extracting product details:", e);
             return null;
         }
+    }
+
+    /**
+     * Returns the ordered list of specification keys relevant to the given product category.
+     * Mirrors the 8 canonical category specification profiles.
+     */
+    function getCategorySpecKeys(category) {
+        const cat = (category || "").toLowerCase().trim();
+
+        // 1. Mobiles
+        if (/\b(phone|phones|smartphone|smartphones|mobile|mobiles|tablet|tablets)\b/.test(cat)) {
+            return [
+                "Operating System", "Custom UI", "Processor", "AnTuTu Score", "RAM", "Storage",
+                "Storage Type", "Display Type", "Display Size", "Refresh Rate", "Peak Brightness",
+                "Rear Camera", "Front Camera", "Battery Capacity", "Charging Speed",
+                "Fast Charging Support", "5G Bands", "NFC Support", "IP Rating",
+                "Fingerprint Sensor Type", "Weight", "Thickness", "Audio Jack"
+            ];
+        }
+        // 2. Laptops
+        if (/(laptop|computer|\bpc\b|notebook)/.test(cat)) {
+            return [
+                "Processor", "Generation", "Core/Thread Count", "Base/Boost Clock",
+                "RAM Capacity", "RAM Type", "Expandable RAM", "Storage Capacity", "Storage Type",
+                "Additional SSD Slot", "GPU", "TGP", "Display Size", "Resolution", "Panel Type",
+                "Refresh Rate", "Color Gamut", "Battery Capacity", "Battery Life", "Charging Wattage",
+                "Weight", "Ports", "Biometrics"
+            ];
+        }
+        // 3. Audio / Earbuds / Headphones
+        if (/(headphone|earphone|earbud|airpod|headset|tws|audio)/.test(cat)) {
+            return [
+                "Form Factor", "Driver Size", "Frequency Response", "ANC Support", "ANC Depth",
+                "Transparency Mode", "Mic Count", "Environmental Noise Cancellation", "Latency",
+                "Bluetooth Version", "Codec Support", "Battery Life (Earbuds)", "Battery Life (With Case)",
+                "Charging Time", "Fast Charging Support", "Wireless Charging", "IP Rating",
+                "App Support", "Touch Controls", "Multipoint Connection"
+            ];
+        }
+        // 4. Pressure Cooker
+        if (/(cooker|pressure cooker)/.test(cat)) {
+            return [
+                "Capacity", "Material", "Base Type", "Induction Compatibility", "Lid Type",
+                "Safety Valve Count", "Handle Material", "Gasket Release System", "Dishwasher Safe", "Warranty"
+            ];
+        }
+        // 5. Mixer Grinder
+        if (/(mixer|grinder)/.test(cat)) {
+            return [
+                "Motor Wattage", "RPM", "Number of Jars", "Jar Capacities", "Blade Material",
+                "Body Material", "Overload Protection", "Speed Settings", "Pulse Mode",
+                "Locking Mechanism", "Noise Level", "Warranty"
+            ];
+        }
+        // 6. Electric Kettle
+        if (/(kettle|electric kettle)/.test(cat)) {
+            return [
+                "Capacity", "Power/Wattage", "Heating Element Type", "Body Material",
+                "Auto Shut-Off", "Boil Dry Protection", "360-Degree Base", "Water Level Indicator",
+                "Keep Warm Function", "Cord Length", "Warranty"
+            ];
+        }
+        // 7. Clothing & Fashion
+        if (/(clothing|fashion|apparel|saree|shirt|t-shirt|jeans|dress|kurti|kurta)/.test(cat)) {
+            return [
+                "Fabric Material", "Fabric Composition", "Fit Type", "Pattern", "Sleeve Length",
+                "Neck/Collar Type", "Occasion", "Closure Type", "Care Instructions",
+                "Transparency", "Stretchability"
+            ];
+        }
+        // 8. Shoes & Footwear & Slippers
+        if (/(shoe|footwear|sneaker|sandal|boot|slipper|slippers|slide)/.test(cat)) {
+            return [
+                "Upper Material", "Sole Material", "Insole/Cushioning", "Closure Type", "Toe Shape",
+                "Heel Height/Type", "Ankle Height", "Water Resistance", "Occasion",
+                "Care Instructions", "Weight per Shoe"
+            ];
+        }
+        // 9. Bags & Backpacks
+        if (/(\bbag\b|backpack|handbag|purse|wallet|luggage|tote)/.test(cat)) {
+            return [
+                "Capacity", "Material", "Number of Compartments", "Laptop Sleeve Size",
+                "Water Resistance", "Dimensions", "Weight", "Closure Type", "Strap Type",
+                "Lock Mechanism", "Expandability", "Rain Cover Included", "Warranty"
+            ];
+        }
+        // 10. Grocery & Food
+        if (/(grocery|food|rice|chocolate|coffee|tea|snack|\boil\b|spice|seed|nut|dal|flour|sugar|salt|protein)/.test(cat)) {
+            return [
+                "Net Quantity", "Pack Size", "Form", "Processing", "Protein Content",
+                "Dietary Fibre", "Carbohydrates", "Added Sugar", "Fat/Trans Fat", "Calories",
+                "Omega-3/Omega-6", "Vitamins/Minerals", "Shelf Life", "Country of Origin",
+                "Certification", "Allergens"
+            ];
+        }
+        // 11. Face Wash
+        if (/(face_wash|facewash|face wash|cleanser)/.test(cat)) {
+            return [
+                "Skin Type", "Key Actives", "Key Benefits", "Formulation", "Target Concerns",
+                "pH Level", "Sulphate-Free", "Paraben-Free", "Fragrance Type",
+                "Non-Comedogenic", "Volume", "Shelf Life"
+            ];
+        }
+        // 12. Sunscreen
+        if (/(sunscreen|sun screen|sunblock)/.test(cat)) {
+            return [
+                "SPF Value", "PA Rating", "Broad Spectrum", "Filter Type", "Finish",
+                "Water/Sweat Resistance", "White Cast", "Key Actives", "Paraben-Free", "Net Volume"
+            ];
+        }
+        // 13. Moisturizer
+        if (/(moisturizer|moisturiser|cream|lotion)/.test(cat)) {
+            return [
+                "Skin Type", "Texture", "Key Ingredients", "Finish", "SPF Included",
+                "Non-Greasy", "Comedogenic Rating", "Target Concerns", "Paraben-Free", "Net Volume", "Shelf Life"
+            ];
+        }
+        // 14. Foundation
+        if (/foundation/.test(cat)) {
+            return [
+                "Skin Type", "Coverage", "Finish", "Formulation", "SPF Included",
+                "Shade Range", "Cruelty-Free", "Waterproof", "Transfer-Proof", "Net Weight/Volume"
+            ];
+        }
+        // 15. Lipstick
+        if (/(lipstick|lip stick|lip gloss|lip balm)/.test(cat)) {
+            return [
+                "Finish", "Formulation", "Longevity", "Transfer-Proof", "Hydrating",
+                "Cruelty-Free", "Paraben-Free", "Shade Family", "Net Weight"
+            ];
+        }
+        // Default fallback
+        return ["Material", "Color", "Dimensions", "Warranty", "Compatibility", "Weight"];
+    }
+
+    /**
+     * Given the list of products being compared, resolves the common category.
+     * Uses the most-frequent non-empty category among the products.
+     */
+    function resolveCompareCategory(products) {
+        const freq = {};
+        products.forEach(p => {
+            const cat = (p.category || (p.specs && p.specs.category) || "").toLowerCase().trim();
+            if (cat && cat !== "general" && cat !== "other") {
+                freq[cat] = (freq[cat] || 0) + 1;
+            }
+        });
+        // Return the most-frequent category
+        let best = "", bestCount = 0;
+        Object.entries(freq).forEach(([cat, count]) => {
+            if (count > bestCount) { best = cat; bestCount = count; }
+        });
+        return best;
+    }
+
+    /**
+     * Given category spec keys and a product's specs dict, returns an ordered map
+     * of { displayLabel -> value } for keys that exist in the product's specs
+     * (case-insensitively matched).
+     */
+    function matchSpecsForCategory(categoryKeys, specs) {
+        const result = [];
+        if (!specs || !categoryKeys) return result;
+
+        // Build a lower-case index of all spec keys the product actually has
+        const specIndex = {};
+        Object.keys(specs).forEach(k => {
+            specIndex[k.toLowerCase().trim()] = k; // lowercase -> original key
+        });
+
+        categoryKeys.forEach(displayLabel => {
+            const lookupKey = displayLabel.toLowerCase().trim();
+            // Try direct match, then underscore variation
+            const originalKey = specIndex[lookupKey]
+                || specIndex[lookupKey.replace(/ /g, "_")]
+                || specIndex[lookupKey.replace(/_/g, " ")];
+            if (originalKey) {
+                const val = String(specs[originalKey] || "").trim();
+                if (val && val !== "N/A" && val !== "Not Available" && val !== "None" && val !== "null") {
+                    result.push({ label: displayLabel, key: originalKey, value: val });
+                } else {
+                    result.push({ label: displayLabel, key: originalKey, value: null });
+                }
+            } else {
+                result.push({ label: displayLabel, key: null, value: null });
+            }
+        });
+        return result;
     }
 
     function parsePriceToNumber(priceStr) {
@@ -245,7 +531,7 @@
                     <button type="button" class="btn-close-slot position-absolute top-0 end-0 translate-middle badge rounded-pill bg-danger border border-white text-white p-1" style="font-size: 0.65rem; width: 18px; height: 18px; cursor: pointer;" onclick="removeFromCompare('${escapeHtml(getProductId(item))}')" title="Remove from compare">
                         ✕
                     </button>
-                    <img src="${escapeHtml(item.image)}" alt="Thumbnail" style="width: 38px; height: 38px; object-fit: contain; border-radius: 4px; background: #fff; flex-shrink: 0;" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'38\\' height=\\'38\\' fill=\\'%2394a3b8\\' viewBox=\\'0 0 16 16\\'><path d=\\'M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z\\'/></svg>';">
+                    <img src="${escapeHtml(item.image || getPlatformFallbackSvg(item.platform))}" alt="Thumbnail" style="width: 38px; height: 38px; object-fit: contain; border-radius: 4px; background: #fff; flex-shrink: 0;" onerror="this.onerror=null; this.src=getPlatformFallbackSvg('${escapeHtml(item.platform)}');">
                     <div class="overflow-hidden" style="line-height: 1.25;">
                         <span class="badge px-1.5 py-0.5 rounded-pill fw-bold text-white mb-0.5" style="font-size: 0.62rem; background: ${platColor};">
                             ${escapeHtml(item.platform)}
@@ -335,12 +621,36 @@
             // Quality Score
             let qScore = p.quality_score || 50;
 
-            // Count distinct features & attributes
-            let specKeys = Object.keys(p.specs || {}).filter(k => {
-                const val = String(p.specs[k] || "").toLowerCase();
-                return val && val !== "n/a" && val !== "not available" && val !== "none";
+            // Count only category-relevant features to avoid inflating scores
+            // with irrelevant fields (e.g. electronic specs for grocery products)
+            const resolvedCat = resolveCompareCategory(products);
+            const catKeys = getCategorySpecKeys(resolvedCat);
+            const catKeyNorm = catKeys.map(k => k.toLowerCase().trim());
+
+            const specIndex = {};
+            Object.keys(p.specs || {}).forEach(k => {
+                specIndex[k.toLowerCase().trim()] = k;
             });
-            let featureCount = specKeys.length + (p.quality_points || []).length;
+
+            // If category keys matched, count only those; otherwise fall back to all non-empty
+            let relevantKeys = catKeyNorm
+                .map(lk => specIndex[lk] || specIndex[lk.replace(/ /g, "_")] || specIndex[lk.replace(/_/g, " ")])
+                .filter(Boolean);
+
+            if (relevantKeys.length === 0) {
+                // Fallback: count all non-empty specs
+                relevantKeys = Object.keys(p.specs || {}).filter(k => {
+                    const val = String((p.specs || {})[k] || "").toLowerCase();
+                    return val && val !== "n/a" && val !== "not available" && val !== "none";
+                });
+            } else {
+                relevantKeys = relevantKeys.filter(k => {
+                    const val = String((p.specs || {})[k] || "").toLowerCase();
+                    return val && val !== "n/a" && val !== "not available" && val !== "none";
+                });
+            }
+
+            let featureCount = relevantKeys.length + (p.quality_points || []).length;
 
             return {
                 ...p,
@@ -348,7 +658,7 @@
                 raw_rating_score: ratingScore,
                 raw_quality_score: qScore,
                 feature_count: featureCount,
-                feature_keys: specKeys
+                feature_keys: relevantKeys
             };
         });
 
@@ -359,35 +669,40 @@
             let featureScore = (item.feature_count / maxFeatures) * 100;
             item.raw_feature_score = featureScore;
 
-            // Composite Smart Score
-            // 25% Price, 25% Rating, 20% Quality, 20% Features, 10% Trust/Stock
+            // Composite Smart Score following Quality First, Price Second:
+            // Priority 1: Specification-based quality (45%)
+            // Priority 2: Feature completeness & coverage (25%)
+            // Priority 3: Ratings & reviews (15%)
+            // Priority 4: Stock & availability (10%)
+            // Priority 5: Price competitiveness (5% tie-breaker)
             const composite = (
-                item.raw_price_score * 0.25 +
-                item.raw_rating_score * 0.25 +
-                item.raw_quality_score * 0.25 +
-                item.raw_feature_score * 0.25
+                item.raw_quality_score * 0.45 +
+                item.raw_feature_score * 0.25 +
+                item.raw_rating_score * 0.15 +
+                (item.raw_price_score * 0.05) +
+                10.0
             );
             item.smart_score = Math.round(composite * 10) / 10;
 
             // Generate feature advantage highlights
             const advantages = [];
-            // Check if cheapest
-            if (item.price_num && item.price_num === minPrice && validPrices.length > 1) {
-                advantages.push(`Lowest Price (₹${item.price_num.toLocaleString("en-IN")})`);
-            }
             // Check quality advantage
             const maxQ = Math.max(...evaluated.map(x => x.raw_quality_score));
             if (item.raw_quality_score === maxQ && maxQ > 60) {
                 advantages.push(`Top Quality Score (${Math.round(item.raw_quality_score)}/100)`);
             }
-            // Check rating advantage
-            const maxR = Math.max(...evaluated.map(x => parseFloat(String(x.rating).replace("★", "").trim()) || 0));
-            if (maxR > 0 && (parseFloat(String(item.rating).replace("★", "").trim()) || 0) === maxR) {
-                advantages.push(`Highest Customer Rating (★ ${maxR})`);
-            }
             // Feature dominance
             if (item.feature_count === maxFeatures && maxFeatures > 3) {
                 advantages.push(`Most Complete Specifications (${item.feature_count} features)`);
+            }
+            // Check rating advantage
+            const maxR = Math.max(...evaluated.map(x => parseFloat(String(x.rating).replace("★", "").trim()) || 0));
+            if (maxR > 0 && (parseFloat(String(item.rating).replace("★", "").trim()) || 0) === maxR) {
+                advantages.push(`Customer Rating (★ ${maxR})`);
+            }
+            // Check if cheapest
+            if (item.price_num && item.price_num === minPrice && validPrices.length > 1) {
+                advantages.push(`Lowest Price (₹${item.price_num.toLocaleString("en-IN")})`);
             }
             if (item.discount && item.discount.includes("%") && !item.discount.startsWith("0")) {
                 advantages.push(`Great Savings (${item.discount})`);
@@ -399,8 +714,19 @@
             item.advantage_count = advantages.length;
         });
 
-        // Sort descending by Smart Score
-        evaluated.sort((a, b) => b.smart_score - a.smart_score);
+        // Sort descending: Quality First (raw_quality_score, feature_count, rating, -price)
+        evaluated.sort((a, b) => {
+            if (b.raw_quality_score !== a.raw_quality_score) {
+                return b.raw_quality_score - a.raw_quality_score;
+            }
+            if (b.raw_feature_score !== a.raw_feature_score) {
+                return b.raw_feature_score - a.raw_feature_score;
+            }
+            if (b.raw_rating_score !== a.raw_rating_score) {
+                return b.raw_rating_score - a.raw_rating_score;
+            }
+            return (a.price_num || 9999999) - (b.price_num || 9999999);
+        });
 
         // Assign ranks and badges
         const rankDefinitions = [
@@ -409,16 +735,21 @@
             { rank: 3, title: "🥉 #3 Value Alternative", badgeClass: "smart-rank-badge-3", icon: "fa-award" }
         ];
 
+        const topItem = evaluated[0];
         return evaluated.map((prod, idx) => {
             const def = rankDefinitions[idx] || { rank: idx + 1, title: `#${idx + 1} Option`, badgeClass: "badge bg-secondary", icon: "fa-tag" };
             
             let whyWon = "";
             if (idx === 0) {
-                whyWon = `Winner with superior score (${prod.smart_score}/100) driven by ${prod.feature_advantages.join(", ")}.`;
-            } else if (idx === 1) {
-                whyWon = `Solid runner-up with strong ${prod.feature_advantages[0] || "performance"}.`;
+                whyWon = `Ranked #1 based on superior verified specifications (${Math.round(prod.raw_quality_score)}/100 quality score, ${prod.feature_count} verified features).`;
             } else {
-                whyWon = `Budget-friendly pick offering ${prod.feature_advantages[0] || "decent balance"}.`;
+                if (prod.raw_quality_score < topItem.raw_quality_score && prod.price_num < topItem.price_num) {
+                    whyWon = `Lower price, but fewer verified specifications (${prod.feature_count} features vs ${topItem.feature_count}).`;
+                } else if (prod.raw_quality_score < topItem.raw_quality_score) {
+                    whyWon = `Lower specification quality score (${Math.round(prod.raw_quality_score)}/100 vs ${Math.round(topItem.raw_quality_score)}/100).`;
+                } else {
+                    whyWon = `Solid alternative offering ${prod.feature_advantages[0] || "decent balance"}.`;
+                }
             }
 
             return {
@@ -454,19 +785,63 @@
 
         const rankedList = calculateSmartRanking(compareList);
 
-        // Gather all unique specification keys across all products
-        const allSpecKeysSet = new Set();
+        // ── Category-specific specification filtering ────────────────────────
+        // Detect the common category from the products being compared
+        const resolvedCategory = resolveCompareCategory(rankedList);
+        const categoryDisplayName = resolvedCategory
+            ? resolvedCategory.charAt(0).toUpperCase() + resolvedCategory.slice(1)
+            : "General";
+        const categoryKeys = getCategorySpecKeys(resolvedCategory);
+
+        // Build an ordered spec key list: only include keys that exist in at
+        // least ONE product and belong to the category schema.
+        // A key is "included" if it maps to a real spec on any product.
+        const EXCLUDED_KEYS = new Set(["price_num", "rating_num", "category_specs", "category",
+            "image", "title", "link", "url", "product_id", "asin"]);
+
+        // Build a set of all spec keys present across all products (normalised)
+        const allSpecsLower = new Set();
         rankedList.forEach(p => {
             if (p.specs && typeof p.specs === "object") {
-                Object.keys(p.specs).forEach(k => {
-                    const cleanKey = k.trim();
-                    if (!["price_num", "rating_num", "category_specs", "image", "title", "link", "url"].includes(cleanKey.toLowerCase())) {
-                        allSpecKeysSet.add(cleanKey);
-                    }
-                });
+                Object.keys(p.specs).forEach(k => allSpecsLower.add(k.toLowerCase().trim()));
             }
         });
-        const specKeys = Array.from(allSpecKeysSet);
+
+        // Filter category keys to those that exist in at least one product
+        const filteredCategoryKeys = categoryKeys.filter(displayLabel => {
+            const lk = displayLabel.toLowerCase().trim();
+            return allSpecsLower.has(lk)
+                || allSpecsLower.has(lk.replace(/ /g, "_"))
+                || allSpecsLower.has(lk.replace(/_/g, " "));
+        });
+
+        // If no category keys matched at all, fall back gracefully to all non-system keys
+        // sorted alphabetically (so at least we show something meaningful)
+        let specKeys;
+        if (filteredCategoryKeys.length > 0) {
+            specKeys = filteredCategoryKeys; // already in priority order
+        } else {
+            specKeys = Array.from(allSpecsLower)
+                .filter(k => !EXCLUDED_KEYS.has(k))
+                .sort()
+                .map(k => k.charAt(0).toUpperCase() + k.slice(1).replace(/_/g, " "));
+        }
+
+        // Helper: given a display-label, look up its value in a product's specs
+        function resolveSpecValue(displayLabel, specs) {
+            if (!specs) return null;
+            const lk = displayLabel.toLowerCase().trim();
+            const candidates = [lk, lk.replace(/ /g, "_"), lk.replace(/_/g, " ")];
+            for (const c of candidates) {
+                for (const [k, v] of Object.entries(specs)) {
+                    if (k.toLowerCase().trim() === c) {
+                        const sv = String(v || "").trim();
+                        return sv && sv !== "N/A" && sv !== "Not Available" ? sv : null;
+                    }
+                }
+            }
+            return null;
+        }
 
         let html = `
         <!-- Top Winner Announcement Banner -->
@@ -524,7 +899,7 @@
                         </div>
 
                         <div class="text-center py-2">
-                            <img src="${escapeHtml(p.image)}" alt="Product Image" style="height: 110px; max-width: 140px; object-fit: contain; border-radius: 8px; background: #fff;" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\\'http://www.w3.org/2000/svg\\' width=\\'80\\' height=\\'80\\' fill=\\'%2394a3b8\\' viewBox=\\'0 0 16 16\\'><path d=\\'M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z\\'/></svg>';">
+                            <img src="${escapeHtml(p.image || getPlatformFallbackSvg(p.platform))}" alt="Product Image" style="height: 110px; max-width: 140px; object-fit: contain; border-radius: 8px; background: #fff;" onerror="this.onerror=null; this.src=getPlatformFallbackSvg('${escapeHtml(p.platform)}');">
                         </div>
 
                         <!-- Title -->
@@ -580,11 +955,176 @@
 
         html += `</div>`;
 
+        // ── Feature / Specification Comparison Section ──────────────────────
+        // Inserted BELOW Smart Ranking product cards, ABOVE the Specification
+        // Comparison table. Uses specKeys + resolveSpecValue already computed
+        // above — no existing logic is modified.
+        (function buildFeatureComparisonSection() {
+            // Only show keys that at least one product has a value for
+            const featureRows = specKeys.filter(k => rankedList.some(p => resolveSpecValue(k, p.specs)));
+
+            if (featureRows.length === 0) return; // nothing to show
+
+            // Coverage counts per product
+            const coverageCounts = rankedList.map(p => ({
+                platform: p.platform,
+                count: featureRows.filter(k => resolveSpecValue(k, p.specs) !== null).length,
+                total: featureRows.length
+            }));
+
+            // Decide winner column (most features)
+            const maxCoverage = Math.max(...coverageCounts.map(c => c.count));
+
+            html += `
+        <!-- ══════════════════════════════════════════════════════════════
+             FEATURE / SPECIFICATION COMPARISON
+             Position: Below Smart Ranking, Above Specification Matrix
+             ══════════════════════════════════════════════════════════════ -->
+        <div class="card border-0 shadow-sm rounded-4 overflow-hidden mb-3" id="featureComparisonSection">
+
+            <!-- Section Header -->
+            <div class="card-header py-2 px-3 d-flex align-items-center justify-content-between"
+                 style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);">
+                <span class="fw-bold small text-uppercase d-flex align-items-center gap-2">
+                    <span class="text-white"><i class="fas fa-layer-group me-1 text-info"></i>Feature / Specification Comparison</span>
+                    <span class="badge bg-info text-dark rounded-pill px-2" style="font-size:0.65rem;">${escapeHtml(categoryDisplayName)}</span>
+                    <span class="badge bg-warning text-dark rounded-pill px-2" style="font-size:0.65rem;">${featureRows.length} Features</span>
+                </span>
+                <span class="badge bg-white text-dark border rounded-pill px-2 py-1" style="font-size:0.7rem;">
+                    <i class="fas fa-check-circle text-success me-1"></i>Actual extracted data only
+                </span>
+            </div>
+
+            <!-- Coverage Summary Bars (one per product) -->
+            <div class="px-3 pt-3 pb-2 bg-light border-bottom d-flex flex-wrap gap-3 align-items-center">
+                <span class="small text-muted fw-semibold text-uppercase" style="font-size:0.72rem; letter-spacing:0.4px;">
+                    <i class="fas fa-chart-bar me-1"></i>Spec Coverage
+                </span>
+                ${coverageCounts.map(c => {
+                    const pct = featureRows.length ? Math.round((c.count / c.total) * 100) : 0;
+                    const isTop = c.count === maxCoverage;
+                    const platColor = getPlatformColor(c.platform);
+                    return `
+                    <div class="d-flex align-items-center gap-2" style="min-width:160px;">
+                        <span class="badge text-white px-2 py-1 rounded-pill" style="background:${platColor}; font-size:0.68rem;">${escapeHtml(c.platform)}</span>
+                        <div class="flex-grow-1" style="min-width:80px;">
+                            <div class="progress" style="height:8px; border-radius:4px;">
+                                <div class="progress-bar ${isTop ? 'bg-success' : 'bg-primary'}"
+                                     style="width:${pct}%; border-radius:4px;" role="progressbar"></div>
+                            </div>
+                        </div>
+                        <span class="fw-bold small ${isTop ? 'text-success' : 'text-secondary'}" style="font-size:0.72rem; white-space:nowrap;">
+                            ${c.count}/${c.total} ${isTop ? '<i class="fas fa-crown" style="font-size:0.6rem;"></i>' : ''}
+                        </span>
+                    </div>`;
+                }).join('')}
+            </div>
+
+            <!-- Feature-by-Feature Table -->
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 text-center" style="font-size:0.83rem;">
+                    <thead>
+                        <tr style="background:#f8faff;">
+                            <th style="width:28%; text-align:left; padding-left:20px; font-size:0.78rem; color:#555; text-transform:uppercase; letter-spacing:0.4px; border-bottom: 2px solid #e0e7ff;">
+                                <i class="fas fa-list-check me-1 text-primary"></i>Feature
+                            </th>
+                            ${rankedList.map(p => {
+                                const platColor = getPlatformColor(p.platform);
+                                const c = coverageCounts.find(x => x.platform === p.platform) || {};
+                                const isTop = c.count === maxCoverage;
+                                return `
+                                <th style="width:${72 / rankedList.length}%; border-bottom: 2px solid #e0e7ff; ${isTop ? 'background:rgba(16,185,129,0.06);' : ''}">
+                                    <div class="d-flex flex-column align-items-center gap-1 py-1">
+                                        <span class="badge text-white px-2 py-1 rounded-pill" style="background:${platColor}; font-size:0.7rem;">
+                                            ${isTop ? '🏆 ' : ''}${escapeHtml(p.platform)}
+                                        </span>
+                                        <div class="text-truncate small text-dark fw-semibold" style="max-width:150px; font-size:0.72rem;" title="${escapeHtml(p.title)}">
+                                            ${escapeHtml(p.title)}
+                                        </div>
+                                    </div>
+                                </th>`;
+                            }).join('')}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${featureRows.map((k, rowIdx) => {
+                            // Alternate row shading
+                            const rowBg = rowIdx % 2 === 0 ? '' : 'style="background:#fafbff;"';
+                            const cells = rankedList.map(p => {
+                                const val = resolveSpecValue(k, p.specs);
+                                const c = coverageCounts.find(x => x.platform === p.platform) || {};
+                                const isTop = c.count === maxCoverage;
+                                if (val !== null && val !== undefined && val !== '') {
+                                    // Has value → show green tick + value
+                                    return `
+                                    <td class="text-center" ${isTop ? 'style="background:rgba(16,185,129,0.04);"' : ''}>
+                                        <div class="d-flex flex-column align-items-center gap-0.5">
+                                            <span class="text-success fw-bold" style="font-size:0.9rem;">✓</span>
+                                            <span class="text-dark" style="font-size:0.78rem; word-break:break-word; max-width:120px; display:block;">${escapeHtml(val)}</span>
+                                        </div>
+                                    </td>`;
+                                } else {
+                                    // Missing → show red cross
+                                    return `
+                                    <td class="text-center text-muted" ${isTop ? 'style="background:rgba(16,185,129,0.04);"' : ''}>
+                                        <span class="text-danger" style="font-size:0.85rem;">✗</span>
+                                        <div style="font-size:0.72rem; color:#bbb;">Not Available</div>
+                                    </td>`;
+                                }
+                            }).join('');
+
+                            return `<tr ${rowBg}>
+                                <td class="fw-semibold text-start text-dark" style="padding-left:20px; font-size:0.8rem;">
+                                    <i class="fas fa-circle-dot text-primary me-1" style="font-size:0.5rem; vertical-align:middle;"></i>
+                                    ${escapeHtml(k)}
+                                </td>
+                                ${cells}
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                    <!-- Footer: totals row -->
+                    <tfoot>
+                        <tr style="background:#f0f4ff; border-top:2px solid #e0e7ff;">
+                            <td class="fw-bold text-start text-primary ps-4" style="font-size:0.78rem; text-transform:uppercase; letter-spacing:0.4px;">
+                                <i class="fas fa-sigma me-1"></i>Total Features Available
+                            </td>
+                            ${coverageCounts.map(c => {
+                                const isTop = c.count === maxCoverage;
+                                return `
+                                <td class="fw-bold text-center ${isTop ? 'text-success' : 'text-secondary'}">
+                                    <span class="badge ${isTop ? 'bg-success' : 'bg-secondary'} px-3 py-1 rounded-pill" style="font-size:0.78rem;">
+                                        ${c.count} / ${c.total}
+                                        ${isTop ? ' ★' : ''}
+                                    </span>
+                                </td>`;
+                            }).join('')}
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+
+            <!-- Legend -->
+            <div class="px-3 py-2 bg-light border-top d-flex align-items-center gap-3 flex-wrap">
+                <span class="small text-muted" style="font-size:0.72rem;">
+                    <span class="text-success fw-bold">✓</span> = Feature verified &amp; extracted
+                    &nbsp;|&nbsp;
+                    <span class="text-danger fw-bold">✗</span> = Not available on this platform
+                    &nbsp;|&nbsp;
+                    <i class="fas fa-crown text-warning"></i> = Most complete specification coverage
+                </span>
+            </div>
+        </div>`;
+        })();
+        // ── End Feature / Specification Comparison Section ─────────────────
+
         // Detailed Side-by-Side Comparison Matrix Table
         html += `
         <div class="card border-0 shadow-sm rounded-4 overflow-hidden mb-3">
             <div class="card-header bg-dark text-white py-2.5 px-3 d-flex align-items-center justify-content-between">
-                <span class="fw-bold small text-uppercase"><i class="fas fa-table me-2 text-primary"></i>Direct Specification &amp; Attribute Comparison</span>
+                <span class="fw-bold small text-uppercase d-flex align-items-center flex-wrap gap-2">
+                    <span><i class="fas fa-table me-1.5 text-primary"></i>Specification Comparison</span>
+                    <span class="badge bg-info text-dark rounded-pill px-2 py-0.5" style="font-size: 0.68rem; font-weight: 600;">${escapeHtml(categoryDisplayName)} Category</span>
+                </span>
                 <span class="badge bg-primary text-white rounded-pill px-2.5 py-1" style="font-size: 0.72rem;">${rankedList.length} Products Matched</span>
             </div>
             <div class="table-responsive">
@@ -605,6 +1145,16 @@
                         </tr>
                     </thead>
                     <tbody>
+                        <!-- 0. Product Preview Row -->
+                        <tr class="table-light">
+                            <td class="fw-bold text-start ps-3 text-dark"><i class="fas fa-image me-1.5 text-muted"></i>Preview</td>
+                            ${rankedList.map(p => `
+                                <td>
+                                    <img src="${escapeHtml(p.image || getPlatformFallbackSvg(p.platform))}" alt="${escapeHtml(p.title)}" style="height: 60px; max-width: 90px; object-fit: contain; border-radius: 6px; background: #fff; padding: 2px;" onerror="this.onerror=null; this.src=getPlatformFallbackSvg('${escapeHtml(p.platform)}');">
+                                </td>
+                            `).join('')}
+                        </tr>
+
                         <!-- 1. Smart Rank -->
                         <tr>
                             <td class="fw-bold text-start ps-3 text-primary"><i class="fas fa-trophy me-1.5"></i>Smart Ranking</td>
@@ -617,19 +1167,9 @@
                             `).join('')}
                         </tr>
 
-                        <!-- 2. Price -->
+                        <!-- 2. Quality Score (Priority 1) -->
                         <tr>
-                            <td class="fw-bold text-start ps-3 text-dark"><i class="fas fa-tag me-1.5 text-success"></i>Current Price</td>
-                            ${rankedList.map(p => `
-                                <td class="fw-bold ${p.price_num && p.price_num === Math.min(...rankedList.map(x => x.price_num || 999999)) ? 'text-success bg-success bg-opacity-10' : 'text-dark'}">
-                                    ${escapeHtml(p.price || '—')}
-                                </td>
-                            `).join('')}
-                        </tr>
-
-                        <!-- 3. Quality Score -->
-                        <tr>
-                            <td class="fw-bold text-start ps-3 text-dark"><i class="fas fa-award me-1.5 text-primary"></i>Quality Score</td>
+                            <td class="fw-bold text-start ps-3 text-dark"><i class="fas fa-award me-1.5 text-primary"></i>Specification Quality</td>
                             ${rankedList.map(p => `
                                 <td>
                                     <span class="badge bg-primary-subtle text-primary border border-primary px-2.5 py-1 rounded-pill fw-bold">
@@ -640,27 +1180,43 @@
                             `).join('')}
                         </tr>
 
-                        <!-- 4. Customer Rating -->
-                        <tr>
-                            <td class="fw-bold text-start ps-3 text-dark"><i class="fas fa-star me-1.5 text-warning"></i>Customer Rating</td>
-                            ${rankedList.map(p => `
-                                <td>
-                                    <span class="fw-bold text-warning-emphasis">★ ${escapeHtml(p.rating || 'N/A')}</span>
-                                    <div class="small text-muted" style="font-size: 0.7rem;">(${escapeHtml(p.reviews || '0')} reviews)</div>
-                                </td>
-                            `).join('')}
-                        </tr>
-
-                        <!-- 5. Dynamic Specifications -->
-                        ${specKeys.map(k => `
+                        <!-- 3. Dynamic Specifications (Priority 2) -->
+                        ${specKeys.map(k => {
+                            const anyHasVal = rankedList.some(p => resolveSpecValue(k, p.specs));
+                            if (!anyHasVal) return '';
+                            return `
                             <tr>
                                 <td class="fw-semibold text-start ps-3 text-muted text-capitalize">${escapeHtml(k)}</td>
                                 ${rankedList.map(p => {
-                                    const val = (p.specs && p.specs[k]) ? String(p.specs[k]) : '—';
-                                    return `<td>${escapeHtml(val)}</td>`;
+                                    const val = resolveSpecValue(k, p.specs);
+                                    return `<td class="${val ? '' : 'text-muted'}">${escapeHtml(val || '—')}</td>`;
                                 }).join('')}
-                            </tr>
-                        `).join('')}
+                            </tr>`;
+                        }).join('')}
+
+                        <!-- 4. Customer Rating & Reviews (Priority 3) -->
+                        <tr>
+                            <td class="fw-bold text-start ps-3 text-dark"><i class="fas fa-star me-1.5 text-warning"></i>Customer Rating</td>
+                            ${rankedList.map(p => {
+                                const cleanR = String(p.rating || 'N/A').replace(/^[★\s]+/, '').trim();
+                                const isNA = !cleanR || cleanR.toUpperCase() === 'N/A' || cleanR === '0' || cleanR === '0.0';
+                                return `
+                                <td>
+                                    <span class="fw-bold text-warning-emphasis">${isNA ? 'N/A' : '★ ' + escapeHtml(cleanR)}</span>
+                                    <div class="small text-muted" style="font-size: 0.7rem;">(${escapeHtml(p.reviews || '0')} reviews)</div>
+                                </td>`;
+                            }).join('')}
+                        </tr>
+
+                        <!-- 5. Price & Value (Priority 4 & 5) -->
+                        <tr>
+                            <td class="fw-bold text-start ps-3 text-dark"><i class="fas fa-tag me-1.5 text-success"></i>Current Price</td>
+                            ${rankedList.map(p => `
+                                <td class="fw-bold ${p.price_num && p.price_num === Math.min(...rankedList.map(x => x.price_num || 999999)) ? 'text-success bg-success bg-opacity-10' : 'text-dark'}">
+                                    ${escapeHtml(p.price || '—')}
+                                </td>
+                            `).join('')}
+                        </tr>
 
                         <!-- 6. Direct Buy Link -->
                         <tr class="table-light">
@@ -819,7 +1375,7 @@
                 html += `
                 <div class="p-2.5 rounded-3 border border-secondary border-opacity-25 bg-white d-flex align-items-center justify-content-between gap-3">
                     <div class="d-flex align-items-center gap-2.5 overflow-hidden">
-                        <img src="${escapeHtml(cand.image)}" alt="Thumbnail" style="width: 44px; height: 44px; object-fit: contain; border-radius: 6px; background: #fff; flex-shrink: 0;">
+                        <img src="${escapeHtml(cand.image || getPlatformFallbackSvg(cand.platform))}" alt="Thumbnail" style="width: 44px; height: 44px; object-fit: contain; border-radius: 6px; background: #fff; flex-shrink: 0;" onerror="this.onerror=null; this.src=getPlatformFallbackSvg('${escapeHtml(cand.platform)}');">
                         <div class="overflow-hidden">
                             <span class="badge text-white px-1.5 py-0.5 rounded-pill mb-0.5" style="font-size: 0.65rem; background: ${getPlatformColor(cand.platform)};">
                                 ${escapeHtml(cand.platform)}
@@ -864,6 +1420,17 @@
     };
 
     // ── Helper Utilities ─────────────────────────────────────────────────────
+    function getPlatformFallbackSvg(plat) {
+        const p = String(plat || "").toLowerCase();
+        if (p.includes("flipkart")) {
+            return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23f1f3f6'/><path d='M35 38 L65 38 L61 68 L39 68 Z' fill='%232874f0'/><path d='M43 38 C43 30 57 30 57 38' stroke='%23ff9f00' stroke-width='3' fill='none'/><text x='50' y='82' font-family='Arial' font-size='9' font-weight='bold' fill='%232874f0' text-anchor='middle'>Flipkart</text></svg>";
+        }
+        if (p.includes("meesho")) {
+            return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23fdf2f8'/><path d='M35 38 L65 38 L61 68 L39 68 Z' fill='%23f43397'/><path d='M43 38 C43 30 57 30 57 38' stroke='%23831843' stroke-width='3' fill='none'/><text x='50' y='82' font-family='Arial' font-size='9' font-weight='bold' fill='%23f43397' text-anchor='middle'>Meesho</text></svg>";
+        }
+        return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23f7f7f7'/><path d='M32 40 L38 40 L45 60 L62 60 L68 45 L40 45' stroke='%23232f3e' stroke-width='3' fill='none'/><circle cx='46' cy='66' r='3' fill='%23ff9900'/><circle cx='61' cy='66' r='3' fill='%23ff9900'/><text x='50' y='82' font-family='Arial' font-size='9' font-weight='bold' fill='%23232f3e' text-anchor='middle'>Amazon</text></svg>";
+    }
+
     function getPlatformColor(plat) {
         const p = String(plat || "").toLowerCase();
         if (p.includes("amazon")) return "#FF9900";

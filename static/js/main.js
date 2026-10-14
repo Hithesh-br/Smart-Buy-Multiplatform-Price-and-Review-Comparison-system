@@ -48,9 +48,33 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    // ── 4. Show loading overlay on all search form submissions ──────────────
+    // ── 4. Search forms: URL vs product name + loading overlay ─────────────
+    function detectMarketplaceUrl(value) {
+        if (!value) return null;
+        const low = value.toLowerCase().trim();
+        if (/^https?:\/\//i.test(low) || low.includes("amazon.in") || low.includes("amazon.co.in") ||
+            low.includes("amzn.in") || low.includes("amzn.to") || low.includes("flipkart.com") ||
+            low.includes("meesho.com")) {
+            return value.trim();
+        }
+        return null;
+    }
+
     document.querySelectorAll("form[action='/search']").forEach(form => {
-        form.addEventListener("submit", () => {
+        form.addEventListener("submit", (e) => {
+            const qInput = form.querySelector("input[name='q']");
+            const raw = (qInput && qInput.value) ? qInput.value.trim() : "";
+            const asUrl = detectMarketplaceUrl(raw);
+            if (asUrl && form.id === "mainSearchForm") {
+                e.preventDefault();
+                const overlay = document.getElementById("loadingOverlay");
+                if (overlay) {
+                    overlay.classList.remove("d-none");
+                    overlay.classList.add("d-flex");
+                }
+                window.location.href = `/search?url=${encodeURIComponent(asUrl)}&fresh=1`;
+                return;
+            }
             const overlay = document.getElementById("loadingOverlay");
             if (overlay) {
                 overlay.classList.remove("d-none");

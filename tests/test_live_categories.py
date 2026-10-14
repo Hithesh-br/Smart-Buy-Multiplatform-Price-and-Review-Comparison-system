@@ -7,6 +7,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 BASE_URL = "http://127.0.0.1:5000"
+__test__ = False
 
 def test_query(query, expected_category=None):
     print(f"\n==================================================")

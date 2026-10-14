@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from flask import Blueprint, render_template, request, redirect, jsonify, session, flash, url_for, Response, stream_with_context
 from werkzeug.security import generate_password_hash, check_password_hash
-from search_engine import fetch_all_products_parallel, fetch_all_products_with_fallbacks, process_results
+from search_engine import fetch_all_products_parallel, fetch_all_products_with_fallbacks, fetch_single_platform, process_results
 from cache import get_cached_search, set_cached_search
 from url_detector import validate_and_detect_url, detect_search_type
 from comparison_engine import compare_by_product_url, compare_by_product_url_stream
@@ -1056,7 +1056,7 @@ def profile_change_password():
 def search():
     """Main search route for side-by-side multi-platform comparison."""
     url_param = request.args.get('url', '').strip()
-    raw_q = request.args.get('q', '').strip()
+    raw_q = (request.args.get('q') or request.args.get('query') or '').strip()
 
     # Automatically detect whether user entered a product URL in 'q' or 'url'
     if not url_param and raw_q:
@@ -1131,18 +1131,39 @@ def search():
         matches = comp_result.get('matches', {})
         matched_list = [p for p in matches.values() if p]
 
+        val_by_plat = comp_result.get('validated_by_platform', {})
+        def _get_url_plat_items(plat_key):
+            m = matches.get(plat_key)
+            cap = plat_key.capitalize()
+            res_items = []
+            if m:
+                res_items.append(m)
+            extra = val_by_plat.get(cap, []) or val_by_plat.get(plat_key, []) or comp_result.get('similar_products', {}).get(plat_key, [])
+            for it in extra:
+                if it not in res_items:
+                    res_items.append(it)
+            return res_items
+
+        # Ensure matches dictionary is populated with the top item for each platform if available
+        for p_k in ('amazon', 'flipkart', 'meesho'):
+            if not matches.get(p_k):
+                p_items = _get_url_plat_items(p_k)
+                if p_items:
+                    matches[p_k] = p_items[0]
+        matched_list = [p for p in matches.values() if p]
+
         platforms_payload = {
             "amazon": {
                 "status": comp_result.get('platform_status', {}).get('Amazon', {}).get('status', 'success'),
-                "products": [matches['amazon']] if matches.get('amazon') else []
+                "products": _get_url_plat_items('amazon')
             },
             "flipkart": {
                 "status": comp_result.get('platform_status', {}).get('Flipkart', {}).get('status', 'success'),
-                "products": [matches['flipkart']] if matches.get('flipkart') else []
+                "products": _get_url_plat_items('flipkart')
             },
             "meesho": {
                 "status": comp_result.get('platform_status', {}).get('Meesho', {}).get('status', 'success'),
-                "products": [matches['meesho']] if matches.get('meesho') else []
+                "products": _get_url_plat_items('meesho')
             }
         }
 
@@ -1162,9 +1183,9 @@ def search():
             "flipkart": matches.get('flipkart'),
             "meesho": matches.get('meesho'),
             "products": {
-                "amazon": [matches['amazon']] if matches.get('amazon') else [],
-                "flipkart": [matches['flipkart']] if matches.get('flipkart') else [],
-                "meesho": [matches['meesho']] if matches.get('meesho') else []
+                "amazon": _get_url_plat_items('amazon'),
+                "flipkart": _get_url_plat_items('flipkart'),
+                "meesho": _get_url_plat_items('meesho')
             }
         }
 
@@ -1175,7 +1196,11 @@ def search():
         }
 
         top_verified_offers = comp_result.get('top_verified_offers', {})
-        val_prods = comp_result.get('validated_products') or matched_list
+        val_prods = comp_result.get('validated_products')
+        if not val_prods:
+            val_prods = [p for p in (_get_url_plat_items('amazon') + _get_url_plat_items('flipkart') + _get_url_plat_items('meesho')) if p]
+        if not val_prods:
+            val_prods = matched_list
 
         from search.specs_extractor import compute_marketplace_statuses
         url_mp_status = compute_marketplace_statuses(matches, comp_result.get('platform_status', {}))
@@ -1194,7 +1219,11 @@ def search():
             validated_products=val_prods,
             total=len(val_prods),
             platforms=platforms_payload,
-            platform_results={"Amazon": [matches['amazon']] if matches.get('amazon') else [], "Flipkart": [matches['flipkart']] if matches.get('flipkart') else [], "Meesho": [matches['meesho']] if matches.get('meesho') else []},
+            platform_results={
+                "Amazon": _get_url_plat_items('amazon'),
+                "Flipkart": _get_url_plat_items('flipkart'),
+                "Meesho": _get_url_plat_items('meesho')
+            },
             platform_status=comp_result.get('platform_status', {}),
             marketplace_status=url_mp_status,
             comparison_data=comparison,
@@ -1222,7 +1251,7 @@ def search():
             filter_params={}
         )
 
-    raw_q = request.args.get('q', '')
+    raw_q = request.args.get('q') or request.args.get('query') or ''
     query = clean_text(raw_q)[:100]
 
 
@@ -1445,6 +1474,7 @@ def api_search():
             "count": platform_status.get("Amazon", {}).get("count", len(processed["platform_results"].get("Amazon", []))),
             "duration": platform_status.get("Amazon", {}).get("duration", 0.0),
             "error": platform_status.get("Amazon", {}).get("error"),
+            "retry_available": platform_status.get("Amazon", {}).get("retry_available", False),
             "products": processed["platform_results"].get("Amazon", [])
         },
         "flipkart": {
@@ -1453,6 +1483,7 @@ def api_search():
             "count": platform_status.get("Flipkart", {}).get("count", len(processed["platform_results"].get("Flipkart", []))),
             "duration": platform_status.get("Flipkart", {}).get("duration", 0.0),
             "error": platform_status.get("Flipkart", {}).get("error"),
+            "retry_available": platform_status.get("Flipkart", {}).get("retry_available", False),
             "products": processed["platform_results"].get("Flipkart", [])
         },
         "meesho": {
@@ -1461,6 +1492,7 @@ def api_search():
             "count": platform_status.get("Meesho", {}).get("count", len(processed["platform_results"].get("Meesho", []))),
             "duration": platform_status.get("Meesho", {}).get("duration", 0.0),
             "error": platform_status.get("Meesho", {}).get("error"),
+            "retry_available": platform_status.get("Meesho", {}).get("retry_available", False),
             "products": processed["platform_results"].get("Meesho", [])
         },
         "platforms": processed.get("platforms", {}),
@@ -1482,6 +1514,53 @@ def api_search():
         "top_prices": processed.get("top_prices"),
         "best_overall_deal": processed.get("best_overall_deal"),
         "savings_info": processed.get("savings_info"),
+    })
+
+
+@api_bp.route('/api/search/platform', methods=['GET', 'POST'])
+def api_search_platform():
+    """
+    Independent single-platform search / retry endpoint.
+    Accepts:
+      platform: "Amazon" | "Flipkart" | "Meesho"
+      q: search query
+      fresh: '1' or '0' (defaults to '1' for retry)
+    Returns JSON with platform status, products, and retry availability.
+    """
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        platform = data.get('platform') or request.form.get('platform', '')
+        query = data.get('q') or data.get('query') or request.form.get('q', '')
+        fresh = bool(data.get('fresh', True))
+    else:
+        platform = request.args.get('platform', '')
+        query = request.args.get('q', '') or request.args.get('query', '')
+        fresh = request.args.get('fresh', '1').lower() in ('1', 'true', 'yes')
+
+    platform = str(platform).strip()
+    query = clean_text(str(query).strip())[:100]
+
+    if not platform or not query:
+        return jsonify({"error": "Both 'platform' and 'q' are required", "status": "error"}), 400
+
+    items, p_stat = fetch_single_platform(platform, query, bypass_fresh=fresh)
+
+    plat_key = p_stat.get("platform", platform.capitalize())
+    raw_dict = {plat_key: items}
+    p_status_dict = {plat_key: p_stat}
+    processed = process_results(query, raw_dict, platform_status=p_status_dict)
+
+    plat_items = processed["platform_results"].get(plat_key, [])
+
+    return jsonify({
+        "status": "success",
+        "platform": plat_key,
+        "platform_status": p_stat,
+        "products": plat_items,
+        "count": len(plat_items),
+        "error": p_stat.get("error"),
+        "retry_available": p_stat.get("retry_available", False),
+        "best_match": processed.get("best_per_platform", {}).get(plat_key)
     })
 
 

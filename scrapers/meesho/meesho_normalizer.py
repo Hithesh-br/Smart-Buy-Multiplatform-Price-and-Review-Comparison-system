@@ -92,12 +92,23 @@ def normalize_meesho_product(raw: Dict[str, Any], query: str = "") -> Optional[D
         return None
 
     # Title extraction & recovery
-    title = str(raw.get("title") or raw.get("name") or raw.get("product_name") or "").strip()
+    title = str(
+        raw.get("hero_product_name")
+        or raw.get("title")
+        or raw.get("name")
+        or raw.get("product_name")
+        or ""
+    ).strip()
     url = str(raw.get("url") or raw.get("product_url") or raw.get("link") or "").strip()
+    slug = str(raw.get("slug") or raw.get("original_slug") or "").strip()
 
-    # If title is short or generic, recover from URL slug
-    if (len(title) < 8 or any(g in title.lower() for g in ("others", "casual", "laptop adapters"))) and url:
-        recovered = extract_title_from_slug(url)
+    generic_titles = (
+        "designer water bottles", "essential water bottles", "fancy water bottles",
+        "water bottles", "lunch boxes & water bottles", "others", "casual", "laptop adapters"
+    )
+    # If title is short or generic, recover from URL or slug
+    if (len(title) < 8 or any(g in title.lower() for g in generic_titles)) and (url or slug):
+        recovered = extract_title_from_slug(slug or url)
         if recovered:
             title = recovered
 
@@ -105,7 +116,14 @@ def normalize_meesho_product(raw: Dict[str, Any], query: str = "") -> Optional[D
         return None
 
     # Price parsing
-    price_num, price_str = parse_price_value(raw.get("price") or raw.get("price_num") or raw.get("discounted_price"))
+    price_val = (
+        raw.get("price")
+        or raw.get("price_num")
+        or raw.get("min_product_price")
+        or raw.get("min_catalog_price")
+        or raw.get("discounted_price")
+    )
+    price_num, price_str = parse_price_value(price_val)
     if price_num is None or price_num <= 0:
         return None
 
@@ -119,13 +137,27 @@ def normalize_meesho_product(raw: Dict[str, Any], query: str = "") -> Optional[D
         discount_percent = int(raw.get("discount_percent") or raw.get("discount") or 0)
 
     # Rating & Reviews
-    rating, review_count = parse_rating_and_reviews(
-        raw.get("rating") or raw.get("rating_num"),
-        raw.get("review_count") or raw.get("reviews")
-    )
+    rev_sum = raw.get("catalog_reviews_summary")
+    if isinstance(rev_sum, dict):
+        r_val = rev_sum.get("average_rating") or rev_sum.get("rating")
+        rating = None
+        if r_val:
+            try:
+                rating = round(float(r_val), 1)
+            except Exception:
+                pass
+        review_count = int(rev_sum.get("review_count") or rev_sum.get("rating_count") or 0)
+    else:
+        rating, review_count = parse_rating_and_reviews(
+            raw.get("rating") or raw.get("rating_num"),
+            raw.get("review_count") or raw.get("reviews")
+        )
 
     # URL normalization
-    if url.startswith("/"):
+    if not url and slug:
+        pid_val = str(raw.get("product_id") or raw.get("id") or "").strip()
+        url = f"https://www.meesho.com/{slug}/p/{pid_val}" if pid_val else f"https://www.meesho.com/{slug}"
+    elif url.startswith("/"):
         url = "https://www.meesho.com" + url
     elif url and not url.startswith("http"):
         url = "https://www.meesho.com/" + url
@@ -138,7 +170,12 @@ def normalize_meesho_product(raw: Dict[str, Any], query: str = "") -> Optional[D
             product_id = m_id.group(1)
 
     # Image
-    image = str(raw.get("image") or raw.get("image_url") or "").strip()
+    images_list = raw.get("images") or raw.get("product_images") or []
+    image = ""
+    if isinstance(images_list, list) and images_list:
+        image = str(images_list[0]).strip()
+    if not image:
+        image = str(raw.get("image") or raw.get("image_url") or "").strip()
     if "unsplash.com" in image or "placeholder" in image:
         image = ""
 
@@ -190,9 +227,41 @@ def normalize_meesho_product(raw: Dict[str, Any], query: str = "") -> Optional[D
         if c_match:
             color = c_match.group(1).capitalize()
 
-    size = raw.get("size") or None
     material = raw.get("material") or None
-    seller = raw.get("seller") or None
+    parsed_attrs = {}
+    fd = raw.get("full_details")
+    if isinstance(fd, str):
+        for line in fd.split("\n"):
+            line = line.strip()
+            if ":" in line:
+                k, v = line.split(":", 1)
+                k_clean = k.strip()
+                v_clean = v.strip()
+                if k_clean and v_clean and v_clean.lower() not in ("none", "null", "n/a"):
+                    parsed_attrs[k_clean] = v_clean
+    elif isinstance(fd, dict):
+        parsed_attrs.update(fd)
+
+    pa = raw.get("product_attributes")
+    if isinstance(pa, list):
+        for attr in pa:
+            if isinstance(attr, str) and ":" in attr:
+                k, v = attr.split(":", 1)
+                k_clean = k.strip()
+                v_clean = v.strip()
+                if k_clean and v_clean and v_clean.lower() not in ("none", "null", "n/a"):
+                    parsed_attrs[k_clean] = v_clean
+
+    if not brand and parsed_attrs.get("Brand"):
+        brand = parsed_attrs.get("Brand")
+    if not color and parsed_attrs.get("Color"):
+        color = parsed_attrs.get("Color")
+    if not material and parsed_attrs.get("Material"):
+        material = parsed_attrs.get("Material")
+
+    size = raw.get("size") or parsed_attrs.get("Size") or None
+    material = material or parsed_attrs.get("Material") or None
+    seller = raw.get("seller") or parsed_attrs.get("Seller") or None
     features = raw.get("features") or raw.get("key_features") or []
     specifications = raw.get("specifications") or {}
     if not specifications:
@@ -212,6 +281,10 @@ def normalize_meesho_product(raw: Dict[str, Any], query: str = "") -> Optional[D
         }
         if material:
             specifications["Material"] = material
+        # Incorporate all parsed attributes
+        for pk, pv in parsed_attrs.items():
+            if pk not in specifications:
+                specifications[pk] = pv
 
     unit_price = calculate_unit_price(price_num, weight, pack_qty)
 

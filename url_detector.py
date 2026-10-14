@@ -14,7 +14,10 @@ import re
 import urllib.parse
 from typing import Optional, Dict, Any
 
-AMAZON_DOMAINS = {"amazon.in", "www.amazon.in", "amazon.co.in", "www.amazon.co.in", "amzn.in", "amzn.to"}
+AMAZON_DOMAINS = {
+    "amazon.in", "www.amazon.in", "amazon.co.in", "www.amazon.co.in",
+    "amazon.com", "www.amazon.com", "amzn.in", "amzn.to"
+}
 FLIPKART_DOMAINS = {"flipkart.com", "www.flipkart.com", "dl.flipkart.com", "fkrt.it"}
 MEESHO_DOMAINS = {"meesho.com", "www.meesho.com"}
 
@@ -31,6 +34,67 @@ def is_valid_http_url(url: str) -> bool:
         return False
 
 
+def normalize_product_url(raw_url: str, platform: Optional[str] = None) -> str:
+    """
+    Normalizes URL encoding and removes tracking/referral parameters
+    while strictly preserving the canonical product identity.
+    """
+    if not raw_url or not isinstance(raw_url, str):
+        return ""
+    clean = raw_url.strip()
+    try:
+        parsed = urllib.parse.urlparse(clean)
+        plat = platform or detect_platform_from_url(clean)
+
+        if plat == "amazon":
+            asin = extract_amazon_asin(clean)
+            if asin:
+                # Use canonical Amazon.in URL
+                domain = "www.amazon.in" if "amazon.in" in (parsed.hostname or "") or "amzn" in (parsed.hostname or "") else (parsed.hostname or "www.amazon.in")
+                return f"https://{domain}/dp/{asin}"
+            # Strip standard Amazon tracking params
+            tracking_params = {
+                'ref', 'ref_', 'tag', 'linkCode', 'psc', 'th', 'creative', 'camp',
+                'creativeASIN', 'ascsubtag', 'pf_rd_r', 'pf_rd_p', 'pf_rd_m', 'pf_rd_s',
+                'pf_rd_t', 'pf_rd_i', 'crid', 'sprefix', 'keywords', 'qid', 'sr'
+            }
+            qs = urllib.parse.parse_qs(parsed.query)
+            clean_qs = {k: v for k, v in qs.items() if k.lower() not in tracking_params}
+            new_query = urllib.parse.urlencode(clean_qs, doseq=True)
+            return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, ""))
+
+        elif plat == "flipkart":
+            # For short share links, keep clean URL for resolver
+            if "dl.flipkart.com/s/" in clean or "fkrt.it/" in clean:
+                return clean
+            # For standard Flipkart links, preserve pid and path
+            pid = extract_flipkart_id(clean)
+            tracking_params = {
+                'lid', 'marketplace', 'spotlightTagId', 'store', 'srno', 'otracker',
+                'otracker1', 'fm', 'iid', 'ppn', 'ppt', 'qH', 'affid'
+            }
+            qs = urllib.parse.parse_qs(parsed.query)
+            clean_qs = {k: v for k, v in qs.items() if k.lower() not in tracking_params}
+            if pid and 'pid' not in clean_qs:
+                clean_qs['pid'] = [pid]
+            new_query = urllib.parse.urlencode(clean_qs, doseq=True)
+            return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, ""))
+
+        elif plat == "meesho":
+            tracking_params = {
+                'ref', 'source', 'campaign', 'utm_source', 'utm_medium',
+                'utm_campaign', 'utm_term', 'utm_content'
+            }
+            qs = urllib.parse.parse_qs(parsed.query)
+            clean_qs = {k: v for k, v in qs.items() if k.lower() not in tracking_params}
+            new_query = urllib.parse.urlencode(clean_qs, doseq=True)
+            return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, ""))
+
+    except Exception:
+        pass
+    return clean
+
+
 def detect_search_type(query: str) -> Dict[str, Any]:
     """
     Detect whether user entered:
@@ -39,7 +103,7 @@ def detect_search_type(query: str) -> Dict[str, Any]:
 
     Examples:
     "Samsung Galaxy S24" -> {"type": "product_name"}
-    "nike shoes" -> {"type": "product_name"}
+    "BAJAJ coconut oil" -> {"type": "product_name"}
     "https://dl.flipkart.com/s/0chNErNNNN" -> {"type": "product_url", "platform": "flipkart"}
     "https://www.amazon.in/dp/B0CHX1W1XY" -> {"type": "product_url", "platform": "amazon"}
     "https://www.meesho.com/s/p/4abc12" -> {"type": "product_url", "platform": "meesho"}
@@ -49,27 +113,24 @@ def detect_search_type(query: str) -> Dict[str, Any]:
 
     q_clean = query.strip()
 
-    # If it contains spaces and doesn't start with http or a domain, it's a product name
-    if " " in q_clean and not q_clean.lower().startswith(("http://", "https://", "www.")):
-        return {"type": "product_name"}
-
-    # Extract URL if user pasted with leading/trailing characters
-    url_match = re.search(r'https?://[^\s]+', q_clean)
+    # Look for URL pattern anywhere in the query string
+    url_match = re.search(r'https?://[^\s<>"]+', q_clean)
     if url_match:
         test_url = url_match.group(0)
     else:
-        # Check if starts with domain e.g. dl.flipkart.com/s/..., amazon.in/..., meesho.com/...
-        if re.match(r'^(?:www\.)?(?:dl\.)?(amazon|flipkart|meesho|amzn)\.', q_clean, re.I):
+        # Check if starts with a recognized marketplace domain
+        if re.match(r'^(?:www\.)?(?:dl\.)?(amazon\.(?:in|com|co\.in)|flipkart\.com|meesho\.com|amzn\.(?:in|to)|fkrt\.it)/', q_clean, re.I):
             test_url = "https://" + q_clean
         else:
             return {"type": "product_name"}
 
     platform = detect_platform_from_url(test_url)
     if platform:
+        canonical = normalize_product_url(test_url, platform)
         return {
             "type": "product_url",
             "platform": platform,
-            "url": test_url
+            "url": canonical or test_url
         }
 
     return {"type": "product_name"}
@@ -83,7 +144,16 @@ def detect_platform_from_url(url: str) -> Optional[str]:
     if not url or not isinstance(url, str):
         return None
 
-    clean = url.strip()
+    clean = url.strip().lower()
+
+    # Domain substring checks matching Section 2 requirements
+    if "amazon.in" in clean or "amazon.com" in clean or "amazon.co.in" in clean or "amzn.in" in clean or "amzn.to" in clean:
+        return "amazon"
+    if "flipkart.com" in clean or "fkrt.it" in clean:
+        return "flipkart"
+    if "meesho.com" in clean:
+        return "meesho"
+
     if not is_valid_http_url(clean):
         if clean.startswith("www.") or re.match(r'^(?:dl\.)?(amazon|flipkart|meesho|amzn)\.', clean, re.I):
             clean = "https://" + clean
@@ -228,14 +298,24 @@ def validate_and_detect_url(raw_url: str) -> Dict[str, Any]:
                 "product_id": None,
                 "error": "This is an Amazon search results page. Please provide a direct product page URL."
             }
+        is_short = "amzn.in/d/" in url or "amzn.to/" in url
+        resolved_url = url
         asin = extract_amazon_asin(url)
+        if is_short and not asin:
+            try:
+                from search.url_resolver import resolve_product_url
+                resolved_url = resolve_product_url(url, "amazon")
+                asin = extract_amazon_asin(resolved_url) or asin
+            except Exception:
+                pass
         return {
             "is_valid": True,
             "platform": "amazon",
             "platform_name": "Amazon",
-            "canonical_url": f"https://www.amazon.in/dp/{asin}" if asin else url,
+            "canonical_url": f"https://www.amazon.in/dp/{asin}" if asin else resolved_url,
             "original_url": url,
             "product_id": asin,
+            "is_short_url": is_short,
             "error": None
         }
 
@@ -253,15 +333,24 @@ def validate_and_detect_url(raw_url: str) -> Dict[str, Any]:
             }
 
         # Flipkart short URLs dl.flipkart.com/s/XXXX are VALID product share URLs!
+        is_short = "dl.flipkart.com/s/" in url or "dl.flipkart.com/dl/" in url or "fkrt.it/" in url
+        resolved_url = url
         pid = extract_flipkart_id(url)
+        if is_short:
+            try:
+                from search.url_resolver import resolve_product_url
+                resolved_url = resolve_product_url(url, "flipkart")
+                pid = extract_flipkart_id(resolved_url) or pid
+            except Exception:
+                pass
         return {
             "is_valid": True,
             "platform": "flipkart",
             "platform_name": "Flipkart",
-            "canonical_url": url,
+            "canonical_url": resolved_url,
             "original_url": url,
             "product_id": pid,
-            "is_short_url": "dl.flipkart.com/s/" in url,
+            "is_short_url": is_short,
             "error": None
         }
 

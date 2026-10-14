@@ -34,7 +34,8 @@ from search.normalizer import (
     normalize_pack_quantity,
     strip_marketing_words,
 )
-from search.category_detector import detect_category
+from search.category_detector import detect_category, get_category_family
+from search.query_parser import extract_specific_product_type, KNOWN_BRANDS
 
 logger = logging.getLogger("smartbuy.product_matcher")
 
@@ -50,29 +51,58 @@ def generate_search_query_from_product(product: Dict[str, Any]) -> str:
         brand = ''
 
     model = product.get('model') or ''
-    if model.lower() in ('standard', 'n/a', 'none', 'general'):
+    model = re.sub(r'[\u200b-\u200f\ufeff]', '', str(model)).strip()
+    if '/' in model or len(model) > 25 or model.lower() in ('standard', 'n/a', 'none', 'general'):
         model = ''
 
     title = product.get('title') or product.get('product_name') or ''
     category = (product.get('category') or product.get('product_type') or detect_category(title=title)).lower()
     variant = product.get('variant') or {}
 
+    if not model and category in ('phone', 'mobile', 'smartphone', 'tablet', 'laptop', 'computer'):
+        m_phone = re.search(r'\b(iphone\s*(?:1[1-6]|se|x|xs|xr)(?:\s*(?:pro\s*max|pro|plus|mini))?|galaxy\s*[a-z]\d{1,2}(?:\s*5g|\s*4g)?|galaxy\s*s\d{2}(?:\s*ultra|\s*plus|\s*fe)?|pixel\s*\d[a-z]?|t\d(?:\s*5g|\s*pro|\s*lite)?|nord(?:\s*ce)?\s*\d[a-z]?)\b', title, re.I)
+        if m_phone:
+            model = m_phone.group(0).strip()
+
     parts = []
     if brand:
         parts.append(brand)
 
-    # 1. Phone / Tablet
-    if category in ('phone', 'mobile', 'smartphone', 'tablet'):
+    # 0. Pen Drive / USB Flash Drive / Storage Device
+    cat_norm = category.replace(" ", "_")
+    if cat_norm in ('pen_drive', 'storage_device', 'flash_drive', 'pendrive') or 'storage' in category or 'pen_drive' in cat_norm or 'pen' in category or 'flash' in category:
+        if not model:
+            # Extract model codes like v222w, cz50, etc.
+            m_code = re.search(r'\b([a-z]\d{2,4}[a-z]?|[a-z]{2,4}\d{2,4}[a-z]?)\b', title, re.I)
+            if m_code:
+                model = m_code.group(1).lower()
         if model:
             parts.append(model)
-        storage = variant.get('storage')
-        if storage:
-            parts.append(storage)
+        cap = variant.get('storage') or variant.get('capacity') or product.get('storage') or product.get('capacity')
+        if not cap:
+            m_cap = re.search(r'\b(\d{1,4})\s*(gb|tb)\b', title, re.I)
+            if m_cap:
+                cap = f"{m_cap.group(1)}{m_cap.group(2).upper()}"
+        if cap:
+            parts.append(str(cap).replace(" ", ""))
+        parts.append("pen drive")
+
+    # 1. Phone / Tablet
+    elif category in ('phone', 'mobile', 'smartphone', 'tablet'):
         if not model:
             # Extract basic phone tokens
-            m = re.search(r'\b(galaxy\s*[a-z0-9]+|iphone\s*\d+[a-z\s]*|pixel\s*\d[a-z]?|nord\s*[a-z0-9\s]+)\b', title, re.I)
+            m = re.search(r'\b(t\d+[a-z]?(?:\s*5g|\s*lite|\s*pro)?|v\d+[a-z]?(?:\s*5g|\s*pro)?|y\d+[a-z]?(?:\s*5g)?|galaxy\s*[a-z0-9]+|iphone\s*\d+[a-z\s]*|pixel\s*\d[a-z]?|nord\s*[a-z0-9\s]+|narzo\s*[a-z0-9\s]+|redmi\s*[a-z0-9\s]+)\b', title, re.I)
             if m:
-                parts.append(m.group(1).title())
+                model = m.group(1).strip()
+        if model:
+            parts.append(model)
+        storage = variant.get('storage') or product.get('storage')
+        if not storage:
+            m_st = re.search(r'\b(\d{2,4})\s*(gb|tb)\b', title, re.I)
+            if m_st:
+                storage = f"{m_st.group(1)}{m_st.group(2).upper()}"
+        if storage:
+            parts.append(str(storage).replace(" ", "").upper())
 
     # 2. Laptop
     elif category in ('laptop', 'computer'):
@@ -94,12 +124,22 @@ def generate_search_query_from_product(product: Dict[str, Any]) -> str:
             parts.append(power)
         parts.append("Charger")
 
-    # 4. Beauty / Skincare / Grocery / Soap / Face wash
-    elif category in ('soap', 'face_wash', 'beauty', 'skincare', 'grocery', 'food', 'shampoo'):
-        # Check specific product noun
+    # 4. Beauty / Skincare / Soap / Face wash
+    elif category in ('soap', 'face_wash', 'beauty', 'skincare', 'shampoo'):
         t_low = title.lower()
         if 'face wash' in t_low or 'facewash' in t_low:
-            parts.append("Face Wash")
+            if 'acne star' in t_low or 'acnestar' in t_low:
+                parts.append("Acne Star Facewash")
+                if 'anti pigm' in t_low or 'anti pigmentation' in t_low:
+                    parts.append("Anti Pigmentation")
+                if 'oil control' in t_low:
+                    parts.append("Oil Control")
+            elif 'hydrat' in t_low and 'beard' in t_low:
+                parts.append("Hydrating Face & Beard Wash")
+            elif 'zit blocker' in t_low:
+                parts.append("Zit Blocker Face Wash")
+            else:
+                parts.append("Face Wash")
         elif 'soap' in t_low:
             parts.append("Soap")
         elif 'shampoo' in t_low:
@@ -109,12 +149,40 @@ def generate_search_query_from_product(product: Dict[str, Any]) -> str:
         elif model:
             parts.append(model)
 
+        # Check for pack count (e.g. Pack-2, Pack of 2)
+        m_pk = re.search(r'\b(?:pack[\s-]*(?:of[\s-]*)?|pack-)(\d+)\b', t_low)
+        if m_pk:
+            parts.append(f"Pack {m_pk.group(1)}")
+
         weight = product.get('weight') or variant.get('weight')
         if weight and weight not in ('Not Available', 'N/A'):
             parts.append(weight)
 
-    # 5. Fashion / Shoes / Bags
-    elif category in ('fashion', 'shoes', 'footwear', 'bags'):
+    # 4b. Grocery / Food / Dry Fruits / Cooking Oil
+    elif category in ('grocery', 'food', 'dry_fruits', 'cooking_oil') or 'grocery' in category:
+        t_low = title.lower()
+        ptype = extract_specific_product_type(title, category)
+        if ptype and ptype != 'other':
+            parts.append(ptype.replace('_', ' ').title())
+        elif model:
+            parts.append(model)
+
+        # Variant keywords like roasted, salted, cold pressed, virgin
+        if 'roasted' in t_low and 'salted' in t_low:
+            parts.append("Roasted & Salted")
+        elif 'cold pressed' in t_low:
+            parts.append("Cold Pressed")
+
+        weight = product.get('weight') or variant.get('weight')
+        if not weight:
+            m_wt = re.search(r'(\d+(?:\.\d+)?\s*(?:g|gm|kg|l|ltr|litre|ml))\b', t_low)
+            if m_wt:
+                weight = m_wt.group(0)
+        if weight and weight not in ('Not Available', 'N/A'):
+            parts.append(weight)
+
+    # 5. Fashion / Shoes / Bags / Clothing
+    elif category in ('fashion', 'shoes', 'footwear', 'bags', 'clothing'):
         if model:
             parts.append(model)
         t_low = title.lower()
@@ -126,14 +194,275 @@ def generate_search_query_from_product(product: Dict[str, Any]) -> str:
         if size and len(str(size)) <= 6:
             parts.append(f"Size {size}")
 
+    # 6. Water Bottles & Flasks
+    elif cat_norm in ('water_bottle', 'bottle', 'flask') or 'bottle' in category or 'flask' in category:
+        t_low = title.lower()
+        if model:
+            parts.append(model)
+        m_mat = re.search(r'\b(stainless\s*steel|copper|glass|borosilicate|plastic|steel)\b', t_low)
+        if m_mat:
+            parts.append(m_mat.group(0).title())
+        elif product.get('material'):
+            parts.append(str(product['material']).title())
+        parts.append("Water Bottle")
+        m_cap = re.search(r'(\d+(?:\.\d+)?)\s*(?:l|ltr|litres?|liters?|ml)\b', t_low)
+        if m_cap:
+            parts.append(m_cap.group(0).upper())
+        elif product.get('capacity'):
+            parts.append(str(product['capacity']).upper())
+
     # Fallback to concise title tokens
     if len(parts) < 2 or (len(parts) == 1 and not model):
         clean = strip_marketing_words(title)
+        clean = re.sub(r'\(.*?\)', '', clean)
+        clean = re.sub(r'[\(\[\{][^\)\]\}]*$', '', clean)
+        clean = re.sub(r'[,/|\-]+', ' ', clean).strip()
         tokens = [t for t in clean.split() if len(t) > 1 and not re.match(r'^(with|for|and|the|best|new|original)$', t, re.I)]
         query_str = " ".join(tokens[:5])
         return query_str.strip() or title[:50]
 
-    return " ".join(parts).strip()
+    raw_query = " ".join(parts).strip()
+    raw_query = re.sub(r'\(.*?\)', '', raw_query)
+    raw_query = re.sub(r'[\(\[\{][^\)\]\}]*$', '', raw_query)
+    raw_query = re.sub(r'[,/|\-]+', ' ', raw_query).strip()
+    raw_query = re.sub(r'\s+', ' ', raw_query).strip()
+    return raw_query
+
+
+def generate_search_query_cascade(product: Dict[str, Any]) -> List[str]:
+    """
+    Generates an intelligent multi-query fallback cascade for cross-platform search.
+    Example for HP v222w 128GB Pen Drive:
+    1. HP v222w 128GB pen drive
+    2. HP v222w 128 GB USB flash drive
+    3. HP v222w 128GB
+    4. HP v222w pen drive
+    5. HP 128GB v222w
+    """
+    brand = product.get('brand') or ''
+    if brand.lower() in ('generic', 'other', 'unknown', 'none'):
+        brand = ''
+
+    model = product.get('model') or ''
+    model = re.sub(r'[\u200b-\u200f\ufeff]', '', str(model)).strip()
+    if '/' in model or len(model) > 25 or model.lower() in ('standard', 'n/a', 'none', 'general'):
+        model = ''
+
+    title = product.get('title') or product.get('product_name') or ''
+    category = (product.get('category') or product.get('product_type') or detect_category(title=title)).lower()
+    variant = product.get('variant') or {}
+
+    if not model and category in ('phone', 'mobile', 'smartphone', 'tablet', 'laptop', 'computer'):
+        m_phone = re.search(r'\b(iphone\s*(?:1[1-6]|se|x|xs|xr)(?:\s*(?:pro\s*max|pro|plus|mini))?|galaxy\s*[a-z]\d{1,2}(?:\s*5g|\s*4g)?|galaxy\s*s\d{2}(?:\s*ultra|\s*plus|\s*fe)?|pixel\s*\d[a-z]?|t\d(?:\s*5g|\s*pro|\s*lite)?|nord(?:\s*ce)?\s*\d[a-z]?)\b', title, re.I)
+        if m_phone:
+            model = m_phone.group(0).strip()
+
+    queries: List[str] = []
+
+    # Pen Drive / Storage Device cascade
+    cat_norm = category.replace(" ", "_")
+    if cat_norm in ('pen_drive', 'storage_device', 'flash_drive', 'pendrive') or 'storage' in category or 'pen_drive' in cat_norm or 'pen' in category or 'flash' in category:
+        if not model:
+            m_code = re.search(r'\b([a-z]\d{2,4}[a-z]?|[a-z]{2,4}\d{2,4}[a-z]?)\b', title, re.I)
+            if m_code:
+                model = m_code.group(1).lower()
+
+        cap = variant.get('storage') or variant.get('capacity') or product.get('storage') or product.get('capacity')
+        if not cap:
+            m_cap = re.search(r'\b(\d{1,4})\s*(gb|tb)\b', title, re.I)
+            if m_cap:
+                cap = f"{m_cap.group(1)}{m_cap.group(2).upper()}"
+
+        b_str = brand.strip()
+        m_str = model.strip()
+        c_str = str(cap).replace(" ", "").upper() if cap else ""
+
+        if b_str and m_str and c_str:
+            queries.append(f"{b_str} {m_str} {c_str} pen drive")
+            queries.append(f"{b_str} {m_str} {c_str} USB flash drive")
+            queries.append(f"{b_str} {m_str} {c_str}")
+            queries.append(f"{b_str} {m_str} pen drive")
+            queries.append(f"{b_str} {c_str} {m_str}")
+        elif b_str and m_str:
+            queries.append(f"{b_str} {m_str} pen drive")
+            queries.append(f"{b_str} {m_str} USB flash drive")
+            queries.append(f"{b_str} {m_str}")
+        elif b_str and c_str:
+            queries.append(f"{b_str} {c_str} pen drive")
+            queries.append(f"{b_str} {c_str} USB flash drive")
+        else:
+            queries.append(generate_search_query_from_product(product))
+
+    # Water Bottle / Flask cascade
+    elif cat_norm in ('water_bottle', 'bottle', 'flask') or 'bottle' in category or 'flask' in category:
+        t_low = title.lower()
+        m_mat = re.search(r'\b(stainless\s*steel|copper|glass|plastic|steel)\b', t_low)
+        mat = m_mat.group(0).title() if m_mat else (str(product.get('material', '')).title() if product.get('material') else "")
+        m_cap = re.search(r'(\d+(?:\.\d+)?)\s*(?:l|ltr|litres?|liters?|ml)\b', t_low)
+        cap = m_cap.group(0).upper() if m_cap else (str(product.get('capacity', '')).upper() if product.get('capacity') else "")
+
+        b_str = brand.strip()
+        m_str = model.strip()
+
+        if b_str and m_str and cap:
+            queries.append(f"{b_str} {m_str} {cap}")
+            queries.append(f"{b_str} {mat} water bottle {cap}".strip())
+            queries.append(f"{b_str} water bottle {cap}".strip())
+        elif b_str and mat and cap:
+            queries.append(f"{b_str} {mat} water bottle {cap}")
+            queries.append(f"{b_str} water bottle {cap}")
+            queries.append(f"{mat} water bottle {cap}")
+        elif b_str and cap:
+            queries.append(f"{b_str} water bottle {cap}")
+            queries.append(f"{b_str} water bottle")
+        elif b_str and mat:
+            queries.append(f"{b_str} {mat} water bottle")
+            queries.append(f"{b_str} water bottle")
+        elif mat and cap:
+            queries.append(f"{mat} water bottle {cap}")
+            queries.append(f"{mat} water bottle")
+        else:
+            queries.append(generate_search_query_from_product(product))
+
+    # Face Wash / Cleanser cascade
+    elif cat_norm in ('face_wash', 'facewash') or 'face_wash' in category or 'face wash' in category or 'facewash' in category:
+        t_low = title.lower()
+        b_str = brand.strip()
+        m_str = model.strip()
+        wt = product.get('weight') or variant.get('weight')
+        if not wt or str(wt) in ('Not Available', 'N/A'):
+            m_wt = re.search(r'(\d+(?:\.\d+)?\s*(?:g|gm|ml))\b', t_low)
+            wt = m_wt.group(0) if m_wt else ""
+        wt_str = str(wt).strip() if wt else ""
+
+        # Extract pack count if present
+        m_pk = re.search(r'\b(?:pack[\s-]*(?:of[\s-]*)?|pack-)(\d+)\b', t_low)
+        pk_num = m_pk.group(1) if m_pk else ""
+        pk_suffix = f" Pack {pk_num}" if pk_num else ""
+        pk_of_suffix = f" Pack of {pk_num}" if pk_num else ""
+
+        if b_str:
+            if 'acne star' in t_low or 'acnestar' in t_low:
+                if pk_num:
+                    queries.append(f"{b_str} Acne Star Facewash Anti Pigmentation Acne Clear Oil Control{pk_suffix}".strip())
+                    queries.append(f"{b_str} Acne Star Face Wash{pk_suffix}".strip())
+                    queries.append(f"{b_str} Acne Star Face Wash{pk_of_suffix}".strip())
+                    queries.append(f"{b_str} Face Wash{pk_suffix}".strip())
+                queries.append(f"{b_str} Acne Star Facewash Anti Pigmentation")
+                queries.append(f"{b_str} Acne Star Face Wash")
+                queries.append(f"{b_str} Face Wash")
+            elif 'hydrat' in t_low and 'beard' in t_low:
+                queries.append(f"{b_str} Hydrating Face & Beard Wash{pk_suffix}".strip())
+                queries.append(f"{b_str} Hydrating Face Wash{pk_suffix}".strip())
+                queries.append(f"{b_str} Face Beard Wash")
+                if 'acne' in t_low or 'tan' in t_low:
+                    queries.append(f"{b_str} Acne Tan Control Face Wash")
+                if wt_str:
+                    queries.append(f"{b_str} {wt_str} Face Wash")
+                queries.append(f"{b_str} Face Wash")
+            elif 'acne' in t_low or 'tan' in t_low:
+                queries.append(f"{b_str} Acne Tan Control Face Wash{pk_suffix}".strip())
+                queries.append(f"{b_str} Face Wash{pk_suffix}".strip())
+                queries.append(f"{b_str} Face Wash")
+            elif m_str:
+                queries.append(f"{b_str} {m_str} Face Wash{pk_suffix}".strip())
+                queries.append(f"{b_str} Face Wash")
+            else:
+                queries.append(f"{b_str} Face Wash{pk_suffix}".strip())
+                if wt_str:
+                    queries.append(f"{b_str} {wt_str} Face Wash")
+                queries.append(f"{b_str} Face Wash")
+        else:
+            queries.append(generate_search_query_from_product(product))
+
+    # Grocery / Dry Fruits / Cooking Oil cascade
+    elif cat_norm in ('grocery', 'food', 'dry_fruits', 'cooking_oil') or 'grocery' in category:
+        t_low = title.lower()
+        b_str = brand.strip()
+        ptype = extract_specific_product_type(title, category)
+        ptype_clean = ptype.replace('_', ' ').title() if ptype and ptype != 'other' else ""
+        wt = product.get('weight') or variant.get('weight')
+        if not wt or str(wt) in ('Not Available', 'N/A'):
+            m_wt = re.search(r'(\d+(?:\.\d+)?\s*(?:g|gm|kg|l|ltr|litre|ml))\b', t_low)
+            wt = m_wt.group(0) if m_wt else ""
+        wt_str = str(wt).strip() if wt else ""
+
+        if b_str and ptype_clean and wt_str:
+            queries.append(f"{b_str} Premium {ptype_clean} {wt_str}")
+            queries.append(f"{b_str} {ptype_clean} {wt_str}")
+            if 'roasted' in t_low and 'salted' in t_low:
+                queries.append(f"{b_str} Roasted & Salted {ptype_clean} {wt_str}")
+            queries.append(f"{b_str} {ptype_clean}")
+        elif b_str and ptype_clean:
+            queries.append(f"{b_str} {ptype_clean}")
+        elif b_str and wt_str:
+            queries.append(f"{b_str} {wt_str}")
+        else:
+            queries.append(generate_search_query_from_product(product))
+
+    # Phone / Tablet cascade
+    elif category in ('phone', 'mobile', 'smartphone', 'tablet'):
+        b_str = brand.strip()
+        m_str = model.strip()
+        if not m_str:
+            m_phone = re.search(r'\b(t\d+[a-z]?(?:\s*5g|\s*lite|\s*pro)?|v\d+[a-z]?(?:\s*5g|\s*pro)?|y\d+[a-z]?(?:\s*5g)?|galaxy\s*[a-z0-9]+|iphone\s*\d+[a-z\s]*|pixel\s*\d[a-z]?|nord\s*[a-z0-9\s]+|narzo\s*[a-z0-9\s]+|redmi\s*[a-z0-9\s]+)\b', title, re.I)
+            if m_phone:
+                m_str = m_phone.group(0).strip()
+
+        cap = variant.get('storage') or product.get('storage')
+        if not cap:
+            m_cap = re.search(r'\b(\d{2,4})\s*(gb)\b', title, re.I)
+            if m_cap:
+                cap = f"{m_cap.group(1)}{m_cap.group(2).upper()}"
+
+        if b_str and m_str and cap:
+            queries.append(f"{b_str} {m_str} {cap}")
+            queries.append(f"{m_str} {cap}")
+            queries.append(f"{b_str} {m_str}")
+            queries.append(f"{m_str}")
+        elif b_str and m_str:
+            queries.append(f"{b_str} {m_str}")
+            queries.append(f"{m_str}")
+        else:
+            base_q = generate_search_query_from_product(product)
+            queries.append(base_q)
+            words = base_q.split()
+            if len(words) > 3:
+                queries.append(" ".join(words[:3]))
+
+    # Clothing / Fashion cascade
+    elif cat_norm in ('fashion', 'clothing', 'shoes', 'footwear', 'bags') or category in ('fashion', 'clothing'):
+        clean_title = strip_marketing_words(title)
+        clean_title = re.sub(r'[\(\[\{][^\)\]\}]*[\)\]\}]?', '', clean_title)
+        clean_title = re.sub(r'[,/|\-]+', ' ', clean_title).strip()
+        tokens = [t for t in clean_title.split() if len(t) > 1 and not re.match(r'^(with|for|and|the|best|new|original)$', t, re.I)]
+        b_str = brand.strip() if brand and brand.lower() not in ('generic', 'women', 'men', 'kids', 'other') else ''
+        if b_str and len(tokens) >= 2:
+            queries.append(f"{b_str} {' '.join(tokens[:4])}".strip())
+        if len(tokens) >= 3:
+            queries.append(" ".join(tokens[:4]))
+            queries.append(" ".join(tokens[:3]))
+        if len(tokens) >= 2:
+            queries.append(" ".join(tokens[:2]))
+        queries.append(generate_search_query_from_product(product))
+
+    else:
+        # Standard cascade
+        base_q = generate_search_query_from_product(product)
+        queries.append(base_q)
+        if brand and model:
+            queries.append(f"{brand} {model}")
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_queries = []
+    for q in queries:
+        cleaned = q.strip()
+        if cleaned and cleaned.lower() not in seen:
+            seen.add(cleaned.lower())
+            unique_queries.append(cleaned)
+
+    return unique_queries or [generate_search_query_from_product(product)]
 
 
 def compute_weighted_match_score(
@@ -148,6 +477,53 @@ def compute_weighted_match_score(
 
     t_can = strip_marketing_words(normalize_title(canonical.get('title') or canonical.get('product_name') or ''))
     t_cand = strip_marketing_words(normalize_title(candidate.get('title') or candidate.get('product_name') or ''))
+
+    cat_can = (canonical.get('category') or canonical.get('product_type') or detect_category(title=t_can)).lower()
+    cat_cand = (candidate.get('category') or candidate.get('product_type') or detect_category(title=t_cand)).lower()
+
+    cat_can_norm = cat_can.lower().replace(" ", "_")
+
+    # Hard rejection: Animal / Pet Product vs Human Product
+    fam_can = get_category_family(cat_can)
+    fam_cand = get_category_family(cat_cand)
+    is_pet_target = fam_can == "pet" or cat_can == "pet_supplies"
+    has_cand_animal = bool(re.search(r'\b(pigs?|pigerry|swine|piglets?|boar|sow|fish\s*food|fish\s*feed|aquarium|pellet\s*fish|goldfish|royal\s*oscar|dog\s*food|cat\s*food|puppy|kitten|bird\s*food|animal\s*feed|cattle\s*feed|poultry\s*feed|veterinary|livestock|aquatic\s*feed)\b', t_cand.lower()))
+    if not is_pet_target and has_cand_animal:
+        return 0.0, "Not a Match", {"rejection": 0.0, "reason": "Animal/Pet product conflict"}
+
+    # Hard rejection: Incompatible Category Families
+    if fam_can != "other" and fam_cand != "other" and fam_can != fam_cand:
+        return 0.0, "Not a Match", {"rejection": 0.0, "reason": "Category family conflict"}
+
+    # Hard rejection: Specific Product Type Incompatibility
+    type_can = canonical.get('product_type') or extract_specific_product_type(t_can, cat_can)
+    type_cand = candidate.get('product_type') or extract_specific_product_type(t_cand, cat_cand)
+    if type_can and type_can != "other":
+        if type_cand and type_cand != "other" and type_cand != type_can:
+            return 0.0, "Not a Match", {"rejection": 0.0, "reason": "Product type mismatch"}
+
+    # Hard rejection: Brand Conflict
+    b_can_norm = normalize_brand(canonical.get('brand'))
+    b_cand_norm = normalize_brand(candidate.get('brand'))
+    if b_can_norm and b_can_norm.lower() not in ('generic', 'none', 'unknown', ''):
+        if b_cand_norm and b_cand_norm.lower() not in ('generic', 'none', 'unknown', ''):
+            if b_can_norm.lower() != b_cand_norm.lower() and b_can_norm.lower() not in b_cand_norm.lower() and b_cand_norm.lower() not in b_can_norm.lower():
+                return 0.0, "Not a Match", {"brand": 0.0, "rejection": 0.0, "reason": "Brand conflict"}
+        elif not re.search(r'\b' + re.escape(b_can_norm.lower()) + r'\b', t_cand.lower()):
+            m_can_chk = (canonical.get('model') or '').strip()
+            if not m_can_chk or m_can_chk.lower() not in t_cand.lower():
+                return 0.0, "Not a Match", {"brand": 0.0, "rejection": 0.0, "reason": "Brand missing from candidate"}
+
+    # Hard rejection of unrelated accessories/devices when comparing storage devices
+    if any(k in cat_can_norm for k in ('pen_drive', 'storage', 'flash_drive')) or 'pen drive' in t_can.lower():
+        if re.search(r'\b(printer|printers|cable|cables|hdmi|vga|aux|displayport|laptop|desktop|monitor|camera)\b', t_cand.lower()) and not re.search(r'\b(pen\s*drive|pendrive|usb\s*flash\s*drive|flash\s*drive|thumb\s*drive|usb\s*drive)\b', t_cand.lower()):
+            return 0.0, "Not a Match", {"brand": 0.0, "category": 0.0, "rejection": 0.0}
+
+    # Hard rejection of unrelated accessories when comparing water bottles
+    if any(k in cat_can_norm for k in ('water_bottle', 'bottle', 'flask')) or 'water bottle' in t_can.lower():
+        if re.search(r'\b(brush|cleaner|pouch|sleeve|cover|holder|stand|strap|stickers?)\b', t_cand.lower()):
+            if not re.search(r'\b(brush|cleaner|pouch|sleeve|cover|holder|stand|strap|stickers?)\b', t_can.lower()):
+                return 0.0, "Not a Match", {"brand": 0.0, "category": 0.0, "rejection": 0.0}
 
     # 1. Brand Score (20 pts)
     b_can = normalize_brand(canonical.get('brand'))
@@ -234,13 +610,20 @@ def compute_weighted_match_score(
     if (is_5g_can and is_4g_cand and not is_5g_cand) or (is_4g_can and is_5g_cand and not is_5g_can):
         has_variant_conflict = True
 
+    # Check bottle material (e.g. Stainless Steel vs Plastic)
+    if any(k in cat_can_norm for k in ('water_bottle', 'bottle', 'flask')) or 'water bottle' in t_can.lower():
+        is_metal_can = any(w in t_can.lower() for w in ('stainless steel', 'steel', 'copper', 'thermosteel')) or any(w in str(canonical.get('material', '')).lower() for w in ('stainless steel', 'steel', 'copper', 'thermosteel'))
+        is_plastic_cand = 'plastic' in t_cand.lower() or 'plastic' in str(candidate.get('material', '')).lower()
+        if is_metal_can and is_plastic_cand:
+            has_variant_conflict = True
+
     variant_score = 0.0 if has_variant_conflict else 15.0
     breakdown['variant'] = variant_score
 
     # 5. Weight / Capacity Score (10 pts)
     w_can = normalize_weight(canonical.get('weight') or v_can.get('weight') or t_can)
     w_cand = normalize_weight(candidate.get('weight') or v_cand.get('weight') or t_cand)
-    is_weight_sensitive = cat_can in ('soap', 'face_wash', 'grocery', 'food', 'beauty', 'skincare', 'shampoo')
+    is_weight_sensitive = cat_can in ('soap', 'face_wash', 'grocery', 'food', 'beauty', 'skincare', 'shampoo', 'water_bottle', 'bottle')
     has_weight_conflict = False
     if w_can and w_cand:
         if w_can == w_cand:
@@ -305,8 +688,7 @@ def compute_weighted_match_score(
 
     # Immediate disqualification on hard brand mismatch
     if breakdown['brand'] == 0.0 and b_can and b_cand:
-        total_score = min(total_score, 40.0)
-        return total_score, "Not a Match", breakdown
+        return 0.0, "Not a Match", breakdown
 
     # Immediate disqualification on hard model mismatch
     if breakdown['model'] == 0.0 and m_can and m_cand:
