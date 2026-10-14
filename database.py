@@ -2049,7 +2049,7 @@ def verify_otp_code(identifier: str, code: str, channel: str = "email", purpose:
         if current_attempts >= max_attempts:
             db.otp_verifications.delete_one({"_id": rec["_id"]})
             db.otp_codes.delete_one({"identifier": clean_id})
-            return False, "Maximum OTP attempts reached. Please request a new OTP."
+            return False, "Maximum OTP attempts exceeded. Please request a new OTP."
 
         # 3. Validate Hash / Code
         stored_hash = rec.get("otp_hash")
@@ -2062,11 +2062,11 @@ def verify_otp_code(identifier: str, code: str, channel: str = "email", purpose:
             if new_attempts >= max_attempts:
                 db.otp_verifications.delete_one({"_id": rec["_id"]})
                 db.otp_codes.delete_one({"identifier": clean_id})
-                return False, "Maximum OTP attempts reached. Please request a new OTP."
+                return False, "Maximum OTP attempts exceeded. Please request a new OTP."
             else:
                 db.otp_verifications.update_one({"_id": rec["_id"]}, {"$set": {"attempts": new_attempts}})
                 db.otp_codes.update_one({"identifier": clean_id}, {"$set": {"attempts": new_attempts}})
-                return False, "Invalid OTP. Please try again."
+                return False, "Invalid OTP"
 
         # 4. Verified Successfully
         db.otp_verifications.update_one(
@@ -2134,7 +2134,718 @@ def mark_user_verified(user_id_or_email: str, channel: str = "email") -> bool:
         return False
 
 
+# ════════════════════ GEC ECOM DIRECT STORE & CATALOG ════════════════════
+
+DEFAULT_GECECOM_PRODUCTS = [
+    {
+        "product_name": "Vivo T4 5G (8GB RAM, 128GB Storage, Titanium Gold)",
+        "current_price": 21999,
+        "original_price": 25000,
+        "rating": 4.4,
+        "reviews_count": 320,
+        "category": "mobiles",
+        "product_image": "https://m.media-amazon.com/images/I/71Y8rh450HL._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B0D1VIVOT4"
+    },
+    {
+        "product_name": "Apple iPhone 15 (128 GB) - Black",
+        "current_price": 65999,
+        "original_price": 79900,
+        "rating": 4.6,
+        "reviews_count": 1450,
+        "category": "mobiles",
+        "product_image": "https://m.media-amazon.com/images/I/71657TiFeHL._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B0CHX1W1XY"
+    },
+    {
+        "product_name": "Samsung Galaxy S24 5G (8GB RAM, 256GB Storage)",
+        "current_price": 69999,
+        "original_price": 79999,
+        "rating": 4.5,
+        "reviews_count": 890,
+        "category": "mobiles",
+        "product_image": "https://m.media-amazon.com/images/I/717Qo4MH97L._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B0CS5X6R2F"
+    },
+    {
+        "product_name": "OnePlus Nord CE4 5G (8GB RAM, 128GB Storage, Celadon Marble)",
+        "current_price": 24999,
+        "original_price": 27999,
+        "rating": 4.4,
+        "reviews_count": 1280,
+        "category": "mobiles",
+        "product_image": "https://m.media-amazon.com/images/I/61abLrCfF7L._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B0CX24J4P2"
+    },
+    {
+        "product_name": "boAt Rockerz 450 Bluetooth On Ear Headphones",
+        "current_price": 1499,
+        "original_price": 3990,
+        "rating": 4.2,
+        "reviews_count": 8520,
+        "category": "electronics",
+        "product_image": "https://m.media-amazon.com/images/I/51xxA+6E+xL._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B07PR1CL3S"
+    },
+    {
+        "product_name": "Sony WH-1000XM4 Wireless Industry Leading Noise Cancelling Headphones",
+        "current_price": 19990,
+        "original_price": 29990,
+        "rating": 4.6,
+        "reviews_count": 3210,
+        "category": "electronics",
+        "product_image": "https://m.media-amazon.com/images/I/71o8Or1FiVL._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B0863TXGM3"
+    },
+    {
+        "product_name": "Noise ColorFit Pulse Grand Smart Watch with 1.69 HD Display",
+        "current_price": 1299,
+        "original_price": 3999,
+        "rating": 4.1,
+        "reviews_count": 14200,
+        "category": "electronics",
+        "product_image": "https://m.media-amazon.com/images/I/61epn29QG0L._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B09NVPSCQT"
+    },
+    {
+        "product_name": "Safari Sawari 55cm Cabin Trolley Bag",
+        "current_price": 1899,
+        "original_price": 6499,
+        "rating": 4.3,
+        "reviews_count": 640,
+        "category": "bags",
+        "product_image": "https://m.media-amazon.com/images/I/61k1qV6W5oL._SL1200_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B0D5XYZSAF"
+    },
+    {
+        "product_name": "American Tourister Casual Backpack 32L (Navy Blue)",
+        "current_price": 1199,
+        "original_price": 2600,
+        "rating": 4.3,
+        "reviews_count": 4890,
+        "category": "bags",
+        "product_image": "https://m.media-amazon.com/images/I/81xU21w6HVL._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B07C64KC9Q"
+    },
+    {
+        "product_name": "Pigeon by Stovekraft 1.5L Electric Kettle",
+        "current_price": 549,
+        "original_price": 1245,
+        "rating": 4.1,
+        "reviews_count": 4200,
+        "category": "kitchen",
+        "product_image": "https://m.media-amazon.com/images/I/51Q1nAepVAL._SL1080_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B07WMS7TWB"
+    },
+    {
+        "product_name": "Philips Digital Air Fryer HD9252/90 4.1 Litre with Rapid Air Tech",
+        "current_price": 7499,
+        "original_price": 11995,
+        "rating": 4.5,
+        "reviews_count": 2100,
+        "category": "kitchen",
+        "product_image": "https://m.media-amazon.com/images/I/61k8wO52dML._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B08X4XZL3B"
+    },
+    {
+        "product_name": "HP 15s 12th Gen Intel Core i5 16GB RAM 512GB SSD 15.6-inch Laptop",
+        "current_price": 51990,
+        "original_price": 62000,
+        "rating": 4.3,
+        "reviews_count": 940,
+        "category": "electronics",
+        "product_image": "https://m.media-amazon.com/images/I/71CzbyK6XwL._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B0B5F4T7R3"
+    },
+    {
+        "product_name": "Puma Men Dazzler Sneaker Casual Shoes",
+        "current_price": 1699,
+        "original_price": 3999,
+        "rating": 4.2,
+        "reviews_count": 3150,
+        "category": "fashion",
+        "product_image": "https://m.media-amazon.com/images/I/71d5-X9Y3zL._SL1500_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B08XZP3M99"
+    },
+    {
+        "product_name": "Pilgrim Salicylic & Glycolic Acid Foaming Face Wash (120ml)",
+        "current_price": 319,
+        "original_price": 400,
+        "rating": 4.3,
+        "reviews_count": 5210,
+        "category": "grocery",
+        "product_image": "https://m.media-amazon.com/images/I/61rU1O6+LwL._SL1200_.jpg",
+        "amazon_url": "https://www.amazon.in/dp/B09JCG2F68"
+    }
+]
 
 
+def _format_gececom_product(doc: dict) -> dict:
+    if not doc:
+        return {}
+    res = format_doc(doc)
+    c_price = int(res.get("current_price", 0) or 0)
+    o_price = int(res.get("original_price", c_price) or c_price)
+    res["formatted_current_price"] = f"₹{c_price:,}"
+    res["formatted_original_price"] = f"₹{o_price:,}"
+    res["is_discounted"] = bool(o_price > c_price)
+    if o_price > c_price and o_price > 0:
+        res["discount_pct"] = int(round(((o_price - c_price) / o_price) * 100))
+    else:
+        res["discount_pct"] = 0
+    return res
 
 
+def get_all_gececom_products() -> list[dict]:
+    """Fetch all GEC ECom products from MongoDB. Auto-seed if empty."""
+    if db is None:
+        return [_format_gececom_product(p) for p in DEFAULT_GECECOM_PRODUCTS]
+
+    try:
+        count = db.gececom_products.count_documents({})
+        if count == 0:
+            seed_default_gececom_products()
+
+        docs = list(db.gececom_products.find().sort("created_at", DESCENDING))
+        return [_format_gececom_product(d) for d in docs]
+    except Exception as e:
+        logger.error(f"Error fetching GEC ECom products: {e}")
+        return [_format_gececom_product(p) for p in DEFAULT_GECECOM_PRODUCTS]
+
+
+def seed_default_gececom_products() -> bool:
+    """Populate default starter catalog in MongoDB."""
+    if db is None:
+        return False
+    try:
+        now = datetime.now(timezone.utc)
+        for item in DEFAULT_GECECOM_PRODUCTS:
+            doc = dict(item)
+            doc["created_at"] = now
+            doc["updated_at"] = now
+            db.gececom_products.update_one(
+                {"product_name": doc["product_name"]},
+                {"$setOnInsert": doc},
+                upsert=True
+            )
+        return True
+    except Exception as e:
+        logger.error(f"Error seeding GEC ECom products: {e}")
+        return False
+
+
+def get_gececom_product_by_id(product_id: str) -> dict | None:
+    """Get single GEC ECom product by ObjectId or string ID."""
+    if db is None or not product_id:
+        return None
+    try:
+        oid = to_object_id(product_id)
+        q = {"_id": oid} if oid else {"id": product_id}
+        doc = db.gececom_products.find_one(q)
+        return _format_gececom_product(doc) if doc else None
+    except Exception as e:
+        logger.error(f"Error getting GEC ECom product {product_id}: {e}")
+        return None
+
+
+def add_gececom_product(data: dict) -> dict | None:
+    """Add a new product to GEC ECom store catalog."""
+    if db is None or not data:
+        return None
+    try:
+        now = datetime.now(timezone.utc)
+        price = int(data.get("price") or data.get("current_price") or 0)
+        orig_price = int(data.get("original_price") or price)
+        doc = {
+            "product_name": str(data.get("name") or data.get("product_name", "")).strip(),
+            "current_price": price,
+            "original_price": orig_price,
+            "rating": float(data.get("rating", 4.3)),
+            "reviews_count": int(data.get("reviews_count", 120)),
+            "category": str(data.get("category", "mobiles")).lower().strip(),
+            "product_image": data.get("image") or data.get("product_image", ""),
+            "amazon_url": data.get("amazon_url", ""),
+            "created_at": now,
+            "updated_at": now
+        }
+        res = db.gececom_products.insert_one(doc)
+        doc["_id"] = res.inserted_id
+        return _format_gececom_product(doc)
+    except Exception as e:
+        logger.error(f"Error adding GEC ECom product: {e}")
+        return None
+
+
+def update_gececom_product_price(product_id: str, new_price: int) -> tuple[bool, dict | None]:
+    """Update current price of a GEC ECom product."""
+    if db is None or not product_id or new_price <= 0:
+        return False, None
+    try:
+        oid = to_object_id(product_id)
+        q = {"_id": oid} if oid else {"id": product_id}
+        now = datetime.now(timezone.utc)
+        res = db.gececom_products.update_one(
+            q,
+            {"$set": {"current_price": int(new_price), "updated_at": now}}
+        )
+        if res.modified_count > 0 or res.matched_count > 0:
+            doc = db.gececom_products.find_one(q)
+            return True, _format_gececom_product(doc)
+        return False, None
+    except Exception as e:
+        logger.error(f"Error updating price for {product_id}: {e}")
+        return False, None
+
+
+def delete_gececom_product(product_id: str) -> bool:
+    """Delete a product from GEC ECom store."""
+    if db is None or not product_id:
+        return False
+    try:
+        oid = to_object_id(product_id)
+        q = {"_id": oid} if oid else {"id": product_id}
+        res = db.gececom_products.delete_one(q)
+        return res.deleted_count > 0
+    except Exception as e:
+        logger.error(f"Error deleting product {product_id}: {e}")
+        return False
+
+
+def search_gececom_products(query: str) -> list[dict]:
+    """Search GEC ECom catalog matching title tokens."""
+    if not query:
+        return []
+    products = get_all_gececom_products()
+    q_tokens = [t.lower() for t in query.split() if len(t) > 1]
+    matched = []
+    for p in products:
+        title = (p.get("product_name") or "").lower()
+        score = sum(1 for t in q_tokens if t in title)
+        if score > 0 or query.lower() in title:
+            matched.append((score, p))
+    matched.sort(key=lambda x: x[0], reverse=True)
+    return [m[1] for m in matched]
+
+
+# ════════════════════ PRICE ALERT SYSTEM ════════════════════
+
+def create_price_alert(data: dict) -> tuple[bool, str, dict | None]:
+    """Register a new price drop alert for an item."""
+    if db is None or not data:
+        return False, "Database unavailable", None
+    try:
+        email = str(data.get("email", "")).strip().lower()
+        if not email or "@" not in email:
+            return False, "Invalid email address", None
+
+        current_price = int(data.get("current_price", 0) or 0)
+        target_price = int(data.get("target_price", 0) or 0)
+        target_pct = float(data.get("target_pct") or data.get("percent") or data.get("discount_pct") or 0)
+
+        # Compute target price from percentage if percentage provided
+        if target_price <= 0 and target_pct > 0 and current_price > 0:
+            target_price = max(1, int(round(current_price * (1.0 - target_pct / 100.0))))
+        elif target_price > 0 and current_price > 0 and target_pct <= 0:
+            target_pct = round(max(0.0, ((current_price - target_price) / current_price) * 100.0), 1)
+
+        if target_price <= 0:
+            return False, "Target price or percentage must be greater than 0", None
+
+        now = datetime.now(timezone.utc)
+        alert_doc = {
+            "email": email,
+            "product_name": str(data.get("product_name", "")).strip(),
+            "product_url": data.get("product_url", ""),
+            "platform": str(data.get("platform", "gececom")).lower().strip(),
+            "current_price": current_price,
+            "target_price": target_price,
+            "target_pct": target_pct,
+            "product_image": data.get("product_image", ""),
+            "status": "active",
+            "created_at": now,
+            "updated_at": now
+        }
+        res = db.price_alerts.insert_one(alert_doc)
+        alert_doc["_id"] = str(res.inserted_id)
+        alert_doc["id"] = str(res.inserted_id)
+
+        # 1. Dispatch Instant Confirmation Email
+        try:
+            from otp_utils import send_email
+            p_name = alert_doc["product_name"] or "Product"
+            c_p = f"₹{current_price:,}" if current_price else "Live"
+            t_p = f"₹{target_price:,}"
+            conf_sub = f"🔔 Price Alert Confirmed: Tracking '{p_name[:32]}' on SmartBuy"
+            conf_text = (
+                f"Hello,\n\n"
+                f"Your price alert for '{p_name}' has been successfully set!\n\n"
+                f"• Target Price: {t_p}\n"
+                f"• Baseline Price: {c_p}\n"
+                f"• Platform: {alert_doc['platform'].upper()}\n\n"
+                f"We are monitoring live prices 24/7 across Amazon, Flipkart, Meesho, and GEC ECom.\n"
+                f"You will receive an automated email notification as soon as the price drops to or below your target price!\n\n"
+                f"Happy Shopping,\nSmartBuy Intelligence Team"
+            )
+            conf_html = f"""
+            <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background: #ffffff;">
+                <div style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); padding: 22px; border-radius: 12px; color: #ffffff; text-align: center;">
+                    <h2 style="margin: 0; font-size: 22px;">🔔 Price Alert Activated</h2>
+                    <p style="margin: 6px 0 0 0; opacity: 0.9; font-size: 14px;">SmartBuy 24/7 Automated Price Monitor</p>
+                </div>
+                <div style="padding: 24px 8px;">
+                    <p style="color: #334155; font-size: 15px; margin-top: 0;">
+                        Hello! You are now tracking <strong>{p_name}</strong>. We'll automatically send you an email the instant the price drops.
+                    </p>
+                    <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 18px; margin: 18px 0;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                            <tr>
+                                <td style="color: #64748b; padding: 6px 0;">Product:</td>
+                                <td style="font-weight: 700; color: #0f172a; text-align: right;">{p_name[:45]}</td>
+                            </tr>
+                            <tr>
+                                <td style="color: #64748b; padding: 6px 0;">Baseline Price:</td>
+                                <td style="color: #475569; text-align: right;">{c_p}</td>
+                            </tr>
+                            <tr>
+                                <td style="color: #64748b; padding: 6px 0;">Target Alert Price:</td>
+                                <td style="font-weight: 800; color: #0284c7; text-align: right; font-size: 16px;">{t_p}</td>
+                            </tr>
+                            <tr>
+                                <td style="color: #64748b; padding: 6px 0;">Platform:</td>
+                                <td style="color: #0f172a; text-align: right; text-transform: uppercase; font-weight: 600;">{alert_doc['platform']}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <p style="color: #64748b; font-size: 13px; line-height: 1.5;">
+                        💡 <em>Tip: You can manage, test, or remove your alerts anytime from the <a href="http://127.0.0.1:5000/my-price-alerts" style="color:#0284c7; font-weight:600;">My Price Alerts</a> page.</em>
+                    </p>
+                </div>
+                <div style="border-top: 1px solid #f1f5f9; padding-top: 14px; font-size: 12px; color: #94a3b8; text-align: center;">
+                    SmartBuy Multi-Platform Price Comparison • Automated Notification
+                </div>
+            </div>
+            """
+            send_email(email, conf_sub, conf_text, conf_html)
+        except Exception as mail_err:
+            logger.warning(f"Failed to send alert registration confirmation email to {email}: {mail_err}")
+
+        # 2. If test trigger requested, dispatch price drop alert immediately
+        if data.get("test_trigger_now") or data.get("trigger_now"):
+            sim_drop = target_price if target_price > 0 else (current_price - 100 if current_price else 1)
+            trigger_single_price_alert(str(alert_doc["_id"]), simulated_price=sim_drop)
+
+        return True, "Price alert created and confirmation email dispatched!", alert_doc
+    except Exception as e:
+        logger.error(f"Error creating price alert: {e}")
+        return False, str(e), None
+
+
+def get_user_price_alerts(email: str = None) -> list[dict]:
+    """Retrieve all price alerts registered for an email (or all if email is None)."""
+    if db is None:
+        return []
+    try:
+        q = {"email": email.strip().lower()} if email else {}
+        docs = list(db.price_alerts.find(q).sort("created_at", DESCENDING))
+        return [format_doc(d) for d in docs]
+    except Exception as e:
+        logger.error(f"Error fetching alerts for {email}: {e}")
+        return []
+
+
+def delete_price_alert(alert_id: str) -> bool:
+    """Delete a price alert."""
+    if db is None or not alert_id:
+        return False
+    try:
+        oid = to_object_id(alert_id)
+        q = {"_id": oid} if oid else {"id": alert_id}
+        res = db.price_alerts.delete_one(q)
+        return res.deleted_count > 0
+    except Exception as e:
+        logger.error(f"Error deleting price alert {alert_id}: {e}")
+        return False
+
+
+def trigger_single_price_alert(alert_id: str, simulated_price: int = None) -> tuple[bool, str, dict | None]:
+    """
+    Forcefully trigger a specific price alert, dispatching a price drop email immediately.
+    Ideal for user testing, automated price scraping drops, and manual triggers.
+    """
+    if db is None or not alert_id:
+        return False, "Database unavailable", None
+    try:
+        oid = to_object_id(alert_id)
+        q = {"_id": oid} if oid else {"id": alert_id}
+        alert = db.price_alerts.find_one(q)
+        if not alert:
+            return False, "Price alert not found", None
+
+        to_email = alert.get("email")
+        t_price = int(alert.get("target_price") or 0)
+        c_price = int(alert.get("current_price") or t_price)
+        p_name = alert.get("product_name") or "Tracked Product"
+        p_url = alert.get("product_url") or "http://127.0.0.1:5000/gececom"
+        p_img = alert.get("product_image") or "https://placehold.co/240x240?text=Deal"
+        platform = (alert.get("platform") or "SmartBuy").upper()
+
+        drop_price = int(simulated_price) if simulated_price and int(simulated_price) > 0 else (t_price if t_price > 0 else max(1, c_price - 100))
+        drop_amount = max(0, c_price - drop_price) if c_price > drop_price else max(0, t_price - drop_price)
+        drop_pct = round(((c_price - drop_price) / c_price * 100.0), 1) if c_price > 0 and c_price > drop_price else float(alert.get("target_pct") or 10.0)
+        total_savings = drop_amount if drop_amount > 0 else max(100, t_price - drop_price)
+
+        from otp_utils import send_email
+        subject = f"🎯 PRICE DROP ALERT: '{p_name[:32]}' dropped by ₹{drop_amount:,} ({drop_pct}%) to ₹{drop_price:,}!"
+        body_text = (
+            f"Great news!\n\n"
+            f"The product you are tracking, '{p_name}', just dropped in price!\n\n"
+            f"• Original Baseline Price: ₹{c_price:,}\n"
+            f"• New Dropped Price: ₹{drop_price:,}\n"
+            f"• Total Price Drop: ₹{drop_amount:,} ({drop_pct}% DROP!)\n"
+            f"• Target Alert Threshold: ₹{t_price:,}\n"
+            f"• Platform: {platform}\n\n"
+            f"View Deal & Buy Now: {p_url}\n\n"
+            f"Best regards,\nSmartBuy Real-time Deal Watcher"
+        )
+        html_content = f"""
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; border: 1px solid #cbd5e1; border-radius: 16px; background: #ffffff;">
+            <div style="background: linear-gradient(135deg, #059669 0%, #047857 100%); padding: 24px; border-radius: 12px; color: #ffffff; text-align: center;">
+                <span style="background: rgba(255,255,255,0.2); padding: 4px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: uppercase;">
+                    Price Drop Detected
+                </span>
+                <h1 style="margin: 10px 0 0 0; font-size: 26px; font-weight: 800;">🎉 Price Dropped by ₹{drop_amount:,}!</h1>
+                <p style="margin: 6px 0 0 0; opacity: 0.95; font-size: 15px;">SmartBuy Automated Instant Notification</p>
+            </div>
+
+            <div style="padding: 24px 10px;">
+                <h2 style="color: #0f172a; margin: 0 0 16px 0; font-size: 19px; line-height: 1.4;">
+                    {p_name}
+                </h2>
+
+                <div style="background: #ecfdf5; border: 2px solid #10b981; padding: 22px; border-radius: 14px; margin: 20px 0; text-align: center;">
+                    <div style="display: inline-block; background: #dc2626; color: #ffffff; font-size: 13px; font-weight: 800; padding: 5px 16px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">
+                        🔥 HUGE PRICE DROP: -₹{drop_amount:,} (-{drop_pct}%)
+                    </div>
+                    
+                    <div style="font-size: 13px; color: #047857; font-weight: 700; text-transform: uppercase;">
+                        New Dropped Live Price
+                    </div>
+                    <div style="font-size: 38px; font-weight: 900; color: #065f46; margin: 4px 0 14px 0;">
+                        ₹{drop_price:,}
+                    </div>
+
+                    <!-- Breakdown Table Showing How Much Product Price Dropped -->
+                    <table style="width: 100%; max-width: 480px; margin: 0 auto; border-collapse: collapse; font-size: 14px; text-align: left; background: #ffffff; border-radius: 10px; overflow: hidden; border: 1px solid #d1fae5;">
+                        <tr style="border-bottom: 1px solid #f1f5f9;">
+                            <td style="padding: 10px 14px; color: #64748b;">Original Baseline Price:</td>
+                            <td style="padding: 10px 14px; font-weight: 700; color: #334155; text-align: right; text-decoration: line-through;">₹{c_price:,}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #f1f5f9; background: #f0fdf4;">
+                            <td style="padding: 10px 14px; color: #166534; font-weight: 700;">Exact Price Dropped:</td>
+                            <td style="padding: 10px 14px; font-weight: 900; color: #15803d; text-align: right; font-size: 16px;">-₹{drop_amount:,} (-{drop_pct}%)</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #f1f5f9;">
+                            <td style="padding: 10px 14px; color: #64748b;">Your Target Alert Threshold:</td>
+                            <td style="padding: 10px 14px; font-weight: 700; color: #0284c7; text-align: right;">₹{t_price:,}</td>
+                        </tr>
+                        <tr style="background: #ecfdf5;">
+                            <td style="padding: 10px 14px; color: #047857; font-weight: 800;">Total Money Saved:</td>
+                            <td style="padding: 10px 14px; font-weight: 900; color: #047857; text-align: right; font-size: 16px;">₹{total_savings:,}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 8px 14px; color: #64748b;">Store / Platform:</td>
+                            <td style="padding: 8px 14px; font-weight: 700; color: #0f172a; text-align: right; text-transform: uppercase;">{platform}</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <p style="color: #475569; font-size: 15px; line-height: 1.6;">
+                    The price of this tracked product has dropped by <strong>₹{drop_amount:,}</strong> (-{drop_pct}%), reaching your target alert threshold! Claim this deal before prices change or stocks run out.
+                </p>
+
+                <div style="text-align: center; margin: 30px 0 20px 0;">
+                    <a href="{p_url}" target="_blank" style="background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff; padding: 14px 36px; text-decoration: none; border-radius: 999px; font-weight: 800; font-size: 16px; display: inline-block; box-shadow: 0 4px 14px rgba(2, 132, 199, 0.4);">
+                        Claim Deal &amp; Buy Now &rarr;
+                    </a>
+                </div>
+            </div>
+
+            <div style="border-top: 1px solid #f1f5f9; padding-top: 14px; font-size: 12px; color: #94a3b8; text-align: center;">
+                Sent automatically by SmartBuy • Real-time Multi-platform Price Tracker
+            </div>
+        </div>
+        """
+
+        email_sent = send_email(to_email, subject, body_text, html_content)
+
+        # Update alert in DB
+        now = datetime.now(timezone.utc)
+        db.price_alerts.update_one(
+            q,
+            {"$set": {
+                "status": "triggered",
+                "triggered_at": now,
+                "triggered_price": drop_price,
+                "last_email_sent_at": now
+            }}
+        )
+
+        # Add SmartBuy inbox message if user exists
+        user = get_user_by_email(to_email)
+        if user:
+            u_id = str(user.get("id") or user.get("_id", ""))
+            try:
+                create_inbox_message(
+                    user_id=u_id,
+                    message_type="price_alert",
+                    title="Price Alert Reached! 🎉",
+                    message=f"'{p_name}' dropped to ₹{drop_price:,} (target: ₹{t_price:,}) on {platform}!"
+                )
+            except Exception:
+                pass
+
+        return True, f"Price drop alert triggered! Email sent to {to_email} (Success: {email_sent})", {
+            "email_sent": email_sent,
+            "to_email": to_email,
+            "triggered_price": drop_price
+        }
+    except Exception as e:
+        logger.error(f"Error in trigger_single_price_alert: {e}")
+        return False, str(e), None
+
+
+def check_and_trigger_price_alerts(product_name: str, new_price: int, platform: str = "gececom") -> dict:
+    """
+    Check if any active price alert matches this product and is triggered by new_price <= target_price.
+    Dispatches automated email and SmartBuy inbox notification.
+    """
+    if db is None or not product_name or new_price <= 0:
+        return {"checked": 0, "triggered": 0, "notifications_sent": 0}
+
+    from otp_utils import send_email
+
+    clean_name = product_name.strip()
+    # Find matching active alerts by regex or token match
+    tokens = [re.escape(t) for t in clean_name.split() if len(t) > 2]
+    regex_pattern = "|".join(tokens[:3]) if tokens else re.escape(clean_name)
+
+    query = {
+        "status": "active",
+        "product_name": {"$regex": regex_pattern, "$options": "i"},
+        "target_price": {"$gte": int(new_price)}
+    }
+
+    try:
+        matching_alerts = list(db.price_alerts.find(query))
+        triggered_count = 0
+        sent_count = 0
+        now = datetime.now(timezone.utc)
+
+        for alert in matching_alerts:
+            aid = alert["_id"]
+            to_email = alert.get("email")
+            t_price = int(alert.get("target_price") or 0)
+            c_price = int(alert.get("current_price") or t_price)
+            p_name = alert.get("product_name") or clean_name
+            p_url = alert.get("product_url") or f"/gececom"
+            drop_amount = max(0, c_price - int(new_price)) if c_price > int(new_price) else max(0, t_price - int(new_price))
+            drop_pct = round(((c_price - int(new_price)) / c_price * 100.0), 1) if c_price > 0 and c_price > int(new_price) else float(alert.get("target_pct") or 10.0)
+
+            # 1. Dispatch Email with exact drop amount
+            subject = f"🎯 PRICE DROP ALERT: '{p_name[:32]}' dropped by ₹{drop_amount:,} ({drop_pct}%) to ₹{new_price:,}!"
+            body_text = (
+                f"Great news!\n\n"
+                f"The product you are tracking, '{p_name}', just dropped in price!\n\n"
+                f"• Original Baseline Price: ₹{c_price:,}\n"
+                f"• New Dropped Price: ₹{new_price:,}\n"
+                f"• Total Price Dropped: ₹{drop_amount:,} ({drop_pct}% DROP!)\n"
+                f"• Your Target Price: ₹{t_price:,}\n\n"
+                f"Buy it now: {p_url}\n\n"
+                f"Happy Shopping,\nSmartBuy Real-time Deal Watcher"
+            )
+            html_content = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px; border: 1px solid #cbd5e1; border-radius: 16px; background: #ffffff;">
+                <div style="background: linear-gradient(135deg, #059669 0%, #047857 100%); padding: 22px; border-radius: 12px; color: #fff; text-align: center;">
+                    <span style="background: rgba(255,255,255,0.2); padding: 4px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: uppercase;">
+                        Price Drop Detected
+                    </span>
+                    <h2 style="margin: 8px 0 0 0; font-size: 24px; font-weight: 800;">🎉 Price Dropped by ₹{drop_amount:,}!</h2>
+                    <p style="margin: 4px 0 0 0; opacity: 0.9; font-size: 14px;">SmartBuy Instant Price Alert Notification</p>
+                </div>
+                <div style="padding: 20px 10px;">
+                    <h3 style="color: #0f172a; margin-top: 0; font-size: 18px;">{p_name}</h3>
+                    
+                    <div style="background: #ecfdf5; border: 2px solid #10b981; padding: 20px; border-radius: 12px; margin: 16px 0; text-align: center;">
+                        <div style="display: inline-block; background: #dc2626; color: #ffffff; font-size: 13px; font-weight: 800; padding: 4px 14px; border-radius: 999px; text-transform: uppercase; margin-bottom: 10px;">
+                            🔥 PRICE DROP: -₹{drop_amount:,} (-{drop_pct}%)
+                        </div>
+                        <div style="font-size: 13px; color: #047857; font-weight: 700; text-transform: uppercase;">New Live Dropped Price:</div>
+                        <div style="font-size: 34px; font-weight: 900; color: #065f46; margin: 4px 0 12px 0;">₹{new_price:,}</div>
+                        
+                        <table style="width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #d1fae5;">
+                            <tr style="border-bottom: 1px solid #f1f5f9;">
+                                <td style="padding: 8px 12px; color: #64748b;">Original Baseline:</td>
+                                <td style="padding: 8px 12px; font-weight: 700; text-decoration: line-through; text-align: right;">₹{c_price:,}</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #f1f5f9; background: #f0fdf4;">
+                                <td style="padding: 8px 12px; color: #166534; font-weight: 700;">Exact Drop Amount:</td>
+                                <td style="padding: 8px 12px; font-weight: 900; color: #15803d; text-align: right;">-₹{drop_amount:,} (-{drop_pct}%)</td>
+                            </tr>
+                            <tr style="border-bottom: 1px solid #f1f5f9;">
+                                <td style="padding: 8px 12px; color: #64748b;">Your Target:</td>
+                                <td style="padding: 8px 12px; font-weight: 700; color: #0284c7; text-align: right;">₹{t_price:,}</td>
+                            </tr>
+                            <tr style="background: #ecfdf5;">
+                                <td style="padding: 8px 12px; color: #047857; font-weight: 800;">Total Saved:</td>
+                                <td style="padding: 8px 12px; font-weight: 900; color: #047857; text-align: right;">₹{drop_amount:,}</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div style="text-align: center; margin: 25px 0 10px 0;">
+                        <a href="{p_url}" style="background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff; padding: 12px 32px; text-decoration: none; border-radius: 999px; font-weight: bold; font-size: 15px; display: inline-block;">
+                            Claim Deal Now &rarr;
+                        </a>
+                    </div>
+                </div>
+                <div style="border-top: 1px solid #f1f5f9; padding-top: 12px; font-size: 12px; color: #94a3b8; text-align: center;">
+                    Sent by SmartBuy & GEC ECom • Multi-Platform Price Comparison
+                </div>
+            </div>
+            """
+            try:
+                ok = send_email(to_email, subject, body_text, html_content)
+                if ok:
+                    sent_count += 1
+            except Exception as mail_err:
+                logger.error(f"Error sending price drop email to {to_email}: {mail_err}")
+
+            # 2. Add SmartBuy inbox message if user account exists
+            user = get_user_by_email(to_email)
+            if user:
+                u_id = str(user.get("id") or user.get("_id", ""))
+                try:
+                    create_inbox_message(
+                        user_id=u_id,
+                        message_type="price_alert",
+                        title="Price Alert Triggered! 🎉",
+                        message=f"'{p_name}' has dropped to ₹{new_price:,} (target: ₹{t_price:,})!"
+                    )
+                except Exception:
+                    pass
+
+            # 3. Mark alert as triggered
+            db.price_alerts.update_one(
+                {"_id": aid},
+                {"$set": {"status": "triggered", "triggered_at": now, "triggered_price": new_price}}
+            )
+            triggered_count += 1
+
+        return {
+            "checked": len(matching_alerts),
+            "triggered": triggered_count,
+            "notifications_sent": sent_count
+        }
+    except Exception as e:
+        logger.error(f"Error checking price alerts: {e}")
+        return {"checked": 0, "triggered": 0, "notifications_sent": 0, "error": str(e)}

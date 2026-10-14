@@ -8,6 +8,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         /* ── Sort Tabs ── */
         .sort-tabs {
@@ -131,6 +132,7 @@
         .bg-amazon  { background: linear-gradient(135deg, #232f3e, #ff9900) !important; }
         .bg-flipkart{ background: linear-gradient(135deg, #2874f0, #ffe500) !important; color: #111 !important; }
         .bg-meesho  { background: linear-gradient(135deg, #f43397, #bb1c6f) !important; }
+        .bg-gececom { background: linear-gradient(135deg, #0284c7, #0f766e) !important; color: #fff !important; }
         /* ── Specs box ── */
         .specs-badge {
             background: rgba(255,255,255,0.9);
@@ -335,7 +337,8 @@
                 {% else %}
                 <li class="nav-item"><a class="nav-link px-2 fw-semibold" href="/"><i class="fas fa-home me-1 text-primary"></i>Home</a></li>
                 <li class="nav-item"><a class="nav-link px-2 fw-semibold" href="/about"><i class="fas fa-info-circle me-1 text-secondary"></i>About</a></li>
-                <li class="nav-item"><a class="nav-link px-2 fw-semibold active" href="/search"><i class="fas fa-search me-1 text-success"></i>Search Products</a></li>
+                <li class="nav-item"><a class="nav-link px-2 fw-semibold text-warning" href="/my-price-alerts"><i class="fas fa-bell me-1"></i>Price Alerts</a></li>
+                <li class="nav-item"><a class="nav-link px-2 fw-semibold text-info" href="/gececom"><i class="fas fa-store me-1"></i>GEC ECom</a></li>
                 {% if current_user %}
                 <li class="nav-item"><a class="nav-link px-2 fw-semibold" href="/profile"><i class="fas fa-user-circle me-1 text-primary"></i>Profile</a></li>
                 {% endif %}
@@ -892,7 +895,7 @@
             <!-- View Tabs (Side-by-Side Platforms | Quality Comparison Table | Specification Table | All Product Cards) -->
             <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
                 <button class="view-tab-btn active" id="tabPlatform" onclick="switchView('platform')">
-                    <i class="fas fa-columns me-1"></i> Side-by-Side Platforms (Amazon | Flipkart | Meesho)
+                    <i class="fas fa-columns me-1"></i> Side-by-Side Platforms (Amazon | Flipkart | Meesho | GEC ECom)
                 </button>
                 <button class="view-tab-btn" id="tabQualityTable" onclick="switchView('qualityTable')">
                     <i class="fas fa-award me-1"></i> Quality Comparison Table
@@ -909,6 +912,77 @@
                     <span class="result-count-badge ms-1">{{ total }}</span>
                 </button>
             </div>
+
+            <!-- ════════════ 4-PLATFORM PRICE HISTORY & AI PREDICTION GRAPH ════════════ -->
+            {% if price_prediction %}
+            <div class="card border-0 shadow-sm glass-card mb-4 rounded-4 overflow-hidden" id="pricePredictionCard">
+                <div class="card-header text-white py-3 px-4 d-flex align-items-center justify-content-between flex-wrap gap-2"
+                    style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0369a1 100%) !important;">
+                    <div class="d-flex align-items-center gap-2.5">
+                        <div class="rounded-circle bg-info bg-opacity-20 text-info d-flex align-items-center justify-content-center" style="width: 40px; height: 40px;">
+                            <i class="fas fa-chart-line fs-5"></i>
+                        </div>
+                        <div>
+                            <h5 class="mb-0 fw-bold d-flex align-items-center gap-2">
+                                4-STORE PRICE COMPARISON &amp; AI PRICE PREDICTION GRAPH
+                                <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-50 px-2 py-0.5 rounded-pill" style="font-size:0.75rem;">
+                                    <i class="fas fa-bolt me-1"></i>Live ML Model
+                                </span>
+                            </h5>
+                            <small class="text-white-50">Compare historical curves across Amazon, Flipkart, Meesho &amp; GEC ECom + 60-Day Predictive Trend Forecast</small>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-{{ price_prediction.recommendation_badge }} px-3 py-2 rounded-pill fw-bold" style="font-size: 0.88rem;">
+                            <i class="fas {{ price_prediction.recommendation_icon }} me-1"></i>{{ price_prediction.recommendation }}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- AI Recommendation & Key Stats Strip -->
+                <div class="p-3 bg-light border-bottom d-flex align-items-center justify-content-between flex-wrap gap-3">
+                    <div class="d-flex align-items-center gap-3 flex-wrap">
+                        <div class="d-flex align-items-center gap-1.5">
+                            <span class="small text-muted fw-bold text-uppercase">Lowest Store:</span>
+                            <span class="badge bg-success text-white px-2.5 py-1 rounded-pill fw-bold">
+                                <i class="fas fa-tag me-1"></i>{{ price_prediction.cheapest_platform }} ({{ price_prediction.formatted_cheapest_price }})
+                            </span>
+                        </div>
+                        {% if price_prediction.expected_savings > 0 %}
+                        <div class="d-flex align-items-center gap-1.5">
+                            <span class="small text-muted fw-bold text-uppercase">Predicted Drop:</span>
+                            <span class="badge bg-primary text-white px-2.5 py-1 rounded-pill fw-bold">
+                                <i class="fas fa-arrow-down me-1"></i>-{{ price_prediction.formatted_expected_savings }} (-{{ price_prediction.expected_savings_pct }}%)
+                            </span>
+                        </div>
+                        {% endif %}
+                        <div class="d-flex align-items-center gap-1.5">
+                            <span class="small text-muted fw-bold text-uppercase">AI Confidence:</span>
+                            <span class="badge bg-secondary-subtle text-dark px-2.5 py-1 rounded-pill fw-bold">
+                                <i class="fas fa-circle-check text-success me-1"></i>{{ price_prediction.confidence_score }}%
+                            </span>
+                        </div>
+                    </div>
+                    <div class="small fw-semibold text-dark">
+                        <i class="fas fa-lightbulb text-warning me-1"></i>{{ price_prediction.recommendation_reason }}
+                    </div>
+                </div>
+
+                <!-- Chart Canvas Container -->
+                <div class="card-body p-4 bg-white position-relative">
+                    <div style="height: 330px; width: 100%;">
+                        <canvas id="multiPlatformPriceChart"></canvas>
+                    </div>
+                    <div class="d-flex align-items-center justify-content-center gap-4 mt-3 flex-wrap small text-muted">
+                        <span><span class="d-inline-block rounded-circle me-1" style="width:10px; height:10px; background:#ff9900;"></span>Amazon</span>
+                        <span><span class="d-inline-block rounded-circle me-1" style="width:10px; height:10px; background:#2874f0;"></span>Flipkart</span>
+                        <span><span class="d-inline-block rounded-circle me-1" style="width:10px; height:10px; background:#e11d48;"></span>Meesho</span>
+                        <span><span class="d-inline-block rounded-circle me-1" style="width:10px; height:10px; background:#0284c7;"></span>GEC ECom</span>
+                        <span class="text-secondary"><i class="fas fa-circle-notch fa-spin me-1 text-primary"></i>Dashed Line = Machine Learning Forecast Horizon</span>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
 
             <!-- ════════════ PRODUCT SPECIFICATION COMPARISON TABLE ════════════ -->
             {% if specifications_matrix %}
@@ -953,21 +1027,32 @@
                             <i class="{{ mee_stat.icon or 'fas fa-minus-circle' }} me-1"></i>{{ mee_stat.label or (mee_stat.status if mee_stat else 'Unavailable') }}
                         </span>
                     </div>
+
+                    {% set gec_stat = marketplace_status.get('GEC ECom', {}) if marketplace_status else {} %}
+                    <div class="d-flex align-items-center gap-1">
+                        <span class="badge bg-gececom text-white px-2 py-1 rounded-pill small">GEC ECom:</span>
+                        <span class="badge {{ gec_stat.badge_class or 'bg-success text-white' }} px-2 py-1 rounded-pill small">
+                            <i class="{{ gec_stat.icon or 'fas fa-check-circle' }} me-1"></i>{{ gec_stat.label or (gec_stat.status if gec_stat else 'Found') }}
+                        </span>
+                    </div>
                 </div>
 
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0 text-center" style="font-size: 0.88rem;">
                         <thead class="table-light">
                             <tr>
-                                <th style="width: 25%; text-align: left; padding-left: 20px;">Specification</th>
-                                <th style="width: 25%;">
+                                <th style="width: 20%; text-align: left; padding-left: 20px;">Specification</th>
+                                <th style="width: 20%;">
                                     <span class="badge bg-amazon text-white px-3 py-1 rounded-pill">Amazon</span>
                                 </th>
-                                <th style="width: 25%;">
+                                <th style="width: 20%;">
                                     <span class="badge bg-flipkart text-dark px-3 py-1 rounded-pill">Flipkart</span>
                                 </th>
-                                <th style="width: 25%;">
+                                <th style="width: 20%;">
                                     <span class="badge bg-meesho text-white px-3 py-1 rounded-pill">Meesho</span>
+                                </th>
+                                <th style="width: 20%;">
+                                    <span class="badge bg-gececom text-white px-3 py-1 rounded-pill">GEC ECom</span>
                                 </th>
                             </tr>
                         </thead>
@@ -976,6 +1061,7 @@
                             {% set amz_item = comparison_data.amazon or comparison_data.Amazon or (best_per_platform.get('Amazon') if best_per_platform else None) or (platform_results.Amazon[0] if (platform_results and platform_results.get('Amazon')) else None) %}
                             {% set fk_item = comparison_data.flipkart or comparison_data.Flipkart or (best_per_platform.get('Flipkart') if best_per_platform else None) or (platform_results.Flipkart[0] if (platform_results and platform_results.get('Flipkart')) else None) %}
                             {% set mee_item = comparison_data.meesho or comparison_data.Meesho or (best_per_platform.get('Meesho') if best_per_platform else None) or (platform_results.Meesho[0] if (platform_results and platform_results.get('Meesho')) else None) %}
+                            {% set gec_item = comparison_data.gececom or comparison_data.GEC_ECom or (best_per_platform.get('GEC ECom') if best_per_platform else None) or (platform_results['GEC ECom'][0] if (platform_results and platform_results.get('GEC ECom')) else None) %}
 
                             <!-- Product Preview Image Row -->
                             <tr class="table-light">
@@ -1007,6 +1093,15 @@
                                     <span class="text-muted">—</span>
                                     {% endif %}
                                 </td>
+                                <td>
+                                    {% set gec_img = gec_item.image if (gec_item and gec_item.image) else (gec_item.image_url if (gec_item and gec_item.image_url) else None) %}
+                                    {% if gec_img and gec_img|length >= 10 and not ('placeholder' in gec_img|lower or 'no_image' in gec_img|lower) %}
+                                    <img src="{{ gec_img }}" alt="GEC ECom Product" style="height: 70px; max-width: 100px; object-fit: contain; border-radius: 6px; background:#fff; padding: 2px;" referrerpolicy="no-referrer" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='inline';">
+                                    <span style="display:none;" class="text-muted">—</span>
+                                    {% else %}
+                                    <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
                             </tr>
 
                             <!-- Categorized Specification Rows with Distinct Preference Dividers -->
@@ -1023,11 +1118,13 @@
                                 {% set amz_val = row.amazon %}
                                 {% set fk_val = row.flipkart %}
                                 {% set mee_val = row.meesho %}
+                                {% set gec_val = row.gececom %}
                                 {% set has_amz = amz_val and amz_val not in is_inv and not ('temporarily unavailable' in amz_val|string|lower or 'scraping unavailable' in amz_val|string|lower or 'no matching product' in amz_val|string|lower) %}
                                 {% set has_fk = fk_val and fk_val not in is_inv and not ('temporarily unavailable' in fk_val|string|lower or 'scraping unavailable' in fk_val|string|lower or 'no matching product' in fk_val|string|lower) %}
                                 {% set has_mee = mee_val and mee_val not in is_inv and not ('temporarily unavailable' in mee_val|string|lower or 'scraping unavailable' in mee_val|string|lower or 'no matching product' in mee_val|string|lower) %}
+                                {% set has_gec = gec_val and gec_val not in is_inv and not ('temporarily unavailable' in gec_val|string|lower or 'scraping unavailable' in gec_val|string|lower or 'no matching product' in gec_val|string|lower) %}
 
-                                {% if (has_amz or has_fk or has_mee) and r_name not in ('Buy Link', 'link', 'url', 'product_url') %}
+                                {% if (has_amz or has_fk or has_mee or has_gec) and r_name not in ('Buy Link', 'link', 'url', 'product_url') %}
 
                                     {# Render Section 1: Quality of Product (First Preference) Header #}
                                     {% if r_name in quality_field_names and not ns.shown_quality_hdr %}
@@ -1076,6 +1173,9 @@
                                         </td>
                                         <td class="{% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform == 'Meesho' %}fw-bold text-success bg-success bg-opacity-10{% elif r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">
                                             {{ mee_val if has_mee else '—' }}
+                                        </td>
+                                        <td class="{% if r_name == 'Price' and comparison_data.get('best_deal') and comparison_data.best_deal.platform in ('GEC ECom', 'gececom') %}fw-bold text-success bg-success bg-opacity-10{% elif r_name == 'Quality Score' %}fw-bold text-primary{% endif %}">
+                                            {{ gec_val if has_gec else '—' }}
                                         </td>
                                     </tr>
                                 {% endif %}
@@ -1218,23 +1318,25 @@
 
             <!-- ════ 1. SIDE-BY-SIDE PLATFORMS VIEW (DEFAULT PRIMARY VIEW) ════ -->
             <div id="viewPlatform">
-                {% set has_results = (platform_results.get('Amazon',[])|length > 0) or (platform_results.get('Flipkart',[])|length > 0) or (platform_results.get('Meesho',[])|length > 0) %}
+                {% set has_results = (platform_results.get('Amazon',[])|length > 0) or (platform_results.get('Flipkart',[])|length > 0) or (platform_results.get('Meesho',[])|length > 0) or (platform_results.get('GEC ECom',[])|length > 0) %}
 
                 {% if has_results %}
                 <div class="row g-3 comparison-grid">
                     {% for platform, items in platform_results.items() %}
-                    <div class="col-lg-4 col-md-6">
+                    <div class="col-xl-3 col-lg-4 col-md-6">
                         <div class="card border-0 shadow-sm h-100 glass-card platform-column-card" style="border-radius:16px;">
                             <!-- Platform Vertical Header -->
                             <div class="card-header border-0 text-white text-center py-3 d-flex align-items-center justify-content-center
-                                {% if platform == 'Amazon' %}bg-amazon{% elif platform == 'Flipkart' %}bg-flipkart{% else %}bg-meesho{% endif %}"
+                                {% if platform == 'Amazon' %}bg-amazon{% elif platform == 'Flipkart' %}bg-flipkart{% elif platform == 'Meesho' %}bg-meesho{% else %}bg-gececom{% endif %}"
                                 style="border-radius: 16px 16px 0 0;">
                                 {% if platform == 'Amazon' %}
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/a/a9/Amazon_logo.svg" alt="Amazon" style="height:20px; filter:brightness(0) invert(1); margin-right:8px;">
                                 {% elif platform == 'Flipkart' %}
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/7/7a/Flipkart_logo.svg" alt="Flipkart" style="height:20px; margin-right:8px;">
-                                {% else %}
+                                {% elif platform == 'Meesho' %}
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/8/80/Meesho_Logo_Logo.svg" alt="Meesho" style="height:20px; filter:brightness(0) invert(1); margin-right:8px;">
+                                {% else %}
+                                <i class="fas fa-bag-shopping text-warning me-2 fs-5"></i>
                                 {% endif %}
                                 <span class="fw-bold fs-6">{{ platform }}</span>
                                 {% set p_stat_header = platform_status.get(platform, {}).get('status', 'unavailable') if platform_status else 'unavailable' %}
@@ -1463,6 +1565,19 @@
                                             data-specs='{{ item.specs | tojson if item.specs else "{}" }}'
                                             data-points='{{ (item.quality_points or []) | tojson }}'>
                                         <i class="fas fa-balance-scale me-1.5"></i><span>Add to Compare</span>
+                                    </button>
+
+                                    <!-- Set Price Alert -->
+                                    <button type="button"
+                                            class="btn btn-outline-warning btn-sm w-100 mt-1.5 rounded-pill py-1.5 fw-bold d-flex align-items-center justify-content-center text-dark shadow-xs"
+                                            style="font-size: 0.78rem; border-color: #f59e0b; background: #fffbeb;"
+                                            data-product-name="{{ item.title }}"
+                                            data-product-image="{{ item.image or item.image_url }}"
+                                            data-platform="{{ platform }}"
+                                            data-current-price="{{ item.price_num or item.price }}"
+                                            data-product-url="{{ item.link or item.product_url or item.url }}"
+                                            onclick="openPriceAlertModal(this)">
+                                        <i class="fas fa-bell text-warning me-1.5"></i><span>Set Price Alert</span>
                                     </button>
                                 </div>
                                 {% endfor %}
@@ -2149,6 +2264,19 @@
                                 style="font-size: 0.72rem;">
                             <i class="fas fa-balance-scale me-1"></i><span>Add to Compare</span>
                         </button>
+
+                        <!-- Set Price Alert -->
+                        <button type="button"
+                                class="btn btn-outline-warning btn-sm w-100 mt-1.5 rounded-pill py-1 fw-bold d-flex align-items-center justify-content-center text-dark shadow-xs"
+                                style="font-size: 0.74rem; border-color: #f59e0b; background: #fffbeb;"
+                                data-product-name="{{ item.title }}"
+                                data-product-image="{{ item.image or item.image_url }}"
+                                data-platform="{{ item.platform }}"
+                                data-current-price="{{ item.price_num or item.price }}"
+                                data-product-url="{{ item.link or item.product_url or item.url }}"
+                                onclick="openPriceAlertModal(this)">
+                            <i class="fas fa-bell text-warning me-1"></i><span>Set Price Alert</span>
+                        </button>
                     </div>
                     {% endfor %}
                     {% else %}
@@ -2742,8 +2870,462 @@ function updateThemeIcon(isDark) {
         </div>
     </div>
 
+    <!-- ════════════════════════════════════════════════════════════════
+         UNIVERSAL PRICE ALERT MODAL (SMARTBUY 4-STORE DEALS)
+         ════════════════════════════════════════════════════════════════ -->
+    <div class="modal fade" id="priceAlertModal" tabindex="-1" aria-labelledby="priceAlertModalLabel" aria-hidden="true" style="z-index: 1070;">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden">
+                <div class="modal-header bg-dark text-white py-3 px-4 d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="fas fa-bell text-warning fs-5"></i>
+                        <div>
+                            <h5 class="modal-title fw-bold mb-0" id="priceAlertModalLabel">Set Price Drop Alert</h5>
+                            <small class="text-white-50" style="font-size: 0.75rem;">Get notified instantly via email when price drops</small>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4 bg-light">
+                    <!-- Product Info preview -->
+                    <div class="d-flex gap-3 align-items-center bg-white p-3 rounded-3 border mb-3">
+                        <img id="paModalImg" src="https://placehold.co/80x80" alt="Product" style="width: 70px; height: 70px; object-fit: contain; border-radius: 8px;">
+                        <div class="overflow-hidden">
+                            <span id="paModalPlatform" class="badge bg-primary px-2 py-0.5 text-uppercase fw-bold mb-1" style="font-size: 0.7rem;">STORE</span>
+                            <h6 id="paModalTitle" class="fw-bold text-dark text-truncate mb-1" style="font-size: 0.92rem;">Product Title</h6>
+                            <div class="small text-muted">Current Price: <span id="paModalCurPrice" class="fw-bold text-dark fs-6">₹0</span></div>
+                        </div>
+                    </div>
+
+                    <form id="priceAlertForm" onsubmit="event.preventDefault(); submitPriceAlertModal();">
+                        <input type="hidden" id="paHiddenName">
+                        <input type="hidden" id="paHiddenUrl">
+                        <input type="hidden" id="paHiddenImg">
+                        <input type="hidden" id="paHiddenPlatform">
+                        <input type="hidden" id="paHiddenCurPrice">
+
+                        <!-- ════ Alert Mode Selector: Percent Drop vs Exact Price ════ -->
+                        <div class="mb-3">
+                            <label class="form-label fw-bold small text-muted text-uppercase mb-1.5 d-flex align-items-center justify-content-between">
+                                <span><i class="fas fa-sliders-h text-primary me-1"></i>Select Alert Option:</span>
+                                <span class="badge bg-primary bg-opacity-10 text-primary fw-bold" id="paSelectedOptionBadge">Any % Drop Mode</span>
+                            </label>
+                            <div class="btn-group w-100 p-1 bg-white border rounded-pill shadow-xs" role="group">
+                                <button type="button" class="btn btn-sm rounded-pill fw-bold btn-primary" id="paTabBtnPct" onclick="switchPaMode('percent')">
+                                    <i class="fas fa-percent me-1"></i>Any % Drop
+                                </button>
+                                <button type="button" class="btn btn-sm rounded-pill fw-bold btn-light text-muted" id="paTabBtnPrice" onclick="switchPaMode('price')">
+                                    <i class="fas fa-tag me-1"></i>Exact Target Price (₹)
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- ══ Option A: Enter Any Percentage Drop (%) ══ -->
+                        <div id="paSectionPct" class="card border-0 rounded-3 shadow-xs p-3 mb-3 bg-white border">
+                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                <label class="form-label fw-bold small text-dark text-uppercase mb-0">
+                                    <i class="fas fa-percent text-primary me-1"></i>Enter Any Percentage Drop (%)
+                                </label>
+                                <span class="badge bg-primary text-white fw-bold px-2 py-1" id="paPctBadge">10% OFF</span>
+                            </div>
+                            
+                            <div class="input-group mb-2">
+                                <input type="number" id="paInputPct" class="form-control form-control-lg fw-extrabold text-primary"
+                                    placeholder="Enter ANY % (e.g. 5, 8, 12, 18, 25, 33)" min="1" max="95" step="0.5" value="10"
+                                    oninput="onPaPctInput(this.value)">
+                                <span class="input-group-text bg-light fw-bold text-primary fs-5">% DROP</span>
+                            </div>
+
+                            <!-- Quick preset pills -->
+                            <div class="d-flex gap-1.5 flex-wrap align-items-center mb-2">
+                                <span class="small text-muted me-1" style="font-size:0.75rem;">Quick Presets:</span>
+                                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(5)">5%</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(10)">10%</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(15)">15%</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(20)">20%</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(25)">25%</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(30)">30%</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(40)">40%</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(50)">50%</button>
+                            </div>
+
+                            <!-- Live calculation breakdown -->
+                            <div class="p-2.5 rounded-3 bg-light border">
+                                <div class="d-flex justify-content-between align-items-center small text-muted">
+                                    <span>Current: <strong class="text-dark" id="paCalcCurrent">₹0</strong></span>
+                                    <span>Discount: <strong class="text-danger" id="paCalcDropAmount">-₹0</strong></span>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-1 pt-1 border-top">
+                                    <span class="small fw-bold text-dark">🎯 Target Trigger Price:</span>
+                                    <span class="fs-6 fw-extrabold text-success" id="paCalcTargetPrice">₹0</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ══ Option B: Exact Target Price in Rupees (₹) ══ -->
+                        <div id="paSectionPrice" class="card border-0 rounded-3 shadow-xs p-3 mb-3 bg-white border">
+                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                <label class="form-label fw-bold small text-dark text-uppercase mb-0">
+                                    <i class="fas fa-tag text-success me-1"></i>Exact Target Price (₹) *
+                                </label>
+                                <small class="text-success fw-bold" id="paSavingsBadge" style="font-size: 0.8rem;">You Save: ₹0</small>
+                            </div>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light fw-bold text-success fs-5">₹</span>
+                                <input type="number" id="paInputTarget" class="form-control form-control-lg rounded-end fw-extrabold text-success"
+                                    placeholder="e.g. 19999" required oninput="onPaTargetPriceInput(this.value)">
+                            </div>
+                            <div class="d-flex align-items-center justify-content-between mt-1">
+                                <small class="text-muted" style="font-size: 0.76rem;">Alert triggers when product price drops to or below this amount.</small>
+                                <small class="fw-bold text-primary" id="paLiveDiffText" style="font-size: 0.76rem;"></small>
+                            </div>
+                        </div>
+
+                        {% if current_user %}
+                        <div class="mb-3">
+                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                <label class="form-label fw-bold small text-muted text-uppercase mb-0">Notification Email</label>
+                                <span class="badge bg-success bg-opacity-10 text-success fw-bold" style="font-size: 0.72rem;">
+                                    <i class="fas fa-check-circle me-1"></i>Verified Account
+                                </span>
+                            </div>
+                            <input type="email" id="paInputEmail" class="form-control rounded-3 bg-light fw-semibold" value="{{ current_user.email }}" readonly required>
+                            <small class="text-muted" style="font-size: 0.74rem;">Alert will be registered to your authenticated account and notifications sent here.</small>
+                        </div>
+
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="paTestTriggerToggle" checked>
+                            <label class="form-check-label small fw-semibold" for="paTestTriggerToggle">
+                                ⚡ Send test email notification immediately to verify
+                            </label>
+                        </div>
+
+                        <div id="paModalStatusAlert" class="alert d-none py-2.5 px-3 small rounded-3 mb-3"></div>
+
+                        <button type="submit" id="paModalBtn" class="btn btn-primary w-100 rounded-pill py-2.5 fw-bold shadow-sm">
+                            <i class="fas fa-bell me-1"></i>Activate Price Alert &amp; View in Dashboard
+                        </button>
+                        {% else %}
+                        <div class="alert alert-warning border-0 rounded-3 p-3 mb-3 shadow-xs">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <i class="fas fa-lock text-warning fs-5"></i>
+                                <div class="fw-bold text-dark">Sign In Required to Set Price Alerts</div>
+                            </div>
+                            <p class="small text-muted mb-2.5" style="font-size: 0.82rem;">
+                                You need to be logged into your SmartBuy account to set up custom percentage price alerts and manage them in your dashboard.
+                            </p>
+                            <a href="/signin?next={{ request.full_path|urlencode }}" class="btn btn-warning btn-sm w-100 fw-bold rounded-pill py-2">
+                                <i class="fas fa-sign-in-alt me-1"></i>Sign In to Activate Price Alert
+                            </a>
+                        </div>
+                        <input type="hidden" id="paInputEmail" value="">
+                        <input type="hidden" id="paTestTriggerToggle" value="0">
+                        <div id="paModalStatusAlert" class="alert d-none py-2.5 px-3 small rounded-3 mb-3"></div>
+                        <a href="/signin?next={{ request.full_path|urlencode }}" class="btn btn-outline-primary w-100 rounded-pill py-2.5 fw-bold">
+                            <i class="fas fa-sign-in-alt me-1"></i>Sign In to SmartBuy
+                        </a>
+                        {% endif %}
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='js/url_search.js') }}"></script>
     <script src="{{ url_for('static', filename='js/product_compare.js') }}"></script>
+    <script>
+    // ════════════ 4-PLATFORM PRICE CHART INITIALIZATION ════════════
+    document.addEventListener("DOMContentLoaded", function() {
+        const rawData = {{ price_prediction_json | safe if price_prediction_json else 'null' }};
+        const canvas = document.getElementById('multiPlatformPriceChart');
+        if (!rawData || !canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const labels = rawData.labels;
+        const series = rawData.series;
+
+        const datasets = [
+            {
+                label: 'Amazon',
+                data: series['Amazon'],
+                borderColor: '#ff9900',
+                backgroundColor: 'rgba(255, 153, 0, 0.08)',
+                borderWidth: 2.5,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                tension: 0.35,
+                segment: {
+                    borderDash: ctx => ctx.p0DataIndex >= 5 ? [6, 6] : undefined
+                }
+            },
+            {
+                label: 'Flipkart',
+                data: series['Flipkart'],
+                borderColor: '#2874f0',
+                backgroundColor: 'rgba(40, 116, 240, 0.08)',
+                borderWidth: 2.5,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                tension: 0.35,
+                segment: {
+                    borderDash: ctx => ctx.p0DataIndex >= 5 ? [6, 6] : undefined
+                }
+            },
+            {
+                label: 'Meesho',
+                data: series['Meesho'],
+                borderColor: '#e11d48',
+                backgroundColor: 'rgba(225, 29, 72, 0.08)',
+                borderWidth: 2.5,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+                tension: 0.35,
+                segment: {
+                    borderDash: ctx => ctx.p0DataIndex >= 5 ? [6, 6] : undefined
+                }
+            },
+            {
+                label: 'GEC ECom',
+                data: series['GEC ECom'],
+                borderColor: '#0284c7',
+                backgroundColor: 'rgba(2, 132, 199, 0.12)',
+                borderWidth: 3.2,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                pointBackgroundColor: '#0284c7',
+                tension: 0.35,
+                segment: {
+                    borderDash: ctx => ctx.p0DataIndex >= 5 ? [6, 6] : undefined
+                }
+            }
+        ];
+
+        new Chart(ctx, {
+            type: 'line',
+            data: { labels: labels, datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: {
+                            usePointStyle: true,
+                            font: { family: "'Inter', sans-serif", weight: '600', size: 12 }
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) label += ': ';
+                                if (context.parsed.y !== null) {
+                                    label += '₹' + context.parsed.y.toLocaleString('en-IN');
+                                }
+                                if (context.dataIndex > 5) {
+                                    label += ' (AI Forecast)';
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: function(value) {
+                                return '₹' + value.toLocaleString('en-IN');
+                            },
+                            font: { family: "'Inter', sans-serif", size: 11 }
+                        },
+                        grid: {
+                            color: 'rgba(0, 0, 0, 0.06)'
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            font: { family: "'Inter', sans-serif", size: 11 }
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    // ════════════ PRICE ALERT MODAL HANDLERS (ANY % DROP SUPPORT) ════════════
+    let currentPaMode = 'percent';
+
+    function switchPaMode(mode) {
+        currentPaMode = mode;
+        const btnPct = document.getElementById('paTabBtnPct');
+        const btnPrice = document.getElementById('paTabBtnPrice');
+        const secPct = document.getElementById('paSectionPct');
+        const secPrice = document.getElementById('paSectionPrice');
+        const badge = document.getElementById('paSelectedOptionBadge');
+
+        if (mode === 'percent') {
+            btnPct.className = 'btn btn-sm rounded-pill fw-bold btn-primary';
+            btnPrice.className = 'btn btn-sm rounded-pill fw-bold btn-light text-muted';
+            secPct.classList.remove('opacity-50');
+            secPct.style.border = '2px solid #0284c7';
+            secPrice.style.border = '1px solid #e2e8f0';
+            if (badge) badge.innerText = 'Any % Drop Mode';
+            document.getElementById('paInputPct').focus();
+        } else {
+            btnPrice.className = 'btn btn-sm rounded-pill fw-bold btn-success text-white';
+            btnPct.className = 'btn btn-sm rounded-pill fw-bold btn-light text-muted';
+            secPrice.style.border = '2px solid #10b981';
+            secPct.style.border = '1px solid #e2e8f0';
+            if (badge) badge.innerText = 'Target Price Mode';
+            document.getElementById('paInputTarget').focus();
+        }
+    }
+
+    function onPaPctInput(pctVal) {
+        const cur = parseInt(document.getElementById('paHiddenCurPrice').value) || 0;
+        const pct = parseFloat(pctVal) || 0;
+        const badge = document.getElementById('paPctBadge');
+        if (badge) badge.innerText = (pct > 0 ? pct : 0) + '% OFF';
+
+        if (cur > 0 && pct > 0) {
+            const target = Math.max(1, Math.round(cur * (1 - pct / 100)));
+            document.getElementById('paInputTarget').value = target;
+            updatePaSavingsDisplay(cur, target, pct);
+        }
+    }
+
+    function onPaTargetPriceInput(targetVal) {
+        const cur = parseInt(document.getElementById('paHiddenCurPrice').value) || 0;
+        const target = parseInt(targetVal) || 0;
+        if (cur > 0 && target > 0) {
+            const pct = Math.max(0, Math.round(((cur - target) / cur) * 1000) / 10);
+            document.getElementById('paInputPct').value = pct;
+            const badge = document.getElementById('paPctBadge');
+            if (badge) badge.innerText = pct + '% OFF';
+            updatePaSavingsDisplay(cur, target, pct);
+        }
+    }
+
+    function applyPaPreset(pct) {
+        document.getElementById('paInputPct').value = pct;
+        onPaPctInput(pct);
+    }
+
+    function updatePaSavingsDisplay(cur, target, pct) {
+        const savings = Math.max(0, cur - target);
+        const savingsEl = document.getElementById('paSavingsBadge');
+        const diffText = document.getElementById('paLiveDiffText');
+        const calcCur = document.getElementById('paCalcCurrent');
+        const calcDrop = document.getElementById('paCalcDropAmount');
+        const calcTarget = document.getElementById('paCalcTargetPrice');
+
+        if (savingsEl) {
+            savingsEl.innerText = `You Save: ₹${savings.toLocaleString('en-IN')} (-${pct}%)`;
+        }
+        if (diffText) {
+            diffText.innerText = `Requires ₹${savings.toLocaleString('en-IN')} drop`;
+        }
+        if (calcCur) calcCur.innerText = '₹' + cur.toLocaleString('en-IN');
+        if (calcDrop) calcDrop.innerText = `-₹${savings.toLocaleString('en-IN')} (${pct}%)`;
+        if (calcTarget) calcTarget.innerText = '₹' + target.toLocaleString('en-IN');
+    }
+
+    function openPriceAlertModal(btn) {
+        const name = btn.getAttribute('data-product-name') || '';
+        const img = btn.getAttribute('data-product-image') || '';
+        const plat = btn.getAttribute('data-platform') || 'SmartBuy';
+        const rawPrice = btn.getAttribute('data-current-price') || '0';
+        const url = btn.getAttribute('data-product-url') || window.location.href;
+
+        let numPrice = parseInt(String(rawPrice).replace(/[^\d]/g, '')) || 0;
+
+        document.getElementById('paHiddenName').value = name;
+        document.getElementById('paHiddenImg').value = img;
+        document.getElementById('paHiddenPlatform').value = plat;
+        document.getElementById('paHiddenCurPrice').value = numPrice;
+        document.getElementById('paHiddenUrl').value = url;
+
+        document.getElementById('paModalTitle').innerText = name;
+        document.getElementById('paModalTitle').title = name;
+        document.getElementById('paModalPlatform').innerText = plat.toUpperCase();
+        document.getElementById('paModalCurPrice').innerText = '₹' + numPrice.toLocaleString('en-IN');
+        if (img) document.getElementById('paModalImg').src = img;
+
+        const defaultPct = 10;
+        document.getElementById('paInputPct').value = defaultPct;
+        switchPaMode('percent');
+        onPaPctInput(defaultPct);
+
+        const alertBox = document.getElementById('paModalStatusAlert');
+        alertBox.className = 'alert d-none';
+
+        const modal = new bootstrap.Modal(document.getElementById('priceAlertModal'));
+        modal.show();
+    }
+
+    async function submitPriceAlertModal() {
+        const btn = document.getElementById('paModalBtn');
+        const alertBox = document.getElementById('paModalStatusAlert');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Activating...';
+        alertBox.className = 'alert d-none';
+
+        const payload = {
+            product_name: document.getElementById('paHiddenName').value,
+            product_image: document.getElementById('paHiddenImg').value,
+            platform: document.getElementById('paHiddenPlatform').value,
+            current_price: parseInt(document.getElementById('paHiddenCurPrice').value) || 0,
+            target_price: parseInt(document.getElementById('paInputTarget').value) || 0,
+            target_pct: parseFloat(document.getElementById('paInputPct').value) || 0,
+            product_url: document.getElementById('paHiddenUrl').value,
+            email: document.getElementById('paInputEmail').value.trim(),
+            test_trigger_now: document.getElementById('paTestTriggerToggle').checked
+        };
+
+        try {
+            const res = await fetch('/api/price-alerts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data.success) {
+                alertBox.className = 'alert alert-success py-2.5 px-3 small rounded-3';
+                alertBox.innerHTML = '<i class="fas fa-check-circle me-1.5"></i>' + (data.message || 'Price alert set! Confirmation email dispatched.') + '<div class="mt-1.5 fw-bold text-success"><i class="fas fa-arrow-right me-1"></i>Moving to Price Alerts Dashboard...</div>';
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Moving to Dashboard...';
+                setTimeout(() => {
+                    window.location.href = data.redirect_url || '/my-price-alerts';
+                }, 1200);
+            } else if (data.login_required) {
+                alertBox.className = 'alert alert-warning py-2.5 px-3 small rounded-3';
+                alertBox.innerHTML = '<i class="fas fa-lock me-1.5"></i>' + data.message + ' <a href="/signin?next=' + encodeURIComponent(window.location.pathname + window.location.search) + '" class="fw-bold text-dark text-decoration-underline ms-1">Sign In Now &rarr;</a>';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sign-in-alt me-1"></i>Sign In to Activate';
+                setTimeout(() => {
+                    window.location.href = '/signin?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                }, 1500);
+            } else {
+                alertBox.className = 'alert alert-danger py-2.5 px-3 small rounded-3';
+                alertBox.innerText = data.message || 'Failed to create price alert.';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-bell me-1"></i>Activate Price Alert';
+            }
+        } catch (err) {
+            alertBox.className = 'alert alert-danger py-2.5 px-3 small rounded-3';
+            alertBox.innerText = 'Network error: ' + err.message;
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-bell me-1"></i>Activate Price Alert';
+        }
+    }
+    </script>
 </body>
 </html>
 

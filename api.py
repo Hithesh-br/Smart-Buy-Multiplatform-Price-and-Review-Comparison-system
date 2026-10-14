@@ -47,52 +47,24 @@ from database import (
     mark_admin_notification_read, delete_admin_notification,
     get_all_users_for_admin, get_user_full_details_for_admin,
     store_otp, verify_otp_code, check_otp_resend_cooldown, get_otp_expiry_minutes,
-    delete_otp
+    delete_otp, is_email_verified
 )
 from autocomplete_engine import build_trie_from_history, get_autocomplete_suggestions
 from search.normalizer import normalize_query, build_search_query
 from search.filters import parse_filter_params
 from utils import clean_text
+from otp_utils import send_otp_email, send_email as utils_send_email, generate_otp, validate_password
 
 logger = logging.getLogger("smartbuy.api")
 api_bp = Blueprint("api", __name__)
 
 
-def send_email(to_email: str, subject: str, body_text: str) -> bool:
+def send_email(to_email: str, subject: str, body_text: str, html_content: str = None) -> bool:
     """
-    Send a plain-text email via SMTP using credentials from .env
-    (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_NAME).
-
-    Returns True on success, False on any failure — never raises, so a
-    flaky SMTP connection degrades to "couldn't send the email" for the
-    caller to handle, rather than crashing the request.
+    Send an email via SMTP using credentials from .env or safe verified fallback.
+    Returns True on success, False on any failure.
     """
-    smtp_host = os.environ.get('SMTP_HOST')
-    smtp_port = int(os.environ.get('SMTP_PORT', 587))
-    smtp_user = os.environ.get('SMTP_USER')
-    smtp_password = os.environ.get('SMTP_PASSWORD')
-    from_name = os.environ.get('SMTP_FROM_NAME', 'SmartBuy')
-
-    if not smtp_host or not smtp_user or not smtp_password:
-        logger.warning(f"[Email] SMTP not configured — cannot send '{subject}' to {to_email}.")
-        return False
-
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = f"{from_name} <{smtp_user}>"
-        msg['To'] = to_email
-        msg['Subject'] = subject
-        msg.attach(MIMEText(body_text, 'plain'))
-
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.sendmail(smtp_user, [to_email], msg.as_string())
-        logger.info(f"[Email] Sent '{subject}' to {to_email}")
-        return True
-    except Exception as e:
-        logger.error(f"[Email] Failed to send '{subject}' to {to_email}: {e}")
-        return False
+    return utils_send_email(to_email=to_email, subject=subject, body_text=body_text, html_content=html_content)
 
 
 def login_required(f):
@@ -352,12 +324,13 @@ def handle_buy_click():
     return redirect(url_for('api.signup'))
 
 
+@api_bp.route('/api/auth/signup', methods=['POST'])
 @api_bp.route('/api/signup', methods=['POST'])
 @api_bp.route('/signup', methods=['GET', 'POST'])
 def signup():
     """
     User Registration Endpoint:
-    - Supports JSON API requests (POST /api/signup) and standard HTML form POSTs (POST /signup).
+    - Supports JSON API requests (POST /api/signup, POST /api/auth/signup) and standard HTML form POSTs (POST /signup).
     - Validates name, email, password (>=6 chars), confirm_password match.
     - Checks duplicate email (HTTP 409).
     - Hashes password using Werkzeug.
@@ -370,7 +343,8 @@ def signup():
         return render_template('signup.html')
 
     # Detect if request is JSON / AJAX
-    is_json_req = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '') or request.path == '/api/signup'
+    is_json_req = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '') or request.path in ('/api/signup', '/api/auth/signup')
+    is_auth_api = request.path == '/api/auth/signup'
 
     if request.is_json:
         data = request.get_json() or {}
@@ -408,6 +382,13 @@ def signup():
         if is_json_req:
             return jsonify({"success": False, "message": msg}), 400
         return render_template('signup.html', errors=[msg], name=name, email=email), 400
+
+    if is_auth_api:
+        if not is_email_verified(email):
+            return jsonify({"success": False, "message": "Please verify your email before creating an account."}), 400
+        is_pwd_ok, pwd_errors = validate_password(password)
+        if not is_pwd_ok:
+            return jsonify({"success": False, "message": pwd_errors[0] if pwd_errors else "Password does not meet complexity requirements."}), 400
 
     # Password Hash & Database Insert
     pwd_hash = generate_password_hash(password)
@@ -475,16 +456,13 @@ def send_reset_otp():
     if not store_otp(email, otp_code, channel='email', purpose='password_reset', ttl_minutes=expiry_minutes):
         return jsonify({"success": False, "message": "Unable to generate OTP right now. Please try again."}), 500
 
-    sent = send_email(
+    sent, send_err = send_otp_email(
         to_email=email,
-        subject="Your SmartBuy Password Reset Code",
-        body_text=(
-            f"Your SmartBuy password reset code is: {otp_code}\n\n"
-            f"This code expires in {expiry_minutes} minutes.\n\n"
-            f"If you didn't request this, you can safely ignore this email."
-        ),
+        otp_code=otp_code,
+        purpose='password_reset'
     )
     if not sent:
+        logger.error(f"[Password Reset] Failed to send OTP email to {email}: {send_err}")
         return jsonify({"success": False, "message": "Unable to send the OTP email right now. Please try again shortly."}), 500
 
     return jsonify({"success": True, "message": f"OTP sent to {email}."}), 200
@@ -512,6 +490,86 @@ def verify_reset_otp():
     session['reset_password_verified_at'] = datetime.now(timezone.utc).isoformat()
 
     return jsonify({"success": True, "message": "OTP verified successfully."}), 200
+
+
+@api_bp.route('/api/send-otp', methods=['POST'])
+@api_bp.route('/api/auth/send-otp', methods=['POST'])
+def api_send_otp():
+    """Generate and dispatch OTP for signup/email verification via SMTP."""
+    data = request.get_json(silent=True) or {}
+    email = str(data.get('email', '')).strip().lower()
+
+    if not email or '@' not in email or '.' not in email:
+        return jsonify({"success": False, "message": "Please enter a valid email address."}), 400
+
+    allowed, cooldown_msg = check_otp_resend_cooldown(email, cooldown_seconds=60)
+    if not allowed:
+        return jsonify({"success": False, "message": cooldown_msg}), 429
+
+    otp_code = generate_otp()
+    expiry_minutes = get_otp_expiry_minutes()
+
+    if not store_otp(email, otp_code, channel='email', purpose='signup', ttl_minutes=expiry_minutes):
+        return jsonify({"success": False, "message": "Unable to generate OTP right now. Please try again."}), 500
+
+    sent, send_err = send_otp_email(to_email=email, otp_code=otp_code, purpose='signup')
+    if not sent:
+        logger.error(f"[API OTP] Failed to send OTP email to {email}: {send_err}")
+        return jsonify({"success": False, "message": "Unable to send the OTP email right now. Please try again shortly."}), 500
+
+    return jsonify({"success": True, "message": "OTP sent successfully"}), 200
+
+
+@api_bp.route('/api/verify-otp', methods=['POST'])
+@api_bp.route('/api/auth/verify-otp', methods=['POST'])
+def api_verify_otp():
+    """Verify submitted OTP code for signup/verification."""
+    data = request.get_json(silent=True) or {}
+    email = str(data.get('email', '')).strip().lower()
+    otp = str(data.get('otp', '')).strip()
+
+    if not email or not otp:
+        return jsonify({"success": False, "message": "Email and OTP are required."}), 400
+
+    ok, msg = verify_otp_code(email, otp, channel='email', purpose='signup')
+    if not ok:
+        ok_any, _ = verify_otp_code(email, otp, channel='email', purpose='password_reset')
+        if not ok_any:
+            return jsonify({"success": False, "message": msg or "Invalid OTP"}), 400
+
+    session['verified_email'] = email
+    return jsonify({"success": True, "message": "Email verified successfully"}), 200
+
+
+@api_bp.route('/api/auth/resend-otp', methods=['POST'])
+@api_bp.route('/resend-otp', methods=['POST'])
+def api_resend_otp():
+    """Resend OTP code subject to cooldown."""
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        email = str(data.get('email', '')).strip().lower()
+    else:
+        email = str(request.form.get('email', '')).strip().lower()
+
+    if not email:
+        email = session.get('pending_user_email', session.get('reset_password_email', ''))
+
+    if not email or '@' not in email:
+        return jsonify({"success": False, "message": "Valid email is required."}), 400
+
+    allowed, cooldown_msg = check_otp_resend_cooldown(email, cooldown_seconds=60)
+    if not allowed:
+        return jsonify({"success": False, "message": cooldown_msg}), 429
+
+    otp_code = generate_otp()
+    expiry_minutes = get_otp_expiry_minutes()
+    store_otp(email, otp_code, channel='email', purpose='signup', ttl_minutes=expiry_minutes)
+
+    sent, send_err = send_otp_email(to_email=email, otp_code=otp_code, purpose='signup')
+    if not sent:
+        return jsonify({"success": False, "message": "Failed to resend OTP email."}), 500
+
+    return jsonify({"success": True, "message": "OTP resent successfully"}), 200
 
 
 @api_bp.route('/reset-password', methods=['GET'])
@@ -1713,3 +1771,203 @@ def admin_user_detail(user_id):
         flash("User not found.", "danger")
         return redirect(url_for('api.admin_dashboard'))
     return render_template('admin_user_detail.html', user_detail=user_detail)
+
+
+# ════════════════════ GEC ECOM DIRECT STORE & PRICE ALERTS ════════════════════
+
+@api_bp.route('/gececom', methods=['GET'])
+def gececom_store():
+    """GEC ECom Direct Online Storefront."""
+    from database import get_all_gececom_products
+    products = get_all_gececom_products()
+    return render_template('gececom.html', products=products)
+
+
+@api_bp.route('/api/gececom/products', methods=['GET'])
+def api_get_gececom_products():
+    """Get all GEC ECom products as JSON."""
+    from database import get_all_gececom_products
+    products = get_all_gececom_products()
+    return jsonify({"success": True, "products": products, "count": len(products)})
+
+
+@api_bp.route('/api/gececom/products', methods=['POST'])
+def api_add_gececom_product():
+    """Add a new product to GEC ECom store."""
+    from database import add_gececom_product
+    data = request.get_json(silent=True) or request.form.to_dict()
+    if not data or not (data.get("name") or data.get("product_name")):
+        return jsonify({"success": False, "message": "Product name is required."}), 400
+
+    product = add_gececom_product(data)
+    if product:
+        return jsonify({"success": True, "message": "Product added successfully!", "product": product}), 201
+    return jsonify({"success": False, "message": "Failed to add product to database."}), 500
+
+
+@api_bp.route('/api/gececom/products/<product_id>/price', methods=['PUT', 'POST'])
+def api_update_gececom_product_price(product_id):
+    """Update price for GEC ECom product and optionally trigger active price drop alerts."""
+    from database import update_gececom_product_price, check_and_trigger_price_alerts
+    data = request.get_json(silent=True) or request.form.to_dict()
+    if not data:
+        return jsonify({"success": False, "message": "Request payload missing."}), 400
+
+    new_price = int(data.get("new_price") or data.get("price") or 0)
+    if new_price <= 0:
+        return jsonify({"success": False, "message": "Price must be greater than 0."}), 400
+
+    trigger_check = bool(data.get("trigger_check", True))
+    ok, updated = update_gececom_product_price(product_id, new_price)
+    if not ok or not updated:
+        return jsonify({"success": False, "message": "Product not found or update failed."}), 404
+
+    trigger_results = {"checked": 0, "triggered": 0, "notifications_sent": 0}
+    if trigger_check:
+        p_name = updated.get("product_name", "")
+        trigger_results = check_and_trigger_price_alerts(p_name, new_price, platform="gececom")
+
+    return jsonify({
+        "success": True,
+        "message": "Price updated successfully!",
+        "product": updated,
+        "formatted_new_price": updated.get("formatted_current_price"),
+        "trigger_results": trigger_results
+    })
+
+
+@api_bp.route('/api/gececom/products/<product_id>', methods=['DELETE'])
+def api_delete_gececom_product(product_id):
+    """Delete a product from GEC ECom store."""
+    from database import delete_gececom_product
+    ok = delete_gececom_product(product_id)
+    if ok:
+        return jsonify({"success": True, "message": "Product deleted successfully."})
+    return jsonify({"success": False, "message": "Product not found or delete failed."}), 404
+
+
+@api_bp.route('/api/price-alerts', methods=['GET', 'POST'])
+def api_price_alerts():
+    """Register a new price drop alert or list active alerts."""
+    from database import create_price_alert, get_user_price_alerts
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or request.form.to_dict()
+        if not data:
+            return jsonify({"success": False, "message": "Payload required."}), 400
+
+        # Require login for setting price alerts
+        if 'user_id' in session:
+            user = get_user_by_id(session['user_id'])
+            if user:
+                data['user_id'] = str(user.get('id') or user.get('_id', ''))
+                # User's verified email from session takes precedence
+                data['email'] = user.get('email', data.get('email', ''))
+        elif not data.get('email'):
+            return jsonify({
+                "success": False,
+                "login_required": True,
+                "message": "Please sign in to your SmartBuy account to set price alerts."
+            }), 401
+
+        ok, msg, alert_doc = create_price_alert(data)
+        if ok:
+            return jsonify({
+                "success": True,
+                "message": msg,
+                "alert": alert_doc,
+                "redirect_url": "/my-price-alerts"
+            }), 201
+        return jsonify({"success": False, "message": msg}), 400
+
+    # GET: return list of alerts
+    email = request.args.get('email', '').strip()
+    if not email and 'user_id' in session:
+        user = get_user_by_id(session['user_id'])
+        if user:
+            email = user.get('email', '')
+    alerts = get_user_price_alerts(email if email else None)
+    return jsonify({"success": True, "alerts": alerts, "count": len(alerts)})
+
+
+@api_bp.route('/api/price-alerts/<alert_id>/trigger', methods=['POST'])
+def api_trigger_price_alert(alert_id):
+    """Manually test or trigger a price alert to immediately send email notification."""
+    from database import trigger_single_price_alert
+    data = request.get_json(silent=True) or request.form.to_dict() or {}
+    sim_price = data.get('simulated_price') or request.args.get('price')
+    try:
+        sim_price = int(sim_price) if sim_price else None
+    except Exception:
+        sim_price = None
+
+    ok, msg, res = trigger_single_price_alert(alert_id, simulated_price=sim_price)
+    if ok:
+        return jsonify({"success": True, "message": msg, "result": res})
+    return jsonify({"success": False, "message": msg}), 400
+
+
+@api_bp.route('/api/price-alerts/<alert_id>', methods=['DELETE'])
+def api_delete_price_alert(alert_id):
+    """Delete a price alert."""
+    from database import delete_price_alert
+    ok = delete_price_alert(alert_id)
+    if ok:
+        return jsonify({"success": True, "message": "Price alert deleted successfully."})
+    return jsonify({"success": False, "message": "Failed to delete alert or not found."}), 404
+
+
+@api_bp.route('/my-price-alerts', methods=['GET'])
+def my_price_alerts_page():
+    """Render the My Price Alerts management dashboard."""
+    from database import get_user_price_alerts
+    if 'user_id' not in session and not request.args.get('email'):
+        flash("Please sign in to view and manage your Price Alerts Dashboard.", "info")
+        return redirect(url_for('api.signin', next='/my-price-alerts'))
+
+    user_email = ""
+    current_user_obj = None
+    if 'user_id' in session:
+        user = get_user_by_id(session['user_id'])
+        if user:
+            user_email = user.get('email', '')
+            current_user_obj = user
+    if not user_email:
+        user_email = request.args.get('email', '').strip()
+
+    alerts = get_user_price_alerts(user_email if user_email else None)
+    active_count = sum(1 for a in alerts if a.get('status') == 'active')
+    triggered_count = sum(1 for a in alerts if a.get('status') == 'triggered')
+
+    return render_template(
+        'my_price_alerts.html',
+        alerts=alerts,
+        user_email=user_email,
+        active_count=active_count,
+        triggered_count=triggered_count,
+        current_user=current_user_obj
+    )
+
+
+
+@api_bp.route('/api/price-prediction', methods=['GET', 'POST'])
+def api_price_prediction():
+    """Returns 4-platform price prediction and historical trend graph data."""
+    from price_prediction import generate_price_prediction
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or request.form.to_dict() or {}
+        q = data.get('query') or data.get('product_name') or 'Product'
+        prices = data.get('prices') or {}
+        cat = data.get('category') or 'electronics'
+    else:
+        q = request.args.get('q') or request.args.get('query') or 'Product'
+        cat = request.args.get('category') or 'electronics'
+        prices = {
+            'Amazon': request.args.get('amazon'),
+            'Flipkart': request.args.get('flipkart'),
+            'Meesho': request.args.get('meesho'),
+            'GEC ECom': request.args.get('gececom') or request.args.get('gec')
+        }
+    res = generate_price_prediction(q, current_prices=prices, category=cat)
+    return jsonify({"success": True, "prediction": res})
+
+

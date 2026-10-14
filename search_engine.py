@@ -19,6 +19,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from scrapers.amazon_scraper import AmazonScraper
 from scrapers.flipkart_scraper import FlipkartScraper
 from scrapers.meesho_scraper import MeeshoScraper
+from scrapers.gececom_scraper import GecEcomScraper
 
 # ── Processing Package ───────────────────────────────────────────────────
 from search.normalizer import normalize_query, detect_query_type
@@ -43,6 +44,7 @@ _scrapers_instances = {
     "Amazon": AmazonScraper(),
     "Flipkart": FlipkartScraper(),
     "Meesho": MeeshoScraper(),
+    "GEC ECom": GecEcomScraper(),
 }
 
 
@@ -146,11 +148,12 @@ def fetch_all_products_with_fallbacks(query_chain: list[str], bypass_fresh: bool
     Execute scraper search with automatic fallback loop:
     Try query_chain[0] broad query across Amazon, Flipkart, Meesho.
     """
-    combined_raw = {"Amazon": [], "Flipkart": [], "Meesho": []}
+    combined_raw = {"Amazon": [], "Flipkart": [], "Meesho": [], "GEC ECom": []}
     combined_status = {
         "Amazon": {"available": False, "error": None, "count": 0, "status": "unavailable"},
         "Flipkart": {"available": False, "error": None, "count": 0, "status": "unavailable"},
         "Meesho": {"available": False, "error": None, "count": 0, "status": "unavailable"},
+        "GEC ECom": {"available": False, "error": None, "count": 0, "status": "unavailable"},
     }
 
     if not query_chain:
@@ -252,6 +255,7 @@ def process_results(query: str, raw_results: dict,
         "Amazon": best_match_per_platform.get("Amazon"),
         "Flipkart": best_match_per_platform.get("Flipkart"),
         "Meesho": best_match_per_platform.get("Meesho"),
+        "GEC ECom": best_match_per_platform.get("GEC ECom"),
     }
 
     ai_summary = get_ai_comparison(query, platform_results)
@@ -268,12 +272,17 @@ def process_results(query: str, raw_results: dict,
         "meesho": {
             "status": platform_status.get("Meesho", {}).get("status", "success"),
             "products": platform_results.get("Meesho", [])
+        },
+        "gececom": {
+            "status": platform_status.get("GEC ECom", {}).get("status", "success"),
+            "products": platform_results.get("GEC ECom", [])
         }
     }
 
     amz_prod = best_match_per_platform.get("Amazon") or (platform_results.get("Amazon", [None])[0] if platform_results.get("Amazon") else None)
     fk_prod = best_match_per_platform.get("Flipkart") or (platform_results.get("Flipkart", [None])[0] if platform_results.get("Flipkart") else None)
     mee_prod = best_match_per_platform.get("Meesho") or (platform_results.get("Meesho", [None])[0] if platform_results.get("Meesho") else None)
+    gec_prod = best_match_per_platform.get("GEC ECom") or (platform_results.get("GEC ECom", [None])[0] if platform_results.get("GEC ECom") else None)
 
     comparison = {
         "query": query,
@@ -283,13 +292,15 @@ def process_results(query: str, raw_results: dict,
         "amazon": amz_prod,
         "flipkart": fk_prod,
         "meesho": mee_prod,
+        "gececom": gec_prod,
         "Amazon": amz_prod,
         "Flipkart": fk_prod,
         "Meesho": mee_prod,
+        "GEC ECom": gec_prod,
         "specification_table": {
             "has_match": pipeline_data["has_cross_platform_match"],
             "rows": specifications_matrix,
-            "columns": ["specification", "amazon", "flipkart", "meesho"]
+            "columns": ["specification", "amazon", "flipkart", "meesho", "gececom"]
         },
         "quality_comparison_table": quality_comparison_table,
         "comparison_summary": comparison_summary,
@@ -297,9 +308,39 @@ def process_results(query: str, raw_results: dict,
         "products": {
             "amazon": platform_results.get("Amazon", []),
             "flipkart": platform_results.get("Flipkart", []),
-            "meesho": platform_results.get("Meesho", [])
+            "meesho": platform_results.get("Meesho", []),
+            "gececom": platform_results.get("GEC ECom", [])
         }
     }
+
+    # 4-Platform Price History & AI Price Prediction Engine
+    import json
+    from price_prediction import generate_price_prediction
+    current_prices_map = {
+        "Amazon": amz_prod.get("price_num") if amz_prod else None,
+        "Flipkart": fk_prod.get("price_num") if fk_prod else None,
+        "Meesho": mee_prod.get("price_num") if mee_prod else None,
+        "GEC ECom": gec_prod.get("price_num") if gec_prod else None,
+    }
+    price_prediction_data = generate_price_prediction(query, current_prices=current_prices_map)
+
+    # ── Automated Real-Time Price Alert Checker ──
+    try:
+        from database import check_and_trigger_price_alerts
+        for cand in [overall_best] + list(best_per_platform.values()):
+            if cand and isinstance(cand, dict):
+                c_price = cand.get("price_num") or cand.get("price")
+                c_name = cand.get("title") or cand.get("product_name")
+                c_plat = cand.get("platform", "smartbuy")
+                if c_price and c_name:
+                    try:
+                        clean_c_p = int(float(str(c_price).replace(",", "").replace("₹", "").strip()))
+                        if clean_c_p > 0:
+                            check_and_trigger_price_alerts(c_name, clean_c_p, platform=c_plat)
+                    except Exception:
+                        pass
+    except Exception as alert_chk_err:
+        logger.debug(f"[Alert Check] Search-time trigger check error: {alert_chk_err}")
 
     return {
         "query":                 query,
@@ -329,5 +370,7 @@ def process_results(query: str, raw_results: dict,
         "best_deal":             best_deal,
         "match_pairs":           match_pairs,
         "no_deal_message":       pipeline_data.get("no_deal_message"),
-        "has_cross_platform_match": pipeline_data.get("has_cross_platform_match", False)
+        "has_cross_platform_match": pipeline_data.get("has_cross_platform_match", False),
+        "price_prediction":      price_prediction_data,
+        "price_prediction_json": json.dumps(price_prediction_data)
     }
