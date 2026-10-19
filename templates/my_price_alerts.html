@@ -98,7 +98,17 @@
             font-weight: 800;
             color: #059669;
         }
+
+        @keyframes pulseGlow {
+            0% { transform: scale(1); box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
+            50% { transform: scale(1.02); box-shadow: 0 0 18px rgba(16, 185, 129, 0.4); border-color: #10b981; }
+            100% { transform: scale(1); box-shadow: 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        .pulse-update {
+            animation: pulseGlow 1.2s ease;
+        }
     </style>
+
 </head>
 
 <body>
@@ -171,15 +181,15 @@
 
                 <div class="d-flex gap-2.5 flex-wrap">
                     <div class="bg-white bg-opacity-10 border border-white border-opacity-20 rounded-4 px-3.5 py-2 text-center">
-                        <div class="fs-4 fw-extrabold">{{ alerts | length }}</div>
+                        <div class="fs-4 fw-extrabold" id="statTotalCount">{{ alerts | length }}</div>
                         <small class="text-white-50 text-uppercase fw-bold" style="font-size: 0.72rem;">Total Tracked</small>
                     </div>
                     <div class="bg-white bg-opacity-10 border border-white border-opacity-20 rounded-4 px-3.5 py-2 text-center">
-                        <div class="fs-4 fw-extrabold text-warning">{{ active_count }}</div>
+                        <div class="fs-4 fw-extrabold text-warning" id="statActiveCount">{{ active_count }}</div>
                         <small class="text-white-50 text-uppercase fw-bold" style="font-size: 0.72rem;">Monitoring Live</small>
                     </div>
                     <div class="bg-white bg-opacity-10 border border-white border-opacity-20 rounded-4 px-3.5 py-2 text-center">
-                        <div class="fs-4 fw-extrabold text-success">{{ triggered_count }}</div>
+                        <div class="fs-4 fw-extrabold text-success" id="statTriggeredCount">{{ triggered_count }}</div>
                         <small class="text-white-50 text-uppercase fw-bold" style="font-size: 0.72rem;">Emails Triggered</small>
                     </div>
                 </div>
@@ -211,77 +221,134 @@
         <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 row-cols-xl-4 g-4" id="alertsContainer">
             {% for a in alerts %}
             <div class="col" id="alertCardCol-{{ a.id }}">
-                <div class="alert-card position-relative">
+                <div class="alert-card position-relative" id="alertCard-{{ a.id }}">
                     <!-- Image -->
                     <div class="alert-img-wrap">
                         {% if a.product_image %}
-                        <img src="{{ a.product_image }}" alt="{{ a.product_name }}" onerror="this.src='https://placehold.co/240x200?text=Deal'">
+                        <img src="{{ a.product_image }}" alt="{{ a.product_name }}" id="alertImg-{{ a.id }}" onerror="this.src='https://placehold.co/240x200?text=Deal'">
                         {% else %}
-                        <img src="https://placehold.co/240x200?text=Deal" alt="Deal Item">
+                        <img src="https://placehold.co/240x200?text=Deal" alt="Deal Item" id="alertImg-{{ a.id }}">
                         {% endif %}
 
                         <!-- Platform Badge -->
-                        <span class="position-absolute top-0 start-0 m-2.5 platform-pill platform-{{ (a.platform or 'gececom')|lower }}">
+                        <span class="position-absolute top-0 start-0 m-2.5 platform-pill platform-{{ (a.platform or 'gececom')|lower }}" id="alertPlatform-{{ a.id }}">
                             {{ a.platform or 'GEC ECom' }}
                         </span>
 
-                        <!-- Status Badge -->
-                        {% if a.status == 'active' %}
-                        <span class="position-absolute top-0 end-0 m-2.5 badge bg-success-subtle text-success border border-success fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
-                            <i class="fas fa-circle-notch fa-spin me-1"></i>Tracking Live
-                        </span>
-                        {% else %}
-                        <span class="position-absolute top-0 end-0 m-2.5 badge bg-primary text-white fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
-                            <i class="fas fa-check-circle me-1"></i>Triggered (Emailed)
-                        </span>
-                        {% endif %}
+                        <!-- Status Badge Wrap -->
+                        <div id="alertStatusBadgeWrap-{{ a.id }}" class="position-absolute top-0 end-0 m-2.5">
+                            {% if a.status in ['active', 'monitoring'] %}
+                            <span class="badge bg-success-subtle text-success border border-success fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                                <i class="fas fa-circle-notch fa-spin me-1"></i>Monitoring
+                            </span>
+                            {% elif a.status == 'target_reached' %}
+                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                                <i class="fas fa-bullseye me-1"></i>Target Price Reached
+                            </span>
+                            {% elif a.status == 'email_sending' %}
+                            <span class="badge bg-info-subtle text-info-emphasis border border-info fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                                <i class="fas fa-spinner fa-spin me-1"></i>Email Sending
+                            </span>
+                            {% elif a.status == 'email_sent' or (a.status == 'triggered' and a.last_email_sent_at) %}
+                            <span class="badge bg-success text-white fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                                <i class="fas fa-paper-plane me-1"></i>Email Sent
+                            </span>
+                            {% elif a.status == 'email_failed' or (a.status == 'triggered' and not a.last_email_sent_at) %}
+                            <span class="badge bg-danger text-white fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                                <i class="fas fa-exclamation-triangle me-1"></i>Email Failed
+                            </span>
+                            {% else %}
+                            <span class="badge bg-secondary text-white fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                                {{ (a.status or 'Monitoring')|title }}
+                            </span>
+                            {% endif %}
+                        </div>
                     </div>
 
                     <!-- Body -->
                     <div class="p-3 d-flex flex-column flex-grow-1">
-                        <h6 class="fw-bold text-dark text-truncate mb-2" title="{{ a.product_name }}">
-                            {{ a.product_name }}
-                        </h6>
-
-                        <!-- Price Comparison Box -->
-                        <div class="bg-light p-2.5 rounded-3 border mb-3">
-                            <div class="d-flex align-items-center justify-content-between mb-1">
-                                <span class="text-muted small fw-semibold">Target Alert Price:</span>
-                                <span class="price-badge-target">₹{{ "{:,}".format(a.target_price) if a.target_price else 'N/A' }}</span>
-                            </div>
-                            <div class="d-flex align-items-center justify-content-between">
-                                <span class="text-muted small">Baseline Price:</span>
-                                <span class="fw-bold text-dark">₹{{ "{:,}".format(a.current_price) if a.current_price else 'N/A' }}</span>
-                            </div>
-                            {% if a.current_price and a.target_price and a.current_price > a.target_price %}
-                            <div class="text-primary small fw-semibold mt-1">
-                                <i class="fas fa-arrow-down me-1"></i>Requires ₹{{ "{:,}".format(a.current_price - a.target_price) }} price drop
-                            </div>
+                        <div class="d-flex align-items-center justify-content-between mb-2 gap-2">
+                            <h6 class="fw-bold text-dark text-truncate mb-0" title="{{ a.product_name }}" id="alertTitle-{{ a.id }}">
+                                {{ a.product_name }}
+                            </h6>
+                            {% if a.alert_mode == 'price' %}
+                            <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 fw-bold px-2 py-0.5 rounded-pill" style="font-size:0.68rem; white-space:nowrap;">
+                                <i class="fas fa-tag me-1"></i>Exact Price
+                            </span>
+                            {% else %}
+                            <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 fw-bold px-2 py-0.5 rounded-pill" style="font-size:0.68rem; white-space:nowrap;">
+                                <i class="fas fa-percent me-1"></i>{{ a.target_pct }}% Drop
+                            </span>
                             {% endif %}
                         </div>
 
-                        <div class="small text-muted mb-3 d-flex align-items-center gap-1.5">
-                            <i class="fas fa-envelope text-secondary"></i>
-                            <span class="text-truncate" title="{{ a.email }}">{{ a.email }}</span>
+                        <!-- Price Comparison Box -->
+                        <div class="bg-light p-2.5 rounded-3 border mb-2.5" id="alertPricesBox-{{ a.id }}">
+                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                <span class="text-muted small fw-semibold">Latest Price:</span>
+                                <span class="price-badge-current text-success fw-extrabold" id="alertLatestPrice-{{ a.id }}">₹{{ "{:,}".format(a.latest_price) if a.latest_price else 'N/A' }}</span>
+                            </div>
+                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                <span class="text-muted small">Previous Price:</span>
+                                <span class="text-muted fw-bold text-decoration-line-through small" id="alertPrevPrice-{{ a.id }}">₹{{ "{:,}".format(a.previous_price) if a.previous_price else 'N/A' }}</span>
+                            </div>
+                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                <span class="text-muted small">Target Price:</span>
+                                <span class="price-badge-target fw-bold" id="alertTargetPrice-{{ a.id }}">₹{{ "{:,}".format(a.target_price) if a.target_price else 'N/A' }}</span>
+                            </div>
+                            <div class="d-flex align-items-center justify-content-between mt-1 pt-1 border-top" id="alertReductionRow-{{ a.id }}">
+                                <span class="text-muted small fw-semibold">Price Reduction:</span>
+                                <span class="fw-bold {{ 'text-danger' if (a.reduction_amount and a.reduction_amount > 0) else 'text-muted small' }}" id="alertReduction-{{ a.id }}">
+                                    {% if a.reduction_amount and a.reduction_amount > 0 %}
+                                        -₹{{ "{:,}".format(a.reduction_amount) }} (-{{ a.reduction_pct }}%)
+                                    {% else %}
+                                        Awaiting Drop
+                                    {% endif %}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Status & Timestamps -->
+                        <div class="small text-muted mb-2.5 d-flex flex-column gap-1 bg-white p-2 rounded border" style="font-size: 0.74rem;">
+                            <div class="d-flex justify-content-between">
+                                <span><i class="fas fa-bell me-1 text-primary"></i>Email Status:</span>
+                                <span class="fw-bold text-uppercase {{ 'text-success' if a.notification_status == 'sent' else ('text-danger' if a.notification_status == 'failed' else 'text-muted') }}" id="alertEmailStatus-{{ a.id }}">{{ a.notification_status or 'Monitoring' }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <span><i class="fas fa-clock me-1 text-secondary"></i>Last Checked:</span>
+                                <span id="alertLastChecked-{{ a.id }}">{{ a.last_checked_time_str or 'Just now' }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between {{ 'd-none' if not a.last_email_sent_time_str else '' }}" id="alertSentTimeRow-{{ a.id }}">
+                                <span><i class="fas fa-envelope-circle-check me-1 text-success"></i>Sent At:</span>
+                                <span class="text-success fw-bold" id="alertSentTime-{{ a.id }}">{{ a.last_email_sent_time_str or '-' }}</span>
+                            </div>
+                            <div class="d-flex align-items-center gap-1 text-truncate pt-1 border-top mt-1">
+                                <i class="fas fa-envelope text-secondary"></i>
+                                <span class="text-truncate" title="{{ a.email }}">{{ a.email }}</span>
+                            </div>
                         </div>
 
                         <!-- Card Action Buttons -->
                         <div class="mt-auto d-flex flex-column gap-2">
-                            <!-- 1. Test Trigger Button (Instant Email Simulation) -->
-                            <button type="button" class="btn btn-warning btn-sm rounded-pill fw-bold d-flex align-items-center justify-content-center gap-1.5 py-1.5 shadow-xs"
-                                onclick="testTriggerAlert('{{ a.id }}', '{{ a.product_name|escape }}', '{{ a.email }}')">
-                                <i class="fas fa-paper-plane"></i><span>⚡ Send Test Email Now</span>
+                            <!-- 1. Live Price Drop Button (Updates Dashboard & Sends Real Email to Phone in Live) -->
+                            <button type="button" class="btn btn-danger btn-sm rounded-pill fw-bold d-flex align-items-center justify-content-center gap-1.5 py-1.5 shadow-sm text-white"
+                                onclick="openDropPriceModal('{{ a.id }}', '{{ a.product_name|escape }}', {{ a.latest_price or a.current_price or 0 }}, {{ a.target_price or 0 }}, '{{ a.email }}')" id="dropPriceBtn-{{ a.id }}">
+                                <i class="fas fa-arrow-down-long"></i><span>📉 Drop Price &amp; Send Live Alert</span>
                             </button>
 
-                            <!-- 2. View Product / Deal & Delete Actions -->
+                            <!-- 2. Test Trigger Button (Instant Email Verification) & Deal View -->
                             <div class="d-flex gap-1.5">
-                                <a href="{{ a.product_url or '/gececom' }}" target="_blank" class="btn btn-outline-primary btn-sm flex-grow-1 rounded-pill fw-semibold py-1" style="font-size: 0.8rem;">
-                                    <i class="fas fa-external-link-alt me-1"></i>View Deal
+                                <button type="button" class="btn btn-warning btn-sm rounded-pill fw-bold d-flex align-items-center justify-content-center gap-1 py-1 shadow-xs flex-grow-1" style="font-size: 0.78rem;"
+                                    onclick="testTriggerAlert('{{ a.id }}', '{{ a.product_name|escape }}', '{{ a.email }}')">
+                                    <i class="fas fa-paper-plane"></i><span>Send Test Email</span>
+                                </button>
+                                <a href="{{ a.product_url or '/gececom' }}" target="_blank" class="btn btn-outline-primary btn-sm rounded-pill fw-semibold py-1 px-2.5" style="font-size: 0.78rem;" id="alertDealBtn-{{ a.id }}" title="View Deal">
+                                    <i class="fas fa-external-link-alt"></i>
                                 </a>
                                 <button type="button" class="btn btn-outline-danger btn-sm rounded-circle d-flex align-items-center justify-content-center"
-                                    style="width: 32px; height: 32px; padding: 0;" title="Remove Alert"
+                                    style="width: 29px; height: 29px; padding: 0; min-width: 29px;" title="Remove Alert"
                                     onclick="deletePriceAlert('{{ a.id }}')">
-                                    <i class="fas fa-trash-alt" style="font-size: 0.75rem;"></i>
+                                    <i class="fas fa-trash-alt" style="font-size: 0.72rem;"></i>
                                 </button>
                             </div>
                         </div>
@@ -323,10 +390,10 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-4 bg-light">
-                    <form id="newAlertForm" onsubmit="event.preventDefault(); submitCustomAlert();">
+                    <form id="newAlertForm" novalidate onsubmit="event.preventDefault(); submitCustomAlert();">
                         <div class="mb-3">
                             <label class="form-label fw-bold small text-muted text-uppercase">Product Name or Title</label>
-                            <input type="text" id="naProductName" class="form-control rounded-3" placeholder="e.g. Vivo T4 5G or Apple iPhone 15" required>
+                            <input type="text" id="naProductName" class="form-control rounded-3" placeholder="e.g. Vivo T4 5G or Apple iPhone 15">
                         </div>
 
                         <div class="mb-3">
@@ -361,7 +428,7 @@
                             
                             <div class="input-group mb-2">
                                 <input type="number" id="naInputPct" class="form-control form-control-lg fw-extrabold text-primary"
-                                    placeholder="Enter ANY % (e.g. 5, 8, 12, 18, 25, 33)" min="1" max="95" step="0.5" value="10"
+                                    placeholder="Enter ANY % (e.g. 5, 8, 12, 18, 25, 33)" min="1" max="95" step="any" value="10"
                                     oninput="onNaPctInput(this.value)">
                                 <span class="input-group-text bg-light fw-bold text-primary fs-5">% DROP</span>
                             </div>
@@ -393,21 +460,46 @@
                         </div>
 
                         <!-- ══ Option B: Target Price in Rupees (Two-way linked) ══ -->
-                        <div id="naSectionPrice" class="card border-0 rounded-3 shadow-xs p-3 mb-3 bg-white border">
+                        <div id="naSectionPrice" class="card border-0 rounded-3 shadow-xs p-3 mb-3 bg-white border" style="display: none; border: 2px solid #10b981 !important;">
                             <div class="d-flex align-items-center justify-content-between mb-1">
                                 <label class="form-label fw-bold small text-dark text-uppercase mb-0">
                                     <i class="fas fa-tag text-success me-1"></i>Exact Target Price (₹) *
                                 </label>
-                                <small class="text-success fw-bold" id="naSavingsBadge" style="font-size: 0.8rem;">You Save: ₹0</small>
+                                <span class="badge bg-success text-white fw-bold px-2 py-1" id="naSavingsBadge">You Save: ₹0</span>
                             </div>
-                            <div class="input-group">
+                            <div class="input-group mb-2">
                                 <span class="input-group-text bg-light fw-bold text-success fs-5">₹</span>
                                 <input type="number" id="naTargetPrice" class="form-control form-control-lg rounded-end fw-extrabold text-success"
-                                    placeholder="e.g. 19999" required oninput="onNaTargetPriceInput(this.value)">
+                                    placeholder="e.g. 19999" min="1" step="any" oninput="onNaTargetPriceInput(this.value)">
                             </div>
-                            <div class="d-flex align-items-center justify-content-between mt-1">
+
+                            <!-- Quick preset pills for target price (shows exact target price in Rupees) -->
+                            <div class="d-flex gap-1.5 flex-wrap align-items-center mb-2" id="naPricePresetsContainer">
+                                <span class="small text-muted me-1 fw-bold" style="font-size:0.75rem;">Quick Price Targets:</span>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetPct(5)">-5%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetPct(10)">-10%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetPct(15)">-15%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetPct(20)">-20%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetPct(25)">-25%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetPct(30)">-30%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetPct(50)">-50%</button>
+                            </div>
+
+                            <!-- Live calculation breakdown for Price Mode -->
+                            <div class="p-2.5 rounded-3 bg-light border">
+                                <div class="d-flex justify-content-between align-items-center small text-muted">
+                                    <span>Baseline: <strong class="text-dark" id="naPriceCalcCurrent">₹0</strong></span>
+                                    <span>Discount: <strong class="text-danger" id="naPriceCalcDropAmount">-₹0 (0%)</strong></span>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-1 pt-1 border-top">
+                                    <span class="small fw-bold text-dark">🎯 Target Trigger Price:</span>
+                                    <span class="fs-6 fw-extrabold text-success" id="naPriceCalcTargetPrice">₹0</span>
+                                </div>
+                            </div>
+
+                            <div class="d-flex align-items-center justify-content-between mt-2">
                                 <small class="text-muted" style="font-size: 0.76rem;">Notification triggers when price drops to or below this target.</small>
-                                <small class="fw-bold text-primary" id="naLiveDiffText" style="font-size: 0.76rem;"></small>
+                                <small class="fw-bold text-success" id="naLiveDiffText" style="font-size: 0.76rem;"></small>
                             </div>
                         </div>
 
@@ -420,8 +512,8 @@
                                 </span>
                                 {% endif %}
                             </div>
-                            <input type="email" id="naEmail" class="form-control rounded-3 {% if user_email %}bg-light fw-semibold{% endif %}" value="{{ user_email or '' }}" {% if user_email %}readonly{% endif %} placeholder="name@example.com" required>
-                            <small class="text-muted" style="font-size: 0.76rem;">We'll dispatch both a confirmation email and the price drop notification here.</small>
+                            <input type="email" id="naEmail" class="form-control rounded-3 {% if user_email %}bg-light fw-semibold{% endif %}" value="{{ user_email or '' }}" {% if user_email %}readonly{% endif %} placeholder="name@example.com">
+                            <small class="text-muted" style="font-size: 0.76rem;">Alert confirmation and price drop notifications will be sent to this email.</small>
                         </div>
 
                         <div class="mb-3">
@@ -435,19 +527,92 @@
                             </select>
                         </div>
 
-                        <div class="form-check form-switch mb-3">
-                            <input class="form-check-input" type="checkbox" id="naTestTriggerNow" checked>
-                            <label class="form-check-label small fw-semibold" for="naTestTriggerNow">
-                                ⚡ Send test price drop email immediately after creating
-                            </label>
+                        <!-- 24/7 Smart Alert Notice -->
+                        <div class="p-2.5 rounded-3 bg-white border mb-3 d-flex align-items-center gap-2 text-muted" style="font-size: 0.78rem;">
+                            <i class="fas fa-shield-alt text-success fs-5"></i>
+                            <span><strong>Smart Monitor:</strong> Notification email will only be sent when the actual product price reaches or drops below your target.</span>
                         </div>
+                        <input type="hidden" id="naTestTriggerNow" value="0">
 
                         <div id="naAlertMessage" class="alert d-none py-2 px-3 small rounded-3 mb-3"></div>
 
-                        <button type="submit" id="naSubmitBtn" class="btn btn-primary w-100 rounded-pill py-2.5 fw-bold">
+                        <button type="button" id="naSubmitBtn" onclick="submitCustomAlert()" class="btn btn-primary w-100 rounded-pill py-2.5 fw-bold">
                             <i class="fas fa-bell me-1"></i>Activate Price Alert
                         </button>
                     </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════ MODAL: SIMULATE / DROP PRODUCT PRICE LIVE ════════════ -->
+    <div class="modal fade" id="dropPriceModal" tabindex="-1" aria-labelledby="dropPriceModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden">
+                <div class="modal-header bg-danger text-white py-3 px-4">
+                    <h5 class="modal-title fw-bold" id="dropPriceModalLabel">
+                        <i class="fas fa-arrow-down-long text-warning me-2"></i>Simulate Live Price Drop
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4 bg-light">
+                    <input type="hidden" id="dpAlertId">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-muted text-uppercase mb-1">Tracked Product</label>
+                        <div class="fw-extrabold text-dark fs-6" id="dpProductName">Product Title</div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <div class="p-2.5 rounded-3 bg-white border text-center">
+                                <span class="small text-muted d-block fw-semibold">Current Price</span>
+                                <span class="fs-5 fw-extrabold text-dark" id="dpCurrentPriceDisplay">₹0</span>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2.5 rounded-3 bg-white border text-center">
+                                <span class="small text-muted d-block fw-semibold">Target Price</span>
+                                <span class="fs-5 fw-extrabold text-success" id="dpTargetPriceDisplay">₹0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-muted text-uppercase mb-1.5 d-flex justify-content-between align-items-center">
+                            <span>New Dropped Price (₹)</span>
+                            <span class="badge bg-danger text-white fw-bold" id="dpSavingsBadge">-₹0 saved</span>
+                        </label>
+                        <div class="input-group mb-2">
+                            <span class="input-group-text bg-white fw-bold text-dark fs-5">₹</span>
+                            <input type="number" id="dpNewPriceInput" class="form-control form-control-lg fw-extrabold text-danger"
+                                placeholder="Enter dropped price (e.g. 349)" min="1" step="1" oninput="onDpPriceChange()">
+                        </div>
+
+                        <!-- Quick Presets -->
+                        <div class="d-flex gap-1.5 flex-wrap align-items-center">
+                            <span class="small text-muted me-1" style="font-size:0.75rem;">1-Click Drop:</span>
+                            <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetDrop(0.05)">-5%</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetDrop(0.10)">-10%</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetDrop(0.15)">-15%</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill py-0.5 px-2.5" onclick="setPresetDrop(0.25)">-25%</button>
+                            <button type="button" class="btn btn-outline-danger btn-sm rounded-pill py-0.5 px-2.5 fw-bold" onclick="setPresetDropToTarget()">🎯 Just Below Target</button>
+                        </div>
+                    </div>
+
+                    <div class="p-3 rounded-3 bg-white border border-danger border-opacity-25 mb-3">
+                        <div class="d-flex align-items-start gap-2">
+                            <i class="fas fa-paper-plane text-danger mt-1"></i>
+                            <div class="small">
+                                <strong>Live Notification:</strong> Dropping this price will immediately update the dashboard and dispatch the automated price-drop email alert to <strong class="text-primary" id="dpRecipientEmail">your email</strong> in live.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="dpErrorAlert" class="alert alert-danger py-2 px-3 small rounded-3 d-none"></div>
+
+                    <button type="button" id="dpSubmitBtn" class="btn btn-danger w-100 py-2.5 rounded-pill fw-bold fs-6 shadow-sm text-white" onclick="submitLivePriceDrop()">
+                        <i class="fas fa-bolt me-1.5"></i>Apply Price Drop &amp; Send Live Alert Email 🚀
+                    </button>
                 </div>
             </div>
         </div>
@@ -485,6 +650,7 @@
         }
 
         // ════════════ TWO-WAY ANY PERCENTAGE DROP ENGINE ════════════
+        // ════════════ TWO-WAY ANY PERCENTAGE DROP & TARGET PRICE ENGINE ════════════
         let currentNaMode = 'percent';
 
         function switchNaMode(mode) {
@@ -494,21 +660,38 @@
             const secPct = document.getElementById('naSectionPct');
             const secPrice = document.getElementById('naSectionPrice');
             const badge = document.getElementById('naSelectedOptionBadge');
+            const cur = parseFloat(document.getElementById('naCurrentPrice').value) || 0;
 
             if (mode === 'percent') {
                 btnPct.className = 'btn btn-sm rounded-pill fw-bold btn-primary';
                 btnPrice.className = 'btn btn-sm rounded-pill fw-bold btn-light text-muted';
-                secPct.style.border = '2px solid #0284c7';
-                secPrice.style.border = '1px solid #e2e8f0';
-                if (badge) badge.innerText = 'Any % Drop Mode';
-                document.getElementById('naInputPct').focus();
+                secPct.style.display = 'block';
+                secPrice.style.display = 'none';
+                if (badge) {
+                    badge.innerText = 'Any % Drop Mode';
+                    badge.className = 'badge bg-primary bg-opacity-10 text-primary fw-bold';
+                }
+                const pct = parseFloat(document.getElementById('naInputPct').value) || 10;
+                onNaPctInput(pct);
+                setTimeout(() => { const el = document.getElementById('naInputPct'); if (el) el.focus(); }, 50);
             } else {
                 btnPrice.className = 'btn btn-sm rounded-pill fw-bold btn-success text-white';
                 btnPct.className = 'btn btn-sm rounded-pill fw-bold btn-light text-muted';
-                secPrice.style.border = '2px solid #10b981';
-                secPct.style.border = '1px solid #e2e8f0';
-                if (badge) badge.innerText = 'Target Price Mode';
-                document.getElementById('naTargetPrice').focus();
+                secPct.style.display = 'none';
+                secPrice.style.display = 'block';
+                if (badge) {
+                    badge.innerText = 'Exact Target Price Mode';
+                    badge.className = 'badge bg-success bg-opacity-10 text-success fw-bold';
+                }
+                const pct = parseFloat(document.getElementById('naInputPct').value) || 10;
+                let target = parseFloat(document.getElementById('naTargetPrice').value) || 0;
+                if (cur > 0 && (target <= 0 || target >= cur)) {
+                    target = Math.max(1, Math.round(cur * (1.0 - pct / 100.0)));
+                    document.getElementById('naTargetPrice').value = target;
+                }
+                renderNaPricePresets(cur);
+                onNaTargetPriceInput(target);
+                setTimeout(() => { const el = document.getElementById('naTargetPrice'); if (el) el.focus(); }, 50);
             }
         }
 
@@ -519,7 +702,7 @@
             if (badge) badge.innerText = (pct > 0 ? pct : 0) + '% OFF';
 
             if (cur > 0 && pct > 0) {
-                const target = Math.max(1, Math.round(cur * (1 - pct / 100)));
+                const target = Math.max(1, Math.round(cur * (1.0 - pct / 100.0)));
                 document.getElementById('naTargetPrice').value = target;
                 updateNaSavingsDisplay(cur, target, pct);
             }
@@ -529,22 +712,57 @@
             const cur = parseFloat(document.getElementById('naCurrentPrice').value) || 0;
             const target = parseFloat(targetVal) || 0;
             if (cur > 0 && target > 0) {
-                const pct = Math.max(0, Math.round(((cur - target) / cur) * 1000) / 10);
+                const savings = Math.max(0, cur - target);
+                const pct = cur > target ? Math.round(((cur - target) / cur) * 1000) / 10 : 0;
                 document.getElementById('naInputPct').value = pct;
                 const badge = document.getElementById('naPctBadge');
                 if (badge) badge.innerText = pct + '% OFF';
                 updateNaSavingsDisplay(cur, target, pct);
+            } else {
+                updateNaSavingsDisplay(cur, 0, 0);
             }
         }
 
         function onNaCurrentPriceChange() {
-            const pct = parseFloat(document.getElementById('naInputPct').value) || 10;
-            onNaPctInput(pct);
+            const cur = parseFloat(document.getElementById('naCurrentPrice').value) || 0;
+            renderNaPricePresets(cur);
+            if (currentNaMode === 'percent') {
+                const pct = parseFloat(document.getElementById('naInputPct').value) || 10;
+                onNaPctInput(pct);
+            } else {
+                let target = parseFloat(document.getElementById('naTargetPrice').value) || 0;
+                if (target <= 0 && cur > 0) {
+                    target = Math.max(1, Math.round(cur * 0.9));
+                    document.getElementById('naTargetPrice').value = target;
+                }
+                onNaTargetPriceInput(target);
+            }
         }
 
         function setPresetPct(pct) {
             document.getElementById('naInputPct').value = pct;
             onNaPctInput(pct);
+        }
+
+        function applyNaExactTarget(targetPrice) {
+            document.getElementById('naTargetPrice').value = targetPrice;
+            onNaTargetPriceInput(targetPrice);
+        }
+
+        function renderNaPricePresets(cur) {
+            const container = document.getElementById('naPricePresetsContainer');
+            if (!container) return;
+            if (cur <= 0) {
+                container.innerHTML = '<span class="small text-muted">Enter baseline price above to view quick targets</span>';
+                return;
+            }
+            const percentages = [5, 10, 15, 20, 25, 30, 50];
+            let html = '<span class="small text-muted me-1 fw-bold" style="font-size:0.75rem;">Quick Price Targets:</span>';
+            percentages.forEach(pct => {
+                const target = Math.max(1, Math.round(cur * (1.0 - pct / 100.0)));
+                html += `<button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5 fw-semibold" onclick="applyNaExactTarget(${target})">₹${target.toLocaleString('en-IN')} <small class="text-muted">(-${pct}%)</small></button> `;
+            });
+            container.innerHTML = html;
         }
 
         function updateNaSavingsDisplay(cur, target, pct) {
@@ -555,32 +773,92 @@
             const calcDrop = document.getElementById('naCalcDropAmount');
             const calcTarget = document.getElementById('naCalcTargetPrice');
 
+            // Price mode elements
+            const priceCur = document.getElementById('naPriceCalcCurrent');
+            const priceDrop = document.getElementById('naPriceCalcDropAmount');
+            const priceTarget = document.getElementById('naPriceCalcTargetPrice');
+
+            const curText = '₹' + cur.toLocaleString('en-IN');
+            const dropText = savings > 0 ? `-₹${savings.toLocaleString('en-IN')} (${pct}%)` : `₹0 (0%)`;
+            const targetText = target > 0 ? '₹' + target.toLocaleString('en-IN') : '₹0';
+            const savingsText = target > 0 && savings > 0 
+                ? `You Save: ₹${savings.toLocaleString('en-IN')} (-${pct}%)` 
+                : (target >= cur ? `Target Price: ₹${target.toLocaleString('en-IN')}` : `Enter target price`);
+
             if (savingsEl) {
-                savingsEl.innerText = `You Save: ₹${savings.toLocaleString('en-IN')} (-${pct}%)`;
+                savingsEl.innerText = savingsText;
             }
             if (diffText) {
-                diffText.innerText = `Requires ₹${savings.toLocaleString('en-IN')} drop`;
+                if (savings > 0) {
+                    diffText.innerText = `Requires ₹${savings.toLocaleString('en-IN')} drop`;
+                } else if (target > 0 && target >= cur) {
+                    diffText.innerText = `Alert triggers when price reaches ₹${target.toLocaleString('en-IN')}`;
+                } else {
+                    diffText.innerText = '';
+                }
             }
-            if (calcCur) calcCur.innerText = '₹' + cur.toLocaleString('en-IN');
-            if (calcDrop) calcDrop.innerText = `-₹${savings.toLocaleString('en-IN')} (${pct}%)`;
-            if (calcTarget) calcTarget.innerText = '₹' + target.toLocaleString('en-IN');
+            if (calcCur) calcCur.innerText = curText;
+            if (calcDrop) calcDrop.innerText = dropText;
+            if (calcTarget) calcTarget.innerText = targetText;
+
+            if (priceCur) priceCur.innerText = curText;
+            if (priceDrop) priceDrop.innerText = dropText;
+            if (priceTarget) priceTarget.innerText = targetText;
         }
 
         async function submitCustomAlert() {
             const submitBtn = document.getElementById('naSubmitBtn');
             const msgEl = document.getElementById('naAlertMessage');
+
+            const pName = document.getElementById('naProductName').value.trim();
+            const email = document.getElementById('naEmail').value.trim();
+            const curPrice = parseInt(document.getElementById('naCurrentPrice').value) || 0;
+            let targetPrice = parseInt(document.getElementById('naTargetPrice').value) || 0;
+            let targetPct = parseFloat(document.getElementById('naInputPct').value) || 0;
+
+            if (!pName) {
+                msgEl.className = 'alert alert-danger py-2 px-3 small rounded-3';
+                msgEl.innerText = "Please enter a product name.";
+                return;
+            }
+            if (!email) {
+                msgEl.className = 'alert alert-danger py-2 px-3 small rounded-3';
+                msgEl.innerText = "Please provide a valid notification email.";
+                return;
+            }
+            if (currentNaMode === 'percent') {
+                if (isNaN(targetPct) || targetPct <= 0 || targetPct >= 100) {
+                    msgEl.className = 'alert alert-danger py-2 px-3 small rounded-3';
+                    msgEl.innerText = "Please enter a valid percentage drop between 1% and 99%.";
+                    return;
+                }
+                if (curPrice > 0 && targetPrice <= 0) {
+                    targetPrice = Math.max(1, Math.round(curPrice * (1 - targetPct / 100)));
+                }
+            } else {
+                if (isNaN(targetPrice) || targetPrice <= 0) {
+                    msgEl.className = 'alert alert-danger py-2 px-3 small rounded-3';
+                    msgEl.innerText = "Please enter a valid target price greater than ₹0.";
+                    return;
+                }
+                if (curPrice > 0 && targetPct <= 0) {
+                    targetPct = Math.round(((curPrice - targetPrice) / curPrice) * 1000) / 10;
+                }
+            }
+
             submitBtn.disabled = true;
             submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Activating...';
             msgEl.className = 'alert d-none';
 
             const payload = {
-                product_name: document.getElementById('naProductName').value.trim(),
-                current_price: parseInt(document.getElementById('naCurrentPrice').value) || 0,
-                target_price: parseInt(document.getElementById('naTargetPrice').value) || 0,
-                target_pct: parseFloat(document.getElementById('naInputPct').value) || 0,
-                email: document.getElementById('naEmail').value.trim(),
+                product_name: pName,
+                current_price: curPrice,
+                target_price: targetPrice,
+                target_pct: targetPct,
+                alert_mode: currentNaMode,
+                email: email,
                 platform: document.getElementById('naPlatform').value,
-                test_trigger_now: document.getElementById('naTestTriggerNow').checked
+                test_trigger_now: false
             };
 
             try {
@@ -592,7 +870,7 @@
                 const data = await res.json();
                 if (data.success) {
                     msgEl.className = 'alert alert-success py-2 px-3 small rounded-3';
-                    msgEl.innerText = data.message || "Price Alert Activated! Email dispatched.";
+                    msgEl.innerText = data.message || "Price Alert Activated! Monitoring 24/7.";
                     setTimeout(() => window.location.reload(), 1200);
                 } else {
                     msgEl.className = 'alert alert-danger py-2 px-3 small rounded-3';
@@ -608,8 +886,121 @@
             }
         }
 
+        // ════════════ LIVE PRICE DROP SIMULATION & DISPATCH ════════════
+        let activeDpCurrentPrice = 0;
+        let activeDpTargetPrice = 0;
+
+        function openDropPriceModal(alertId, productName, currentPrice, targetPrice, email) {
+            document.getElementById('dpAlertId').value = alertId;
+            document.getElementById('dpProductName').innerText = productName;
+            document.getElementById('dpRecipientEmail').innerText = email;
+            activeDpCurrentPrice = parseInt(currentPrice) || 0;
+            activeDpTargetPrice = parseInt(targetPrice) || 0;
+
+            document.getElementById('dpCurrentPriceDisplay').innerText = '₹' + activeDpCurrentPrice.toLocaleString('en-IN');
+            document.getElementById('dpTargetPriceDisplay').innerText = '₹' + activeDpTargetPrice.toLocaleString('en-IN');
+
+            let suggestedPrice = 0;
+            if (activeDpTargetPrice > 0) {
+                suggestedPrice = Math.max(1, activeDpTargetPrice - Math.max(1, Math.round(activeDpTargetPrice * 0.05)));
+            } else if (activeDpCurrentPrice > 0) {
+                suggestedPrice = Math.max(1, Math.round(activeDpCurrentPrice * 0.85));
+            }
+            document.getElementById('dpNewPriceInput').value = suggestedPrice;
+            onDpPriceChange();
+
+            const errEl = document.getElementById('dpErrorAlert');
+            errEl.classList.add('d-none');
+            const m = new bootstrap.Modal(document.getElementById('dropPriceModal'));
+            m.show();
+        }
+
+        function onDpPriceChange() {
+            const inputVal = parseInt(document.getElementById('dpNewPriceInput').value) || 0;
+            const badge = document.getElementById('dpSavingsBadge');
+            const refPrice = activeDpCurrentPrice > 0 ? activeDpCurrentPrice : activeDpTargetPrice;
+            if (inputVal > 0 && refPrice > inputVal) {
+                const diff = refPrice - inputVal;
+                const pct = Math.round((diff / refPrice) * 1000) / 10;
+                badge.innerText = `-₹${diff.toLocaleString('en-IN')} (-${pct}%)`;
+                badge.className = 'badge bg-danger text-white fw-bold';
+            } else if (inputVal >= refPrice && inputVal > 0) {
+                badge.innerText = `No price reduction`;
+                badge.className = 'badge bg-secondary text-white fw-bold';
+            } else {
+                badge.innerText = `-₹0 saved`;
+                badge.className = 'badge bg-secondary text-white fw-bold';
+            }
+        }
+
+        function setPresetDrop(fraction) {
+            const base = activeDpCurrentPrice > 0 ? activeDpCurrentPrice : (activeDpTargetPrice > 0 ? activeDpTargetPrice : 1000);
+            const dropped = Math.max(1, Math.round(base * (1 - fraction)));
+            document.getElementById('dpNewPriceInput').value = dropped;
+            onDpPriceChange();
+        }
+
+        function setPresetDropToTarget() {
+            if (activeDpTargetPrice > 0) {
+                const dropped = Math.max(1, activeDpTargetPrice - 1);
+                document.getElementById('dpNewPriceInput').value = dropped;
+                onDpPriceChange();
+            } else {
+                setPresetDrop(0.10);
+            }
+        }
+
+        async function submitLivePriceDrop() {
+            const alertId = document.getElementById('dpAlertId').value;
+            const newPrice = parseInt(document.getElementById('dpNewPriceInput').value) || 0;
+            const errEl = document.getElementById('dpErrorAlert');
+            const btn = document.getElementById('dpSubmitBtn');
+            const email = document.getElementById('dpRecipientEmail').innerText;
+
+            if (newPrice <= 0) {
+                errEl.innerText = "Please enter a valid dropped price greater than ₹0.";
+                errEl.classList.remove('d-none');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Dropping price & sending live email...';
+            errEl.classList.add('d-none');
+
+            try {
+                const resp = await fetch(`/api/price-alerts/${alertId}/simulate-drop`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_price: newPrice })
+                });
+                const data = await resp.json();
+
+                if (resp.ok && data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('dropPriceModal')).hide();
+                    showToast(`🔥 Live price dropped to ₹${newPrice.toLocaleString('en-IN')}! Email alert sent directly to ${email}!`, true);
+                    
+                    // Immediately update UI card with green pulse animation
+                    const cardCol = document.getElementById(`alertCardCol-${alertId}`);
+                    if (cardCol) {
+                        cardCol.classList.add('pulse-update');
+                        setTimeout(() => cardCol.classList.remove('pulse-update'), 2500);
+                    }
+                    pollPriceAlerts();
+                } else {
+                    errEl.innerText = data.message || "Failed to execute price drop.";
+                    errEl.classList.remove('d-none');
+                }
+            } catch (err) {
+                errEl.innerText = "Network error: " + err.message;
+                errEl.classList.remove('d-none');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-bolt me-1.5"></i>Apply Price Drop &amp; Send Live Alert Email 🚀';
+            }
+        }
+
         async function testTriggerAlert(alertId, productName, email) {
-            showToast(`Triggering test price drop email for "${productName}"...`);
+            showToast(`Sending real test email for "${productName}" to ${email}...`);
             try {
                 const res = await fetch(`/api/price-alerts/${alertId}/trigger`, {
                     method: 'POST',
@@ -618,10 +1009,11 @@
                 });
                 const data = await res.json();
                 if (data.success) {
-                    showToast(`✅ Price Drop Email dispatched successfully to ${email}! Check your inbox.`, true);
-                    setTimeout(() => window.location.reload(), 2000);
+                    showToast(`✅ Test email dispatched successfully to ${email}! Check your inbox.`, true);
+                    pollPriceAlerts();
                 } else {
-                    showToast(`❌ Failed: ${data.message}`, false);
+                    showToast(`❌ Test email failed: ${data.message || 'Service refused delivery'}`, false);
+                    pollPriceAlerts();
                 }
             } catch (err) {
                 showToast(`❌ Network error: ${err.message}`, false);
@@ -639,6 +1031,7 @@
                     showToast("Price alert removed.");
                     const el = document.getElementById(`alertCardCol-${alertId}`);
                     if (el) el.remove();
+                    pollPriceAlerts();
                 } else {
                     showToast(data.message || "Could not delete alert.", false);
                 }
@@ -646,7 +1039,140 @@
                 showToast("Network error: " + err.message, false);
             }
         }
+
+        function renderStatusBadge(status, hasEmailSent) {
+            const st = (status || '').toLowerCase();
+            if (st === 'active' || st === 'monitoring') {
+                return `<span class="badge bg-success-subtle text-success border border-success fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                    <i class="fas fa-circle-notch fa-spin me-1"></i>Monitoring
+                </span>`;
+            } else if (st === 'target_reached') {
+                return `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                    <i class="fas fa-bullseye me-1"></i>Target Price Reached
+                </span>`;
+            } else if (st === 'email_sending') {
+                return `<span class="badge bg-info-subtle text-info-emphasis border border-info fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                    <i class="fas fa-spinner fa-spin me-1"></i>Email Sending
+                </span>`;
+            } else if (st === 'email_sent' || (st === 'triggered' && hasEmailSent)) {
+                return `<span class="badge bg-success text-white fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                    <i class="fas fa-paper-plane me-1"></i>Email Sent
+                </span>`;
+            } else if (st === 'email_failed') {
+                return `<span class="badge bg-danger text-white fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                    <i class="fas fa-exclamation-triangle me-1"></i>Email Failed
+                </span>`;
+            } else {
+                return `<span class="badge bg-secondary text-white fw-bold px-2 py-1 rounded-pill" style="font-size: 0.72rem;">
+                    ${status ? (status.charAt(0).toUpperCase() + status.slice(1)) : 'Monitoring'}
+                </span>`;
+            }
+        }
+
+        async function pollPriceAlerts() {
+            try {
+                const userEmail = "{{ user_email or '' }}";
+                const url = userEmail ? `/api/price-alerts?email=${encodeURIComponent(userEmail)}` : '/api/price-alerts';
+                const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data || !data.success || !Array.isArray(data.alerts)) return;
+
+                // Update counter badges
+                const statTotal = document.getElementById('statTotalCount');
+                const statActive = document.getElementById('statActiveCount');
+                const statTriggered = document.getElementById('statTriggeredCount');
+                if (statTotal && data.count !== undefined) statTotal.innerText = data.count;
+                if (statActive && data.active_count !== undefined) statActive.innerText = data.active_count;
+                if (statTriggered && data.triggered_count !== undefined) statTriggered.innerText = data.triggered_count;
+
+                data.alerts.forEach(a => {
+                    const cardCol = document.getElementById(`alertCardCol-${a.id}`);
+                    if (!cardCol) return;
+
+                    // 1. Latest Price
+                    const latestEl = document.getElementById(`alertLatestPrice-${a.id}`);
+                    if (latestEl) {
+                        const newPriceFormatted = '₹' + Number(a.latest_price || 0).toLocaleString('en-IN');
+                        if (latestEl.innerText !== newPriceFormatted) {
+                            latestEl.innerText = newPriceFormatted;
+                            cardCol.classList.add('pulse-update');
+                            setTimeout(() => cardCol.classList.remove('pulse-update'), 1500);
+                        }
+                    }
+
+                    // 2. Previous Price
+                    const prevEl = document.getElementById(`alertPrevPrice-${a.id}`);
+                    if (prevEl) {
+                        prevEl.innerText = '₹' + Number(a.previous_price || 0).toLocaleString('en-IN');
+                    }
+
+                    // 3. Target Price
+                    const targetEl = document.getElementById(`alertTargetPrice-${a.id}`);
+                    if (targetEl) {
+                        targetEl.innerText = '₹' + Number(a.target_price || 0).toLocaleString('en-IN');
+                    }
+
+                    // 4. Reduction Amount & Percentage
+                    const redEl = document.getElementById(`alertReduction-${a.id}`);
+                    if (redEl) {
+                        if (a.reduction_amount && a.reduction_amount > 0) {
+                            redEl.className = 'fw-bold text-danger';
+                            redEl.innerText = `-₹${Number(a.reduction_amount).toLocaleString('en-IN')} (-${a.reduction_pct}%)`;
+                        } else {
+                            redEl.className = 'text-muted small';
+                            redEl.innerText = 'Awaiting Drop';
+                        }
+                    }
+
+                    // 5. Status Badge
+                    const badgeWrap = document.getElementById(`alertStatusBadgeWrap-${a.id}`);
+                    if (badgeWrap) {
+                        badgeWrap.innerHTML = renderStatusBadge(a.status, !!a.last_email_sent_time_str);
+                    }
+
+                    // 6. Email Status Text
+                    const emailStatEl = document.getElementById(`alertEmailStatus-${a.id}`);
+                    if (emailStatEl) {
+                        const stStr = (a.notification_status || 'monitoring').toUpperCase();
+                        let cls = 'fw-bold text-uppercase ';
+                        if (stStr === 'SENT') cls += 'text-success';
+                        else if (stStr === 'FAILED') cls += 'text-danger';
+                        else if (stStr === 'SENDING') cls += 'text-info';
+                        else cls += 'text-muted';
+                        emailStatEl.className = cls;
+                        emailStatEl.innerText = stStr;
+                    }
+
+                    // 7. Last Checked Time
+                    const lastCheckedEl = document.getElementById(`alertLastChecked-${a.id}`);
+                    if (lastCheckedEl && a.last_checked_time_str) {
+                        lastCheckedEl.innerText = a.last_checked_time_str;
+                    }
+
+                    // 8. Notification Sent Time
+                    const sentRow = document.getElementById(`alertSentTimeRow-${a.id}`);
+                    const sentTimeEl = document.getElementById(`alertSentTime-${a.id}`);
+                    if (sentRow && sentTimeEl) {
+                        if (a.last_email_sent_time_str) {
+                            sentRow.classList.remove('d-none');
+                            sentTimeEl.innerText = a.last_email_sent_time_str;
+                        } else {
+                            sentRow.classList.add('d-none');
+                        }
+                    }
+                });
+            } catch (err) {
+                // Silently handle polling errors
+            }
+        }
+
+        // Initialize Real-time Polling every 3.5 seconds
+        document.addEventListener('DOMContentLoaded', () => {
+            setInterval(pollPriceAlerts, 3500);
+        });
     </script>
+
 </body>
 
 </html>

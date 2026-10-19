@@ -59,5 +59,6 @@ Thumbs.db
 # Project scratch / temp artifacts
 scratch/*.png
 scratch/*.jpg
+price_prediction_chart_test.png
 .vercel
 .env*.local

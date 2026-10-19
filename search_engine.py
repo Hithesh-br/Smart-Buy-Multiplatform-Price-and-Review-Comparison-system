@@ -143,6 +143,77 @@ def fetch_all_products_parallel(query: str, bypass_fresh: bool = False) -> tuple
     return raw_results, platform_status
 
 
+def fetch_single_platform(platform_name: str, query: str, bypass_fresh: bool = True) -> tuple[list, dict]:
+    """
+    Fetch products for a single platform independently for retry or on-demand refresh.
+    Returns: (items_list, platform_status_dict)
+    """
+    clean_name = None
+    for name in _scrapers_instances:
+        if name.lower() == platform_name.strip().lower():
+            clean_name = name
+            break
+    if not clean_name:
+        return [], {
+            "platform": platform_name,
+            "status": "error",
+            "available": False,
+            "count": 0,
+            "error": f"Unknown platform '{platform_name}'",
+            "retry_available": False
+        }
+
+    # Check cache if not bypass_fresh
+    if not bypass_fresh:
+        cached_entry = get_platform_cached_results(clean_name, query, bypass_fresh=False)
+        if cached_entry and cached_entry.get("results"):
+            items = cached_entry["results"]
+            stat = cached_entry.get("scrape_status", "success")
+            return items, {
+                "platform": clean_name,
+                "status": stat,
+                "available": True,
+                "count": len(items),
+                "error": None,
+                "duration": 0.0,
+                "source": "cache",
+                "retry_available": False
+            }
+
+    scraper_obj = _scrapers_instances[clean_name]
+    start = time.time()
+    try:
+        items, status, err_msg = scraper_obj.search_products(query)
+        dur = round(time.time() - start, 2)
+        stat_val = status.value if hasattr(status, "value") else str(status)
+        final_stat = stat_val if items else (stat_val if stat_val != "success" else "no_products_found")
+        if items:
+            set_platform_cached_results(clean_name, query, items, stat_val)
+        return items or [], {
+            "platform": clean_name,
+            "status": final_stat,
+            "available": bool(items),
+            "count": len(items or []),
+            "error": err_msg,
+            "duration": dur,
+            "source": "live",
+            "retry_available": not bool(items)
+        }
+    except Exception as err:
+        dur = round(time.time() - start, 2)
+        logger.exception(f"[{clean_name}] Single platform search exception: {err}")
+        return [], {
+            "platform": clean_name,
+            "status": "scraper_error",
+            "available": False,
+            "count": 0,
+            "error": str(err),
+            "duration": dur,
+            "source": "live",
+            "retry_available": True
+        }
+
+
 def fetch_all_products_with_fallbacks(query_chain: list[str], bypass_fresh: bool = False) -> tuple[dict, dict]:
     """
     Execute scraper search with automatic fallback loop:

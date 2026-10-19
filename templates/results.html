@@ -1571,6 +1571,7 @@
                                     <button type="button"
                                             class="btn btn-outline-warning btn-sm w-100 mt-1.5 rounded-pill py-1.5 fw-bold d-flex align-items-center justify-content-center text-dark shadow-xs"
                                             style="font-size: 0.78rem; border-color: #f59e0b; background: #fffbeb;"
+                                            data-product-id="{{ item.product_id or item.id or item._id or '' }}"
                                             data-product-name="{{ item.title }}"
                                             data-product-image="{{ item.image or item.image_url }}"
                                             data-platform="{{ platform }}"
@@ -1980,9 +1981,9 @@
 
                                     <!-- 1. Quality Score (First Preference) -->
                                     <td style="background:rgba(14,165,233,0.03);">
-                                        {% if item.quality_score is not none and item.get('has_sufficient_data', True) %}
+                                        {% if item.quality_score is defined and item.quality_score is not none and item.get('has_sufficient_data', True) %}
                                         <span class="badge bg-primary-subtle text-primary border border-primary px-2 py-1 rounded-pill fw-bold d-inline-block" style="font-size:0.75rem;">
-                                            <i class="fas fa-award me-1"></i>{{ item.quality_score|round|int }}/100
+                                            <i class="fas fa-award me-1"></i>{{ (item.quality_score or 0)|round|int }}/100
                                         </span>
                                         <div class="small text-muted mt-1" style="font-size:0.68rem;">{{ item.quality_band or 'Standard Quality' }}</div>
                                         {% else %}
@@ -2269,6 +2270,7 @@
                         <button type="button"
                                 class="btn btn-outline-warning btn-sm w-100 mt-1.5 rounded-pill py-1 fw-bold d-flex align-items-center justify-content-center text-dark shadow-xs"
                                 style="font-size: 0.74rem; border-color: #f59e0b; background: #fffbeb;"
+                                data-product-id="{{ item.product_id or item.id or item._id or '' }}"
                                 data-product-name="{{ item.title }}"
                                 data-product-image="{{ item.image or item.image_url }}"
                                 data-platform="{{ item.platform }}"
@@ -2897,7 +2899,8 @@ function updateThemeIcon(isDark) {
                         </div>
                     </div>
 
-                    <form id="priceAlertForm" onsubmit="event.preventDefault(); submitPriceAlertModal();">
+                    <form id="priceAlertForm" novalidate onsubmit="event.preventDefault(); submitPriceAlertModal();">
+                        <input type="hidden" id="paHiddenProductId">
                         <input type="hidden" id="paHiddenName">
                         <input type="hidden" id="paHiddenUrl">
                         <input type="hidden" id="paHiddenImg">
@@ -2921,7 +2924,7 @@ function updateThemeIcon(isDark) {
                         </div>
 
                         <!-- ══ Option A: Enter Any Percentage Drop (%) ══ -->
-                        <div id="paSectionPct" class="card border-0 rounded-3 shadow-xs p-3 mb-3 bg-white border">
+                        <div id="paSectionPct" class="card border-0 rounded-3 shadow-xs p-3 mb-3 bg-white border" style="border: 2px solid #0284c7 !important;">
                             <div class="d-flex align-items-center justify-content-between mb-2">
                                 <label class="form-label fw-bold small text-dark text-uppercase mb-0">
                                     <i class="fas fa-percent text-primary me-1"></i>Enter Any Percentage Drop (%)
@@ -2931,7 +2934,7 @@ function updateThemeIcon(isDark) {
                             
                             <div class="input-group mb-2">
                                 <input type="number" id="paInputPct" class="form-control form-control-lg fw-extrabold text-primary"
-                                    placeholder="Enter ANY % (e.g. 5, 8, 12, 18, 25, 33)" min="1" max="95" step="0.5" value="10"
+                                    placeholder="Enter ANY % (e.g. 5, 8, 12, 18, 25, 33)" min="1" max="95" step="any" value="10"
                                     oninput="onPaPctInput(this.value)">
                                 <span class="input-group-text bg-light fw-bold text-primary fs-5">% DROP</span>
                             </div>
@@ -2952,7 +2955,7 @@ function updateThemeIcon(isDark) {
                             <!-- Live calculation breakdown -->
                             <div class="p-2.5 rounded-3 bg-light border">
                                 <div class="d-flex justify-content-between align-items-center small text-muted">
-                                    <span>Current: <strong class="text-dark" id="paCalcCurrent">₹0</strong></span>
+                                    <span>Current Baseline: <strong class="text-dark" id="paCalcCurrent">₹0</strong></span>
                                     <span>Discount: <strong class="text-danger" id="paCalcDropAmount">-₹0</strong></span>
                                 </div>
                                 <div class="d-flex justify-content-between align-items-center mt-1 pt-1 border-top">
@@ -2963,21 +2966,46 @@ function updateThemeIcon(isDark) {
                         </div>
 
                         <!-- ══ Option B: Exact Target Price in Rupees (₹) ══ -->
-                        <div id="paSectionPrice" class="card border-0 rounded-3 shadow-xs p-3 mb-3 bg-white border">
+                        <div id="paSectionPrice" class="card border-0 rounded-3 shadow-xs p-3 mb-3 bg-white border" style="display: none; border: 2px solid #10b981 !important;">
                             <div class="d-flex align-items-center justify-content-between mb-1">
                                 <label class="form-label fw-bold small text-dark text-uppercase mb-0">
                                     <i class="fas fa-tag text-success me-1"></i>Exact Target Price (₹) *
                                 </label>
-                                <small class="text-success fw-bold" id="paSavingsBadge" style="font-size: 0.8rem;">You Save: ₹0</small>
+                                <span class="badge bg-success text-white fw-bold px-2 py-1" id="paSavingsBadge">You Save: ₹0</span>
                             </div>
-                            <div class="input-group">
+                            <div class="input-group mb-2">
                                 <span class="input-group-text bg-light fw-bold text-success fs-5">₹</span>
                                 <input type="number" id="paInputTarget" class="form-control form-control-lg rounded-end fw-extrabold text-success"
-                                    placeholder="e.g. 19999" required oninput="onPaTargetPriceInput(this.value)">
+                                    placeholder="e.g. 19999" min="1" step="any" oninput="onPaTargetPriceInput(this.value)">
                             </div>
-                            <div class="d-flex align-items-center justify-content-between mt-1">
+
+                            <!-- Quick preset pills for target price (shows exact target price in Rupees) -->
+                            <div class="d-flex gap-1.5 flex-wrap align-items-center mb-2" id="paPricePresetsContainer">
+                                <span class="small text-muted me-1 fw-bold" style="font-size:0.75rem;">Quick Price Targets:</span>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(5)">-5%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(10)">-10%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(15)">-15%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(20)">-20%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(25)">-25%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(30)">-30%</button>
+                                <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5" onclick="applyPaPreset(50)">-50%</button>
+                            </div>
+
+                            <!-- Live calculation breakdown for Price Mode -->
+                            <div class="p-2.5 rounded-3 bg-light border">
+                                <div class="d-flex justify-content-between align-items-center small text-muted">
+                                    <span>Current Baseline: <strong class="text-dark" id="paPriceCalcCurrent">₹0</strong></span>
+                                    <span>Discount: <strong class="text-danger" id="paPriceCalcDropAmount">-₹0 (0%)</strong></span>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mt-1 pt-1 border-top">
+                                    <span class="small fw-bold text-dark">🎯 Target Trigger Price:</span>
+                                    <span class="fs-6 fw-extrabold text-success" id="paPriceCalcTargetPrice">₹0</span>
+                                </div>
+                            </div>
+
+                            <div class="d-flex align-items-center justify-content-between mt-2">
                                 <small class="text-muted" style="font-size: 0.76rem;">Alert triggers when product price drops to or below this amount.</small>
-                                <small class="fw-bold text-primary" id="paLiveDiffText" style="font-size: 0.76rem;"></small>
+                                <small class="fw-bold text-success" id="paLiveDiffText" style="font-size: 0.76rem;"></small>
                             </div>
                         </div>
 
@@ -2989,20 +3017,20 @@ function updateThemeIcon(isDark) {
                                     <i class="fas fa-check-circle me-1"></i>Verified Account
                                 </span>
                             </div>
-                            <input type="email" id="paInputEmail" class="form-control rounded-3 bg-light fw-semibold" value="{{ current_user.email }}" readonly required>
+                            <input type="email" id="paInputEmail" class="form-control rounded-3 bg-light fw-semibold" value="{{ current_user.email }}" readonly>
                             <small class="text-muted" style="font-size: 0.74rem;">Alert will be registered to your authenticated account and notifications sent here.</small>
                         </div>
 
-                        <div class="form-check form-switch mb-3">
-                            <input class="form-check-input" type="checkbox" id="paTestTriggerToggle" checked>
-                            <label class="form-check-label small fw-semibold" for="paTestTriggerToggle">
-                                ⚡ Send test email notification immediately to verify
-                            </label>
+                        <!-- 24/7 Smart Alert Notice -->
+                        <div class="p-2.5 rounded-3 bg-white border mb-3 d-flex align-items-center gap-2 text-muted" style="font-size: 0.78rem;">
+                            <i class="fas fa-shield-alt text-success fs-5"></i>
+                            <span><strong>Smart Monitor:</strong> Notification email will only be sent when the actual product price reaches or drops below your target.</span>
                         </div>
+                        <input type="hidden" id="paTestTriggerToggle" value="0">
 
                         <div id="paModalStatusAlert" class="alert d-none py-2.5 px-3 small rounded-3 mb-3"></div>
 
-                        <button type="submit" id="paModalBtn" class="btn btn-primary w-100 rounded-pill py-2.5 fw-bold shadow-sm">
+                        <button type="button" id="paModalBtn" onclick="submitPriceAlertModal()" class="btn btn-primary w-100 rounded-pill py-2.5 fw-bold shadow-sm">
                             <i class="fas fa-bell me-1"></i>Activate Price Alert &amp; View in Dashboard
                         </button>
                         {% else %}
@@ -3160,7 +3188,7 @@ function updateThemeIcon(isDark) {
         });
     });
 
-    // ════════════ PRICE ALERT MODAL HANDLERS (ANY % DROP SUPPORT) ════════════
+    // ════════════ PRICE ALERT MODAL HANDLERS (ANY % DROP & TARGET PRICE) ════════════
     let currentPaMode = 'percent';
 
     function switchPaMode(mode) {
@@ -3170,22 +3198,39 @@ function updateThemeIcon(isDark) {
         const secPct = document.getElementById('paSectionPct');
         const secPrice = document.getElementById('paSectionPrice');
         const badge = document.getElementById('paSelectedOptionBadge');
+        const cur = parseInt(document.getElementById('paHiddenCurPrice').value) || 0;
 
         if (mode === 'percent') {
             btnPct.className = 'btn btn-sm rounded-pill fw-bold btn-primary';
             btnPrice.className = 'btn btn-sm rounded-pill fw-bold btn-light text-muted';
-            secPct.classList.remove('opacity-50');
-            secPct.style.border = '2px solid #0284c7';
-            secPrice.style.border = '1px solid #e2e8f0';
-            if (badge) badge.innerText = 'Any % Drop Mode';
-            document.getElementById('paInputPct').focus();
+            secPct.style.display = 'block';
+            secPrice.style.display = 'none';
+            if (badge) {
+                badge.innerText = 'Any % Drop Mode';
+                badge.className = 'badge bg-primary bg-opacity-10 text-primary fw-bold';
+            }
+            const pct = parseFloat(document.getElementById('paInputPct').value) || 10;
+            onPaPctInput(pct);
+            setTimeout(() => { const el = document.getElementById('paInputPct'); if (el) el.focus(); }, 50);
         } else {
             btnPrice.className = 'btn btn-sm rounded-pill fw-bold btn-success text-white';
             btnPct.className = 'btn btn-sm rounded-pill fw-bold btn-light text-muted';
-            secPrice.style.border = '2px solid #10b981';
-            secPct.style.border = '1px solid #e2e8f0';
-            if (badge) badge.innerText = 'Target Price Mode';
-            document.getElementById('paInputTarget').focus();
+            secPct.style.display = 'none';
+            secPrice.style.display = 'block';
+            if (badge) {
+                badge.innerText = 'Exact Target Price Mode';
+                badge.className = 'badge bg-success bg-opacity-10 text-success fw-bold';
+            }
+            // Always convert current percentage and baseline price to exact target price value
+            const pct = parseFloat(document.getElementById('paInputPct').value) || 10;
+            let target = parseInt(document.getElementById('paInputTarget').value) || 0;
+            if (cur > 0 && (target <= 0 || target >= cur)) {
+                target = Math.max(1, Math.round(cur * (1.0 - pct / 100.0)));
+                document.getElementById('paInputTarget').value = target;
+            }
+            renderPaPricePresets(cur);
+            onPaTargetPriceInput(target);
+            setTimeout(() => { const el = document.getElementById('paInputTarget'); if (el) el.focus(); }, 50);
         }
     }
 
@@ -3196,7 +3241,7 @@ function updateThemeIcon(isDark) {
         if (badge) badge.innerText = (pct > 0 ? pct : 0) + '% OFF';
 
         if (cur > 0 && pct > 0) {
-            const target = Math.max(1, Math.round(cur * (1 - pct / 100)));
+            const target = Math.max(1, Math.round(cur * (1.0 - pct / 100.0)));
             document.getElementById('paInputTarget').value = target;
             updatePaSavingsDisplay(cur, target, pct);
         }
@@ -3206,17 +3251,41 @@ function updateThemeIcon(isDark) {
         const cur = parseInt(document.getElementById('paHiddenCurPrice').value) || 0;
         const target = parseInt(targetVal) || 0;
         if (cur > 0 && target > 0) {
-            const pct = Math.max(0, Math.round(((cur - target) / cur) * 1000) / 10);
+            const savings = Math.max(0, cur - target);
+            const pct = cur > target ? Math.round(((cur - target) / cur) * 1000) / 10 : 0;
             document.getElementById('paInputPct').value = pct;
             const badge = document.getElementById('paPctBadge');
             if (badge) badge.innerText = pct + '% OFF';
             updatePaSavingsDisplay(cur, target, pct);
+        } else {
+            updatePaSavingsDisplay(cur, 0, 0);
         }
     }
 
     function applyPaPreset(pct) {
         document.getElementById('paInputPct').value = pct;
         onPaPctInput(pct);
+    }
+
+    function applyPaExactTarget(targetPrice) {
+        document.getElementById('paInputTarget').value = targetPrice;
+        onPaTargetPriceInput(targetPrice);
+    }
+
+    function renderPaPricePresets(cur) {
+        const container = document.getElementById('paPricePresetsContainer');
+        if (!container) return;
+        if (cur <= 0) {
+            container.innerHTML = '<span class="small text-muted">Enter baseline price to view presets</span>';
+            return;
+        }
+        const percentages = [5, 10, 15, 20, 25, 30, 50];
+        let html = '<span class="small text-muted me-1 fw-bold" style="font-size:0.75rem;">Quick Price Targets:</span>';
+        percentages.forEach(pct => {
+            const target = Math.max(1, Math.round(cur * (1.0 - pct / 100.0)));
+            html += `<button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5 fw-semibold" onclick="applyPaExactTarget(${target})">₹${target.toLocaleString('en-IN')} <small class="text-muted">(-${pct}%)</small></button> `;
+        });
+        container.innerHTML = html;
     }
 
     function updatePaSavingsDisplay(cur, target, pct) {
@@ -3227,18 +3296,39 @@ function updateThemeIcon(isDark) {
         const calcDrop = document.getElementById('paCalcDropAmount');
         const calcTarget = document.getElementById('paCalcTargetPrice');
 
-        if (savingsEl) {
-            savingsEl.innerText = `You Save: ₹${savings.toLocaleString('en-IN')} (-${pct}%)`;
-        }
+        // Target Price mode breakdown elements
+        const priceCur = document.getElementById('paPriceCalcCurrent');
+        const priceDrop = document.getElementById('paPriceCalcDropAmount');
+        const priceTarget = document.getElementById('paPriceCalcTargetPrice');
+
+        const savingsText = target > 0 && savings > 0 
+            ? `You Save: ₹${savings.toLocaleString('en-IN')} (-${pct}%)` 
+            : (target >= cur ? `Target Price: ₹${target.toLocaleString('en-IN')}` : `Enter target price`);
+        const dropText = savings > 0 ? `-₹${savings.toLocaleString('en-IN')} (${pct}%)` : `₹0 (0%)`;
+        const curText = '₹' + cur.toLocaleString('en-IN');
+        const targetText = target > 0 ? '₹' + target.toLocaleString('en-IN') : '₹0';
+
+        if (savingsEl) savingsEl.innerText = savingsText;
         if (diffText) {
-            diffText.innerText = `Requires ₹${savings.toLocaleString('en-IN')} drop`;
+            if (savings > 0) {
+                diffText.innerText = `Requires ₹${savings.toLocaleString('en-IN')} drop`;
+            } else if (target > 0 && target >= cur) {
+                diffText.innerText = `Alert triggers when price reaches ₹${target.toLocaleString('en-IN')}`;
+            } else {
+                diffText.innerText = '';
+            }
         }
-        if (calcCur) calcCur.innerText = '₹' + cur.toLocaleString('en-IN');
-        if (calcDrop) calcDrop.innerText = `-₹${savings.toLocaleString('en-IN')} (${pct}%)`;
-        if (calcTarget) calcTarget.innerText = '₹' + target.toLocaleString('en-IN');
+        if (calcCur) calcCur.innerText = curText;
+        if (calcDrop) calcDrop.innerText = dropText;
+        if (calcTarget) calcTarget.innerText = targetText;
+
+        if (priceCur) priceCur.innerText = curText;
+        if (priceDrop) priceDrop.innerText = dropText;
+        if (priceTarget) priceTarget.innerText = targetText;
     }
 
     function openPriceAlertModal(btn) {
+        const id = btn.getAttribute('data-product-id') || '';
         const name = btn.getAttribute('data-product-name') || '';
         const img = btn.getAttribute('data-product-image') || '';
         const plat = btn.getAttribute('data-platform') || 'SmartBuy';
@@ -3247,6 +3337,8 @@ function updateThemeIcon(isDark) {
 
         let numPrice = parseInt(String(rawPrice).replace(/[^\d]/g, '')) || 0;
 
+        const hiddenId = document.getElementById('paHiddenProductId');
+        if (hiddenId) hiddenId.value = id;
         document.getElementById('paHiddenName').value = name;
         document.getElementById('paHiddenImg').value = img;
         document.getElementById('paHiddenPlatform').value = plat;
@@ -3258,6 +3350,8 @@ function updateThemeIcon(isDark) {
         document.getElementById('paModalPlatform').innerText = plat.toUpperCase();
         document.getElementById('paModalCurPrice').innerText = '₹' + numPrice.toLocaleString('en-IN');
         if (img) document.getElementById('paModalImg').src = img;
+
+        renderPaPricePresets(numPrice);
 
         const defaultPct = 10;
         document.getElementById('paInputPct').value = defaultPct;
@@ -3274,20 +3368,50 @@ function updateThemeIcon(isDark) {
     async function submitPriceAlertModal() {
         const btn = document.getElementById('paModalBtn');
         const alertBox = document.getElementById('paModalStatusAlert');
+
+        const cur_price = parseInt(document.getElementById('paHiddenCurPrice').value) || 0;
+        let target_price = parseInt(document.getElementById('paInputTarget').value) || 0;
+        let target_pct = parseFloat(document.getElementById('paInputPct').value) || 0;
+        const emailInput = document.getElementById('paInputEmail');
+        const email = emailInput ? emailInput.value.trim() : '';
+
+        // Validation for active mode
+        if (currentPaMode === 'percent') {
+            if (isNaN(target_pct) || target_pct <= 0 || target_pct >= 100) {
+                alertBox.className = 'alert alert-danger py-2.5 px-3 small rounded-3';
+                alertBox.innerText = 'Please enter a valid percentage drop between 1% and 99%.';
+                return;
+            }
+            if (cur_price > 0 && target_price <= 0) {
+                target_price = Math.max(1, Math.round(cur_price * (1 - target_pct / 100)));
+            }
+        } else {
+            if (isNaN(target_price) || target_price <= 0) {
+                alertBox.className = 'alert alert-danger py-2.5 px-3 small rounded-3';
+                alertBox.innerText = 'Please enter a valid target price greater than ₹0.';
+                return;
+            }
+            if (cur_price > 0 && target_pct <= 0) {
+                target_pct = Math.round(((cur_price - target_price) / cur_price) * 1000) / 10;
+            }
+        }
+
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Activating...';
         alertBox.className = 'alert d-none';
 
         const payload = {
+            product_id: (document.getElementById('paHiddenProductId') ? document.getElementById('paHiddenProductId').value : '') || undefined,
             product_name: document.getElementById('paHiddenName').value,
             product_image: document.getElementById('paHiddenImg').value,
             platform: document.getElementById('paHiddenPlatform').value,
-            current_price: parseInt(document.getElementById('paHiddenCurPrice').value) || 0,
-            target_price: parseInt(document.getElementById('paInputTarget').value) || 0,
-            target_pct: parseFloat(document.getElementById('paInputPct').value) || 0,
+            current_price: cur_price,
+            target_price: target_price,
+            target_pct: target_pct,
+            alert_mode: currentPaMode,
             product_url: document.getElementById('paHiddenUrl').value,
-            email: document.getElementById('paInputEmail').value.trim(),
-            test_trigger_now: document.getElementById('paTestTriggerToggle').checked
+            email: email,
+            test_trigger_now: false
         };
 
         try {
@@ -3299,7 +3423,7 @@ function updateThemeIcon(isDark) {
             const data = await res.json();
             if (data.success) {
                 alertBox.className = 'alert alert-success py-2.5 px-3 small rounded-3';
-                alertBox.innerHTML = '<i class="fas fa-check-circle me-1.5"></i>' + (data.message || 'Price alert set! Confirmation email dispatched.') + '<div class="mt-1.5 fw-bold text-success"><i class="fas fa-arrow-right me-1"></i>Moving to Price Alerts Dashboard...</div>';
+                alertBox.innerHTML = '<i class="fas fa-check-circle me-1.5"></i>' + (data.message || 'Price alert set! Email will only be sent when target price is reached.') + '<div class="mt-1.5 fw-bold text-success"><i class="fas fa-arrow-right me-1"></i>Moving to Price Alerts Dashboard...</div>';
                 btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Moving to Dashboard...';
                 setTimeout(() => {
                     window.location.href = data.redirect_url || '/my-price-alerts';
@@ -3316,13 +3440,13 @@ function updateThemeIcon(isDark) {
                 alertBox.className = 'alert alert-danger py-2.5 px-3 small rounded-3';
                 alertBox.innerText = data.message || 'Failed to create price alert.';
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-bell me-1"></i>Activate Price Alert';
+                btn.innerHTML = '<i class="fas fa-bell me-1"></i>Activate Price Alert & View in Dashboard';
             }
         } catch (err) {
             alertBox.className = 'alert alert-danger py-2.5 px-3 small rounded-3';
             alertBox.innerText = 'Network error: ' + err.message;
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-bell me-1"></i>Activate Price Alert';
+            btn.innerHTML = '<i class="fas fa-bell me-1"></i>Activate Price Alert & View in Dashboard';
         }
     }
     </script>

@@ -830,6 +830,12 @@ def create_feedback():
 @login_required
 def edit_feedback(feedback_id):
     """Edit an existing feedback entry owned by current user with ownership check."""
+    redirect_target = request.form.get('redirect_to', '')
+    if not redirect_target:
+        ref = request.referrer
+        if ref and ('/my-feedback' in ref or '/profile' in ref):
+            redirect_target = '/my-feedback' if '/my-feedback' in ref else '/profile'
+
     # Check ownership first (Section 12 requirement)
     existing_fb = get_feedback_by_id(feedback_id, session['user_id'])
     if not existing_fb:
@@ -837,7 +843,7 @@ def edit_feedback(feedback_id):
         if request.is_json:
             return jsonify({"status": "error", "message": msg}), 403
         flash(msg, "danger")
-        return redirect(url_for('api.profile'))
+        return redirect(redirect_target if (redirect_target and redirect_target.startswith('/')) else url_for('api.profile'))
 
     title = request.form.get('title', '').strip() or (request.json.get('title', '').strip() if request.is_json else '')
     message = request.form.get('message', '').strip() or (request.json.get('message', '').strip() if request.is_json else '')
@@ -852,14 +858,14 @@ def edit_feedback(feedback_id):
         if request.is_json:
             return jsonify({"status": "error", "message": msg}), 400
         flash(msg, "danger")
-        return redirect(url_for('api.profile'))
+        return redirect(redirect_target if (redirect_target and redirect_target.startswith('/')) else url_for('api.profile'))
 
     if not title or not message:
         msg = "Feedback title and message are required."
         if request.is_json:
             return jsonify({"status": "error", "message": msg}), 400
         flash(msg, "danger")
-        return redirect(url_for('api.profile'))
+        return redirect(redirect_target if (redirect_target and redirect_target.startswith('/')) else url_for('api.profile'))
 
     updated = update_user_feedback(feedback_id, session['user_id'], title, message, rating)
     if updated:
@@ -872,7 +878,7 @@ def edit_feedback(feedback_id):
         if request.is_json:
             return jsonify({"status": "error", "message": msg}), 500
         flash(msg, "danger")
-    return redirect(url_for('api.profile'))
+    return redirect(redirect_target if (redirect_target and redirect_target.startswith('/')) else url_for('api.profile'))
 
 
 @api_bp.route('/feedback/delete/<feedback_id>', methods=['POST'])
@@ -881,13 +887,19 @@ def edit_feedback(feedback_id):
 @login_required
 def delete_feedback(feedback_id):
     """Delete a feedback entry owned by current user with ownership check."""
+    redirect_target = request.form.get('redirect_to', '')
+    if not redirect_target:
+        ref = request.referrer
+        if ref and ('/my-feedback' in ref or '/profile' in ref):
+            redirect_target = '/my-feedback' if '/my-feedback' in ref else '/profile'
+
     existing_fb = get_feedback_by_id(feedback_id, session['user_id'])
     if not existing_fb:
         msg = "Feedback not found or access denied."
         if request.is_json:
             return jsonify({"status": "error", "message": msg}), 403
         flash(msg, "danger")
-        return redirect(url_for('api.profile'))
+        return redirect(redirect_target if (redirect_target and redirect_target.startswith('/')) else url_for('api.profile'))
 
     deleted = delete_user_feedback(feedback_id, session['user_id'])
     if deleted:
@@ -900,7 +912,7 @@ def delete_feedback(feedback_id):
         if request.is_json:
             return jsonify({"status": "error", "message": msg}), 500
         flash(msg, "danger")
-    return redirect(url_for('api.profile'))
+    return redirect(redirect_target if (redirect_target and redirect_target.startswith('/')) else url_for('api.profile'))
 
 
 @api_bp.route('/api/select-product', methods=['POST', 'GET'])
@@ -1066,7 +1078,13 @@ def search():
 
     if url_param:
         fresh = request.args.get('fresh', '0').lower() in ('1', 'true', 'yes')
-        comp_result = compare_by_product_url(url_param, fresh=fresh)
+        try:
+            comp_result = compare_by_product_url(url_param, fresh=fresh)
+        except Exception as e:
+            logger.error(f"Error in compare_by_product_url: {e}", exc_info=True)
+            flash("Unable to compare product from URL. Please check the link or search by product name.", "danger")
+            return redirect('/')
+
         if not comp_result.get('success'):
             flash(comp_result.get('error', 'Unable to retrieve or compare product from the provided URL.'), 'danger')
             return redirect('/')
@@ -1205,6 +1223,39 @@ def search():
         from search.specs_extractor import compute_marketplace_statuses
         url_mp_status = compute_marketplace_statuses(matches, comp_result.get('platform_status', {}))
 
+        # 4-Platform Price History & AI Price Prediction Engine
+        from price_prediction import generate_price_prediction
+        from utils import parse_price
+
+        price_prediction_data = comp_result.get('price_prediction')
+        price_prediction_json = comp_result.get('price_prediction_json')
+
+        if not price_prediction_data:
+            def _extract_url_price(p):
+                if not p or not isinstance(p, dict):
+                    return None
+                return parse_price(p.get('price_num') or p.get('price'))
+
+            src_plat_key = str(comp_result.get('source_platform_name') or comp_result.get('source_platform') or '').lower()
+            current_prices_map = {
+                "Amazon": _extract_url_price(best_per_plat.get("Amazon")),
+                "Flipkart": _extract_url_price(best_per_plat.get("Flipkart")),
+                "Meesho": _extract_url_price(best_per_plat.get("Meesho")),
+                "GEC ECom": _extract_url_price(comp_result.get("matches", {}).get("gececom") or comp_result.get("matches", {}).get("gec")),
+            }
+            if not current_prices_map.get("Amazon") and 'amazon' in src_plat_key:
+                current_prices_map["Amazon"] = _extract_url_price(src_prod)
+            if not current_prices_map.get("Flipkart") and 'flipkart' in src_plat_key:
+                current_prices_map["Flipkart"] = _extract_url_price(src_prod)
+            if not current_prices_map.get("Meesho") and 'meesho' in src_plat_key:
+                current_prices_map["Meesho"] = _extract_url_price(src_prod)
+            if not current_prices_map.get("GEC ECom") and ('gececom' in src_plat_key or 'gec' in src_plat_key):
+                current_prices_map["GEC ECom"] = _extract_url_price(src_prod)
+
+            cat = src_prod.get('category') or 'electronics'
+            price_prediction_data = generate_price_prediction(p_name, current_prices=current_prices_map, category=cat)
+            price_prediction_json = json.dumps(price_prediction_data)
+
         return render_template(
             'results.html',
             is_url_search=True,
@@ -1248,7 +1299,9 @@ def search():
             scraped_at=comp_result.get('scraped_at'),
             sort_views={'best_match': val_prods},
             dynamic_filters={},
-            filter_params={}
+            filter_params={},
+            price_prediction=price_prediction_data,
+            price_prediction_json=price_prediction_json
         )
 
     raw_q = request.args.get('q') or request.args.get('query') or ''
@@ -1886,25 +1939,62 @@ def api_add_gececom_product():
 
 @api_bp.route('/api/gececom/products/<product_id>/price', methods=['PUT', 'POST'])
 def api_update_gececom_product_price(product_id):
-    """Update price for GEC ECom product and optionally trigger active price drop alerts."""
-    from database import update_gececom_product_price, check_and_trigger_price_alerts
+    """Update price for GEC ECom product and trigger price drop alerts for qualifying thresholds."""
+    from database import (
+        get_gececom_product_by_id,
+        update_gececom_product_price,
+        check_and_trigger_price_alerts
+    )
     data = request.get_json(silent=True) or request.form.to_dict()
     if not data:
         return jsonify({"success": False, "message": "Request payload missing."}), 400
 
-    new_price = int(data.get("new_price") or data.get("price") or 0)
+    raw_price = data.get("new_price") if data.get("new_price") is not None else data.get("price")
+    try:
+        new_price = int(round(float(str(raw_price).replace(',', '').replace('₹', '').strip())))
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "message": "Invalid numeric price provided."}), 400
+
     if new_price <= 0:
         return jsonify({"success": False, "message": "Price must be greater than 0."}), 400
+
+    # Fetch product before update to capture previous price
+    prod_before = get_gececom_product_by_id(product_id)
+    prev_price = prod_before.get("current_price") if prod_before else None
 
     trigger_check = bool(data.get("trigger_check", True))
     ok, updated = update_gececom_product_price(product_id, new_price)
     if not ok or not updated:
         return jsonify({"success": False, "message": "Product not found or update failed."}), 404
 
-    trigger_results = {"checked": 0, "triggered": 0, "notifications_sent": 0}
+    # Read verified numeric price directly from updated database record
+    db_price = int(updated.get("current_price", new_price))
+
+    trigger_results = {"checked": 0, "triggered": 0, "notifications_sent": 0, "details": []}
     if trigger_check:
         p_name = updated.get("product_name", "")
-        trigger_results = check_and_trigger_price_alerts(p_name, new_price, platform="gececom")
+        price_dropped = (prev_price is not None and db_price < int(prev_price))
+        trigger_results = check_and_trigger_price_alerts(
+            product_name=p_name,
+            new_price=db_price,
+            platform="gececom",
+            product_id=str(product_id),
+            previous_price=prev_price,
+            force_notify=price_dropped
+        )
+
+    # Immediately sync current session if matching product is active in session
+    p_name = updated.get("product_name", "")
+    for s_key in ['pending_product', 'pending_purchase', 'pending_selected_product']:
+        prod = session.get(s_key)
+        if isinstance(prod, dict):
+            prod_url = str(prod.get('product_url') or '')
+            p_name_sess = str(prod.get('product_name') or prod.get('title') or '')
+            if str(product_id) in prod_url or (p_name and p_name.lower() == p_name_sess.lower()):
+                prod['price'] = updated.get("formatted_current_price", f"₹{db_price:,}")
+                prod['price_num'] = db_price
+                prod['current_price'] = db_price
+                session[s_key] = prod
 
     return jsonify({
         "success": True,
@@ -1965,24 +2055,47 @@ def api_price_alerts():
         if user:
             email = user.get('email', '')
     alerts = get_user_price_alerts(email if email else None)
-    return jsonify({"success": True, "alerts": alerts, "count": len(alerts)})
+    active_count = sum(1 for a in alerts if a.get('status') in ('active', 'monitoring'))
+    triggered_count = sum(1 for a in alerts if a.get('status') in ('triggered', 'email_sent', 'target_reached'))
+    return jsonify({
+        "success": True,
+        "alerts": alerts,
+        "count": len(alerts),
+        "active_count": active_count,
+        "triggered_count": triggered_count
+    })
+
+
+
+@api_bp.route('/api/price-alerts/<alert_id>/simulate-drop', methods=['POST'])
+@api_bp.route('/api/price-alerts/<alert_id>/drop-price', methods=['POST'])
+def api_simulate_price_drop(alert_id):
+    """
+    Simulate or trigger an immediate live price drop for a tracked product.
+    Updates the price in database and dispatches the live price drop email alert to the user.
+    """
+    from database import simulate_and_trigger_price_drop
+    data = request.get_json(silent=True) or request.form.to_dict() or {}
+    raw_price = data.get("new_price")
+    try:
+        new_price_num = int(round(float(str(raw_price).replace(',', '').replace('₹', '').strip()))) if raw_price is not None else None
+    except (ValueError, TypeError):
+        new_price_num = None
+
+    ok, msg, res = simulate_and_trigger_price_drop(alert_id, new_price_num)
+    if ok:
+        return jsonify({"success": True, "message": msg, "data": res}), 200
+    return jsonify({"success": False, "message": msg, "data": res}), 400
 
 
 @api_bp.route('/api/price-alerts/<alert_id>/trigger', methods=['POST'])
 def api_trigger_price_alert(alert_id):
-    """Manually test or trigger a price alert to immediately send email notification."""
-    from database import trigger_single_price_alert
-    data = request.get_json(silent=True) or request.form.to_dict() or {}
-    sim_price = data.get('simulated_price') or request.args.get('price')
-    try:
-        sim_price = int(sim_price) if sim_price else None
-    except Exception:
-        sim_price = None
-
-    ok, msg, res = trigger_single_price_alert(alert_id, simulated_price=sim_price)
+    """Send a real test email for a specific alert without altering its active monitoring status."""
+    from database import trigger_test_price_alert
+    ok, msg, res = trigger_test_price_alert(alert_id)
     if ok:
         return jsonify({"success": True, "message": msg, "result": res})
-    return jsonify({"success": False, "message": msg}), 400
+    return jsonify({"success": False, "message": msg, "result": res}), 400
 
 
 @api_bp.route('/api/price-alerts/<alert_id>', methods=['DELETE'])
@@ -2014,8 +2127,8 @@ def my_price_alerts_page():
         user_email = request.args.get('email', '').strip()
 
     alerts = get_user_price_alerts(user_email if user_email else None)
-    active_count = sum(1 for a in alerts if a.get('status') == 'active')
-    triggered_count = sum(1 for a in alerts if a.get('status') == 'triggered')
+    active_count = sum(1 for a in alerts if a.get('status') in ('active', 'monitoring'))
+    triggered_count = sum(1 for a in alerts if a.get('status') in ('triggered', 'email_sent', 'target_reached'))
 
     return render_template(
         'my_price_alerts.html',

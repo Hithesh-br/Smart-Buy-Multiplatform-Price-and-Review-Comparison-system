@@ -506,6 +506,36 @@ def compare_by_product_url_stream(
         "message": f"Best verified deal: {best_deal['platform']} @ {best_deal['formatted_price']}" if best_deal else "Comparison compiled"
     }
 
+    # ── Step 8: Price Prediction Engine ─────────────────────────────────────
+    import json
+    from price_prediction import generate_price_prediction
+    from utils import parse_price
+
+    def _extract_engine_price(p):
+        if not p or not isinstance(p, dict):
+            return None
+        return parse_price(p.get("price_num") or p.get("price"))
+
+    url_prices_map = {
+        "Amazon": _extract_engine_price(matched_results.get("amazon")),
+        "Flipkart": _extract_engine_price(matched_results.get("flipkart")),
+        "Meesho": _extract_engine_price(matched_results.get("meesho")),
+        "GEC ECom": _extract_engine_price(matched_results.get("gececom") or matched_results.get("gec")),
+    }
+    src_plat_str = str(source_platform or "").lower()
+    if not url_prices_map.get("Amazon") and "amazon" in src_plat_str:
+        url_prices_map["Amazon"] = _extract_engine_price(source_product)
+    if not url_prices_map.get("Flipkart") and "flipkart" in src_plat_str:
+        url_prices_map["Flipkart"] = _extract_engine_price(source_product)
+    if not url_prices_map.get("Meesho") and "meesho" in src_plat_str:
+        url_prices_map["Meesho"] = _extract_engine_price(source_product)
+    if not url_prices_map.get("GEC ECom") and ("gececom" in src_plat_str or "gec" in src_plat_str):
+        url_prices_map["GEC ECom"] = _extract_engine_price(source_product)
+
+    pred_prod_title = source_product.get("title") or search_query or "Product"
+    pred_cat = source_product.get("category") or "electronics"
+    url_price_prediction = generate_price_prediction(pred_prod_title, current_prices=url_prices_map, category=pred_cat)
+
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     final_payload = {
         "success": True,
@@ -530,6 +560,8 @@ def compare_by_product_url_stream(
         "no_deal_message": pipeline_data.get("no_deal_message"),
         "has_cross_platform_match": pipeline_data.get("has_cross_platform_match", False),
         "savings_info": pipeline_data.get("savings_info"),
+        "price_prediction": url_price_prediction,
+        "price_prediction_json": json.dumps(url_price_prediction),
         "scraped_at": now_iso
     }
 

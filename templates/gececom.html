@@ -713,7 +713,9 @@
                                 </button>
                                 <button type="button"
                                     class="btn btn-gec-alert d-flex align-items-center justify-content-center gap-1"
-                                    onclick="openPriceAlertModal(this)" data-product-name="{{ prod.product_name }}"
+                                    onclick="openPriceAlertModal(this)"
+                                    data-product-id="{{ prod.id }}"
+                                    data-product-name="{{ prod.product_name }}"
                                     data-product-image="{{ prod.product_image }}" data-platform="gececom"
                                     data-current-price="{{ prod.current_price }}"
                                     data-product-url="{{ prod.amazon_url or ('/gececom#product-' ~ prod.id) }}"
@@ -976,6 +978,7 @@
                         style="transform: scale(1.3);"></button>
                 </div>
                 <div class="modal-body p-4 p-md-5 bg-white">
+                    <input type="hidden" id="paModalProductId">
                     <input type="hidden" id="paModalProductName">
                     <input type="hidden" id="paModalProductUrl">
                     <input type="hidden" id="paModalPlatformInput">
@@ -1023,7 +1026,7 @@
                         </p>
                         <div class="input-group mb-3">
                             <input type="number" id="paModalPctInput" class="form-control fw-extrabold text-primary ps-3"
-                                placeholder="Enter ANY % (e.g. 5, 8, 12, 18, 25)" min="1" max="95" step="0.5" value="10"
+                                placeholder="Enter ANY % (e.g. 5, 8, 12, 18, 25)" min="1" max="95" step="any" value="10"
                                 oninput="onGecPaPctInput(this.value)" style="font-size: 1.35rem; height: 56px;">
                             <span class="input-group-text bg-white fw-bold text-primary px-3 fs-5">% DROP</span>
                         </div>
@@ -1052,23 +1055,48 @@
                     </div>
 
                     <!-- ══ Option B: Target Price in Rupees (Two-way linked) ══ -->
-                    <div id="gecSectionPrice" class="card border-0 rounded-4 p-4 mb-4 bg-light border">
+                    <div id="gecSectionPrice" class="card border-0 rounded-4 p-4 mb-4 bg-light border" style="display: none; border: 2px solid #10b981 !important;">
                         <div class="d-flex align-items-center justify-content-between mb-2">
                             <label for="paModalTargetPrice" class="form-label fw-bold text-dark mb-0"
                                 style="font-size: 1.15rem;">
                                 <i class="fas fa-tag text-success me-1.5"></i>Exact Target Price (₹) <span class="text-danger">*</span>
                             </label>
-                            <span class="text-success fw-bold" id="gecPaSavingsBadge" style="font-size: 1rem;">You Save: ₹0</span>
+                            <span class="badge bg-success text-white fw-bold px-3 py-1.5 fs-6" id="gecPaSavingsBadge">You Save: ₹0</span>
                         </div>
-                        <div class="input-group">
+                        <div class="input-group mb-3">
                             <span class="input-group-text bg-white fw-bold text-success px-3"
                                 style="font-size: 1.35rem;">₹</span>
                             <input type="number" id="paModalTargetPrice" class="form-control fw-bold ps-2"
-                                placeholder="e.g. 19999" min="1" step="1" oninput="onGecPaTargetInput(this.value)" style="font-size: 1.35rem; height: 56px;">
+                                placeholder="e.g. 19999" min="1" step="any" oninput="onGecPaTargetInput(this.value)" style="font-size: 1.35rem; height: 56px;">
                         </div>
+
+                        <!-- Drop presets for price mode (shows exact target price in Rupees) -->
+                        <div class="d-flex gap-2 flex-wrap align-items-center mb-3" id="gecPricePresetsContainer">
+                            <span class="small text-muted me-1 fw-bold">Quick Price Targets:</span>
+                            <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-1 px-3 fw-semibold" onclick="applyGecPaPreset(5)">-5%</button>
+                            <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-1 px-3 fw-semibold" onclick="applyGecPaPreset(10)">-10%</button>
+                            <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-1 px-3 fw-semibold" onclick="applyGecPaPreset(15)">-15%</button>
+                            <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-1 px-3 fw-semibold" onclick="applyGecPaPreset(20)">-20%</button>
+                            <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-1 px-3 fw-semibold" onclick="applyGecPaPreset(25)">-25%</button>
+                            <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-1 px-3 fw-semibold" onclick="applyGecPaPreset(30)">-30%</button>
+                            <button type="button" class="btn btn-outline-success btn-sm rounded-pill py-1 px-3 fw-semibold" onclick="applyGecPaPreset(50)">-50%</button>
+                        </div>
+
+                        <!-- Live calculation card for price mode -->
+                        <div class="p-3 rounded-3 bg-white border">
+                            <div class="d-flex justify-content-between align-items-center small text-muted">
+                                <span>Baseline Price: <strong class="text-dark" id="gecPriceCalcCurDisplay">₹0</strong></span>
+                                <span>Discount Amount: <strong class="text-danger" id="gecPriceCalcDropAmount">-₹0 (0%)</strong></span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top">
+                                <span class="fw-bold text-dark" style="font-size: 1.05rem;">🎯 Alert Will Trigger When Price Reaches:</span>
+                                <span class="fs-5 fw-extrabold text-success" id="gecPriceCalcTargetDisplay">₹0</span>
+                            </div>
+                        </div>
+
                         <div class="d-flex align-items-center justify-content-between mt-2">
                             <div class="form-text text-muted mb-0" style="font-size: 0.92rem;">Automated email dispatched when price drops to/below this target.</div>
-                            <small class="fw-bold text-primary" id="gecPaLiveDiffText" style="font-size: 0.92rem;"></small>
+                            <small class="fw-bold text-success" id="gecPaLiveDiffText" style="font-size: 0.92rem;"></small>
                         </div>
                     </div>
 
@@ -1532,21 +1560,38 @@
             const secPct = document.getElementById('gecSectionPct');
             const secPrice = document.getElementById('gecSectionPrice');
             const badge = document.getElementById('gecSelectedOptionBadge');
+            const cur = parseInt(document.getElementById('paModalCurrentPriceInput').value) || 0;
 
             if (mode === 'percent') {
                 btnPct.className = 'btn rounded-pill fw-bold btn-primary py-2';
                 btnPrice.className = 'btn rounded-pill fw-bold btn-light text-muted py-2';
-                secPct.style.border = '2px solid #0284c7';
-                secPrice.style.border = '1px solid #e2e8f0';
-                if (badge) badge.innerText = 'Any % Drop Mode';
-                document.getElementById('paModalPctInput').focus();
+                secPct.style.display = 'block';
+                secPrice.style.display = 'none';
+                if (badge) {
+                    badge.innerText = 'Any % Drop Mode';
+                    badge.className = 'badge bg-primary bg-opacity-10 text-primary fw-bold px-2.5 py-1';
+                }
+                const pct = parseFloat(document.getElementById('paModalPctInput').value) || 10;
+                onGecPaPctInput(pct);
+                setTimeout(() => { const el = document.getElementById('paModalPctInput'); if (el) el.focus(); }, 50);
             } else {
                 btnPrice.className = 'btn rounded-pill fw-bold btn-success text-white py-2';
                 btnPct.className = 'btn rounded-pill fw-bold btn-light text-muted py-2';
-                secPrice.style.border = '2px solid #10b981';
-                secPct.style.border = '1px solid #e2e8f0';
-                if (badge) badge.innerText = 'Target Price Mode';
-                document.getElementById('paModalTargetPrice').focus();
+                secPct.style.display = 'none';
+                secPrice.style.display = 'block';
+                if (badge) {
+                    badge.innerText = 'Exact Target Price Mode';
+                    badge.className = 'badge bg-success bg-opacity-10 text-success fw-bold px-2.5 py-1';
+                }
+                const pct = parseFloat(document.getElementById('paModalPctInput').value) || 10;
+                let target = parseInt(document.getElementById('paModalTargetPrice').value) || 0;
+                if (cur > 0 && (target <= 0 || target >= cur)) {
+                    target = Math.max(1, Math.round(cur * (1.0 - pct / 100.0)));
+                    document.getElementById('paModalTargetPrice').value = target;
+                }
+                renderGecPaPricePresets(cur);
+                onGecPaTargetInput(target);
+                setTimeout(() => { const el = document.getElementById('paModalTargetPrice'); if (el) el.focus(); }, 50);
             }
         }
 
@@ -1557,7 +1602,7 @@
             if (badge) badge.innerText = (pct > 0 ? pct : 0) + '% OFF';
 
             if (cur > 0 && pct > 0) {
-                const target = Math.max(1, Math.round(cur * (1 - pct / 100)));
+                const target = Math.max(1, Math.round(cur * (1.0 - pct / 100.0)));
                 document.getElementById('paModalTargetPrice').value = target;
                 updateGecPaSavings(cur, target, pct);
             }
@@ -1567,17 +1612,41 @@
             const cur = parseInt(document.getElementById('paModalCurrentPriceInput').value) || 0;
             const target = parseInt(targetVal) || 0;
             if (cur > 0 && target > 0) {
-                const pct = Math.max(0, Math.round(((cur - target) / cur) * 1000) / 10);
+                const savings = Math.max(0, cur - target);
+                const pct = cur > target ? Math.round(((cur - target) / cur) * 1000) / 10 : 0;
                 document.getElementById('paModalPctInput').value = pct;
                 const badge = document.getElementById('gecPaPctBadge');
                 if (badge) badge.innerText = pct + '% OFF';
                 updateGecPaSavings(cur, target, pct);
+            } else {
+                updateGecPaSavings(cur, 0, 0);
             }
         }
 
         function applyGecPaPreset(pct) {
             document.getElementById('paModalPctInput').value = pct;
             onGecPaPctInput(pct);
+        }
+
+        function applyGecPaExactTarget(targetPrice) {
+            document.getElementById('paModalTargetPrice').value = targetPrice;
+            onGecPaTargetInput(targetPrice);
+        }
+
+        function renderGecPaPricePresets(cur) {
+            const container = document.getElementById('gecPricePresetsContainer');
+            if (!container) return;
+            if (cur <= 0) {
+                container.innerHTML = '<span class="small text-muted">Enter baseline price to view presets</span>';
+                return;
+            }
+            const percentages = [5, 10, 15, 20, 25, 30, 50];
+            let html = '<span class="small text-muted me-1 fw-bold" style="font-size:0.75rem;">Quick Price Targets:</span>';
+            percentages.forEach(pct => {
+                const target = Math.max(1, Math.round(cur * (1.0 - pct / 100.0)));
+                html += `<button type="button" class="btn btn-outline-success btn-sm rounded-pill py-0.5 px-2.5 fw-semibold" onclick="applyGecPaExactTarget(${target})">₹${target.toLocaleString('en-IN')} <small class="text-muted">(-${pct}%)</small></button> `;
+            });
+            container.innerHTML = html;
         }
 
         function updateGecPaSavings(cur, target, pct) {
@@ -1588,18 +1657,41 @@
             const calcDrop = document.getElementById('gecCalcDropAmount');
             const calcTarget = document.getElementById('gecCalcTargetDisplay');
 
+            // Price mode display elements
+            const priceCur = document.getElementById('gecPriceCalcCurDisplay');
+            const priceDrop = document.getElementById('gecPriceCalcDropAmount');
+            const priceTarget = document.getElementById('gecPriceCalcTargetDisplay');
+
+            const curText = '₹' + cur.toLocaleString('en-IN');
+            const dropText = savings > 0 ? `-₹${savings.toLocaleString('en-IN')} (${pct}%)` : `₹0 (0%)`;
+            const targetText = target > 0 ? '₹' + target.toLocaleString('en-IN') : '₹0';
+            const savingsText = target > 0 && savings > 0 
+                ? `You Save: ₹${savings.toLocaleString('en-IN')} (-${pct}%)` 
+                : (target >= cur ? `Target Price: ₹${target.toLocaleString('en-IN')}` : `Enter target price`);
+
             if (savingsEl) {
-                savingsEl.innerText = `You Save: ₹${savings.toLocaleString('en-IN')} (-${pct}%)`;
+                savingsEl.innerText = savingsText;
             }
             if (diffEl) {
-                diffEl.innerText = `Requires ₹${savings.toLocaleString('en-IN')} drop`;
+                if (savings > 0) {
+                    diffEl.innerText = `Requires ₹${savings.toLocaleString('en-IN')} drop`;
+                } else if (target > 0 && target >= cur) {
+                    diffEl.innerText = `Alert triggers when price reaches ₹${target.toLocaleString('en-IN')}`;
+                } else {
+                    diffEl.innerText = '';
+                }
             }
-            if (calcCur) calcCur.innerText = '₹' + cur.toLocaleString('en-IN');
-            if (calcDrop) calcDrop.innerText = `-₹${savings.toLocaleString('en-IN')} (${pct}%)`;
-            if (calcTarget) calcTarget.innerText = '₹' + target.toLocaleString('en-IN');
+            if (calcCur) calcCur.innerText = curText;
+            if (calcDrop) calcDrop.innerText = dropText;
+            if (calcTarget) calcTarget.innerText = targetText;
+
+            if (priceCur) priceCur.innerText = curText;
+            if (priceDrop) priceDrop.innerText = dropText;
+            if (priceTarget) priceTarget.innerText = targetText;
         }
 
         function openPriceAlertModal(btn) {
+            const productId = btn.getAttribute('data-product-id') || '';
             const productName = btn.getAttribute('data-product-name') || 'GEC ECom Product';
             const productImage = btn.getAttribute('data-product-image') || '';
             const platform = (btn.getAttribute('data-platform') || 'gececom').trim();
@@ -1614,6 +1706,7 @@
             document.getElementById('paModalSubmitBtn').disabled = false;
             document.getElementById('paModalSubmitBtn').innerHTML = '<i class="fas fa-bell me-1.5"></i>Create Alert';
 
+            document.getElementById('paModalProductId').value = productId;
             document.getElementById('paModalProductName').value = productName;
             document.getElementById('paModalProductUrl').value = productUrl;
             document.getElementById('paModalPlatformInput').value = platform;
@@ -1622,6 +1715,8 @@
 
             document.getElementById('paModalTitle').innerText = productName;
             document.getElementById('paModalDisplayCurrentPrice').innerText = '₹' + numPrice.toLocaleString('en-IN');
+
+            renderGecPaPricePresets(numPrice);
 
             const defaultPct = 10;
             document.getElementById('paModalPctInput').value = defaultPct;
@@ -1633,6 +1728,7 @@
         }
 
         async function submitPriceAlert() {
+            const productId = document.getElementById('paModalProductId').value;
             const name = document.getElementById('paModalProductName').value;
             const url = document.getElementById('paModalProductUrl').value;
             const platform = document.getElementById('paModalPlatformInput').value;
@@ -1669,14 +1765,17 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        product_id: productId,
                         product_name: name,
                         product_url: url,
                         platform: platform,
                         current_price: currentPrice,
                         target_price: targetPrice,
                         target_pct: targetPct,
+                        alert_mode: currentGecPaMode,
                         email: email,
-                        product_image: image
+                        product_image: image,
+                        test_trigger_now: false
                     })
                 });
                 const data = await resp.json();

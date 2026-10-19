@@ -50,7 +50,7 @@ def validate_password(password: str) -> tuple[bool, list[str]]:
 
 
 DEFAULT_SMTP_HOST = "smtp.gmail.com"
-DEFAULT_SMTP_PORT = 587
+DEFAULT_SMTP_PORT = 465
 DEFAULT_SMTP_USER = "buysmart260@gmail.com"
 DEFAULT_SMTP_PASS = "zrqv vpqh wjcw bjnr"
 DEFAULT_FROM_NAME = "SmartBuy"
@@ -72,36 +72,91 @@ def get_smtp_config() -> tuple[str, int, str, str, str]:
     return smtp_host, smtp_port, smtp_user, smtp_pass, from_name
 
 
-def send_email(to_email: str, subject: str, body_text: str, html_content: str = None) -> bool:
+def send_email_detailed(to_email: str, subject: str, body_text: str, html_content: str = None) -> tuple[bool, str]:
     """
-    Send an email via SMTP.
-    Returns True on success, False on failure.
+    Send an email via SMTP (supporting both Port 465 SSL and Port 587 STARTTLS with auto-fallback).
+    Includes high-priority mobile push headers for immediate phone inbox alerts.
+    Returns (True, success_message) on success, (False, error_message) on failure.
+    Never logs or exposes passwords or sensitive credentials.
     """
     smtp_host, smtp_port, smtp_user, smtp_pass, from_name = get_smtp_config()
     if not smtp_user or not smtp_pass:
-        logger.warning(f"[Email] SMTP credentials missing — cannot send '{subject}' to {to_email}.")
-        return False
+        msg_str = "SMTP credentials (SMTP_USER or SMTP_PASSWORD) are missing from configuration."
+        logger.warning(f"[Email] {msg_str} Cannot send '{subject}' to {to_email}.")
+        return False, msg_str
+
+    clean_to = str(to_email).strip()
+    if not clean_to or "@" not in clean_to:
+        msg_str = f"Invalid recipient email address: '{to_email}'"
+        logger.warning(f"[Email] {msg_str}")
+        return False, msg_str
 
     try:
         msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = f"{from_name} <{smtp_user}>"
-        msg["To"] = to_email.strip()
+        msg["To"] = clean_to
+        msg["Importance"] = "high"
+        msg["X-Priority"] = "1"
+        msg["Priority"] = "urgent"
         msg.set_content(body_text)
 
         if html_content:
             msg.add_alternative(html_content, subtype="html")
 
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=12) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
+        # Primary delivery attempt
+        def _send_via_ssl():
+            with smtplib.SMTP_SSL(smtp_host, 465, timeout=25) as server:
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
 
-        logger.info(f"Successfully sent email '{subject}' to {to_email} via SMTP ({smtp_host}:{smtp_port})")
-        return True
+        def _send_via_starttls(port=587):
+            with smtplib.SMTP(smtp_host, port, timeout=25) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+
+        if smtp_port == 465:
+            _send_via_ssl()
+        else:
+            try:
+                _send_via_starttls(smtp_port)
+            except (smtplib.SMTPServerDisconnected, TimeoutError, OSError) as transient_err:
+                logger.warning(f"[Email] Port {smtp_port} STARTTLS encountered {transient_err}. Retrying via Port 465 SSL...")
+                _send_via_ssl()
+
+        success_msg = f"Email accepted by SMTP server for delivery to {clean_to}"
+        logger.info(f"[Email] Successfully sent email '{subject}' to {clean_to} via SMTP ({smtp_host}:{smtp_port})")
+        return True, success_msg
+    except smtplib.SMTPAuthenticationError as auth_err:
+        err = f"SMTP Authentication failed: {auth_err.smtp_error.decode() if isinstance(auth_err.smtp_error, bytes) else auth_err.smtp_error}"
+        logger.error(f"[Email] Authentication failure sending '{subject}' to {clean_to}: {err}")
+        return False, err
+    except smtplib.SMTPRecipientsRefused as rec_err:
+        err = f"Recipient address rejected by SMTP server: {rec_err}"
+        logger.error(f"[Email] Recipient refused sending '{subject}' to {clean_to}: {err}")
+        return False, err
+    except smtplib.SMTPServerDisconnected as dis_err:
+        err = f"SMTP server disconnected prematurely: {dis_err}"
+        logger.error(f"[Email] Server disconnected sending '{subject}' to {clean_to}: {err}")
+        return False, err
+    except smtplib.SMTPException as smtp_err:
+        err = f"SMTP protocol error: {smtp_err}"
+        logger.error(f"[Email] SMTP error sending '{subject}' to {clean_to}: {err}")
+        return False, err
     except Exception as e:
-        logger.error(f"Failed to send email '{subject}' to {to_email}: {e}")
-        return False
+        err = f"{type(e).__name__}: {e}"
+        logger.error(f"[Email] Failed to send email '{subject}' to {clean_to}: {err}")
+        return False, err
+
+
+def send_email(to_email: str, subject: str, body_text: str, html_content: str = None) -> bool:
+    """
+    Send an email via SMTP.
+    Returns True on success, False on failure.
+    """
+    ok, _ = send_email_detailed(to_email, subject, body_text, html_content)
+    return ok
 
 
 def send_otp_email(to_email: str, otp_code: str, purpose: str = "signup", **kwargs) -> tuple[bool, str]:

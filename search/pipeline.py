@@ -562,20 +562,21 @@ def run_comparison_pipeline(
 
     if candidate_deals:
         # Calculate Best Value score for each deal
-        min_p = min(d["price_num"] for d in candidate_deals if d["price_num"])
+        valid_prices = [d["price_num"] for d in candidate_deals if d.get("price_num") and d["price_num"] > 0]
+        min_p = min(valid_prices) if valid_prices else 1.0
         scored_deals = []
 
         for d in candidate_deals:
-            p_val = d["price_num"]
+            p_val = d.get("price_num") or min_p
             prod = d["product"]
 
             # Deal formula: 35% Price, 25% Quality, 15% Reviews, 15% Seller, 10% Availability
-            price_comp = (min_p / max(1, p_val)) * 35.0
-            qual_comp = (d["quality_score"] / 100.0) * 25.0
-            rev_cnt = d["reviews"] or 0
+            price_comp = (min_p / max(1.0, float(p_val))) * 35.0
+            qual_comp = (d.get("quality_score", 0) / 100.0) * 25.0
+            rev_cnt = d.get("reviews") or 0
             rev_comp = min(15.0, (rev_cnt / 500.0) * 15.0 if rev_cnt < 500 else 15.0)
-            avail_comp = 10.0 if d["availability"] == "In Stock" else 0.0
-            match_comp = (d["match_score"] / 100.0) * 15.0
+            avail_comp = 10.0 if d.get("availability") == "In Stock" else 0.0
+            match_comp = (d.get("match_score", 0) / 100.0) * 15.0
 
             deal_score = round(price_comp + qual_comp + rev_comp + avail_comp + match_comp, 1)
 
@@ -586,24 +587,25 @@ def run_comparison_pipeline(
             })
 
         # Pick deal with highest overall deal score
-        scored_deals.sort(key=lambda x: (-x["deal_score"], x["price_num"]))
+        scored_deals.sort(key=lambda x: (-x["deal_score"], x["price_num"] if x["price_num"] is not None else 999999))
         winner_deal = scored_deals[0]["deal_data"]
         winner_deal["is_overall_best"] = True
 
-        # Calculate savings if 2 or more offers exist
+        # Calculate savings if 2 or more offers exist with valid pricing
         savings = 0
-        if len(candidate_deals) >= 2:
-            prices = [d["price_num"] for d in candidate_deals if d["price_num"]]
-            highest_p = max(prices)
-            savings = max(0, highest_p - winner_deal["price_num"])
+        if len(candidate_deals) >= 2 and len(valid_prices) >= 2:
+            highest_p = max(valid_prices)
+            winner_p = winner_deal.get("price_num") or min_p
+            savings = max(0, highest_p - winner_p)
             if savings > 0:
-                highest_deal = next(d for d in candidate_deals if d["price_num"] == highest_p)
-                savings_info = {
-                    "amount": savings,
-                    "amount_formatted": f"₹{savings:,}",
-                    "compared_platform": highest_deal["platform"],
-                    "highest_price_formatted": highest_deal["price"]
-                }
+                highest_deal = next((d for d in candidate_deals if d.get("price_num") == highest_p), None)
+                if highest_deal:
+                    savings_info = {
+                        "amount": savings,
+                        "amount_formatted": f"₹{savings:,}",
+                        "compared_platform": highest_deal["platform"],
+                        "highest_price_formatted": highest_deal.get("price", f"₹{highest_p}")
+                    }
 
         reasons = [
             f"Verified {winner_deal['match_status']} on {winner_deal['platform']}",

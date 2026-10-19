@@ -52,7 +52,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("smartbuy")
 
 if __name__ == '__main__':
+    import webbrowser
+    import threading
+
     port = int(os.getenv("PORT", 5000))
     logger.info(f"Starting Smart-Buy: Multiplatform Price Review Comparison System on port {port}...")
+
+    def open_browser():
+        try:
+            webbrowser.open(f"http://127.0.0.1:{port}/my-price-alerts")
+        except Exception:
+            pass
+
+    threading.Timer(1.5, open_browser).start()
     app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
 

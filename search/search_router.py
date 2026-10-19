@@ -80,6 +80,8 @@ def route_search(
             "similar_products": comp_result.get("similar_products", {}),
             "quality_comparison_table": comp_result.get("quality_comparison_table", []),
             "comparison_summary": comp_result.get("comparison_summary", {}),
+            "price_prediction": comp_result.get("price_prediction"),
+            "price_prediction_json": comp_result.get("price_prediction_json"),
             "success": comp_result.get("success", True),
             "error": comp_result.get("error")
         }
