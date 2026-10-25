@@ -1,9 +1,7 @@
 {
-  "venvPath": "..",
-  "venv": ".venv",
   "extraPaths": [
-    "../.venv/Lib/site-packages",
-    ".venv/Lib/site-packages",
+    "c:/Users/HP/venv/Lib/site-packages",
+    "C:/Users/HP/AppData/Local/Programs/Python/Python314/Lib/site-packages",
     "."
   ]
 }

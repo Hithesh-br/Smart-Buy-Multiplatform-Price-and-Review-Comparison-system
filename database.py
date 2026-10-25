@@ -133,7 +133,7 @@ def init_db(app=None):
 
 
 def ensure_price_alerts_schema():
-    """Enrich existing price alerts with product_id and normalized status without altering user data."""
+    """Enrich existing price alerts with product_id, user_id, user_name, and normalized status without altering user data."""
     if db is None:
         return
     try:
@@ -151,10 +151,26 @@ def ensure_price_alerts_schema():
                     p_name = a.get("product_name") or ""
                     if p_name:
                         gp = db.gececom_products.find_one({"product_name": {"$regex": f"^{re.escape(p_name.strip())}$", "$options": "i"}})
+                        if not gp:
+                            clean_kw = p_name.strip().lower()
+                            for candidate in db.gececom_products.find():
+                                c_name = candidate.get("product_name", "").lower()
+                                if clean_kw in c_name or c_name in clean_kw:
+                                    gp = candidate
+                                    break
                         if gp:
                             updates["product_id"] = str(gp["_id"])
+                            if not a.get("product_url"):
+                                updates["product_url"] = f"/gececom#product-{gp['_id']}"
 
-            # 2. Normalize status
+            # 2. Backfill user_id and user_name from registered users if missing
+            if not a.get("user_id") and a.get("email"):
+                u = db.users.find_one({"email": str(a.get("email")).strip().lower()})
+                if u:
+                    updates["user_id"] = str(u.get("id") or u.get("_id"))
+                    updates["user_name"] = str(u.get("name") or "")
+
+            # 3. Normalize status & timestamps
             status = a.get("status")
             if status == "active":
                 updates["status"] = "monitoring"
@@ -164,6 +180,11 @@ def ensure_price_alerts_schema():
                     updates["notification_status"] = "sent"
                 else:
                     updates["status"] = "monitoring"
+
+            if not a.get("notification_status"):
+                updates["notification_status"] = "sent" if a.get("status") == "email_sent" else "monitoring"
+            if "notification_timestamp" not in a:
+                updates["notification_timestamp"] = a.get("last_email_sent_at")
 
             if updates:
                 db.price_alerts.update_one({"_id": aid}, {"$set": updates})
@@ -2386,15 +2407,16 @@ def _format_gececom_product(doc: dict) -> dict:
 
 def get_all_gececom_products() -> list[dict]:
     """Fetch all GEC ECom products from MongoDB. Auto-seed if empty."""
-    if db is None:
+    database = get_db()
+    if database is None:
         return [_format_gececom_product(p) for p in DEFAULT_GECECOM_PRODUCTS]
 
     try:
-        count = db.gececom_products.count_documents({})
+        count = database.gececom_products.count_documents({})
         if count == 0:
             seed_default_gececom_products()
 
-        docs = list(db.gececom_products.find().sort("created_at", DESCENDING))
+        docs = list(database.gececom_products.find().sort("created_at", DESCENDING))
         return [_format_gececom_product(d) for d in docs]
     except Exception as e:
         logger.error(f"Error fetching GEC ECom products: {e}")
@@ -2403,7 +2425,8 @@ def get_all_gececom_products() -> list[dict]:
 
 def seed_default_gececom_products() -> bool:
     """Populate default starter catalog in MongoDB."""
-    if db is None:
+    database = get_db()
+    if database is None:
         return False
     try:
         now = datetime.now(timezone.utc)
@@ -2411,7 +2434,7 @@ def seed_default_gececom_products() -> bool:
             doc = dict(item)
             doc["created_at"] = now
             doc["updated_at"] = now
-            db.gececom_products.update_one(
+            database.gececom_products.update_one(
                 {"product_name": doc["product_name"]},
                 {"$setOnInsert": doc},
                 upsert=True
@@ -2424,12 +2447,21 @@ def seed_default_gececom_products() -> bool:
 
 def get_gececom_product_by_id(product_id: str) -> dict | None:
     """Get single GEC ECom product by ObjectId or string ID."""
-    if db is None or not product_id:
+    database = get_db()
+    if database is None or not product_id:
         return None
     try:
-        oid = to_object_id(product_id)
-        q = {"_id": oid} if oid else {"id": product_id}
-        doc = db.gececom_products.find_one(q)
+        clean_id = str(product_id).strip()
+        raw_id = clean_id[4:] if clean_id.startswith("gec_") else clean_id
+        oid = to_object_id(raw_id) or to_object_id(clean_id)
+        
+        q_conds = [{"id": clean_id}, {"id": raw_id}]
+        if oid:
+            q_conds.extend([{"_id": oid}, {"id": str(oid)}])
+        
+        doc = database.gececom_products.find_one({"$or": q_conds})
+        if not doc and not oid:
+            doc = database.gececom_products.find_one({"product_name": {"$regex": f"^{re.escape(clean_id)}$", "$options": "i"}})
         return _format_gececom_product(doc) if doc else None
     except Exception as e:
         logger.error(f"Error getting GEC ECom product {product_id}: {e}")
@@ -2438,7 +2470,8 @@ def get_gececom_product_by_id(product_id: str) -> dict | None:
 
 def add_gececom_product(data: dict) -> dict | None:
     """Add a new product to GEC ECom store catalog."""
-    if db is None or not data:
+    database = get_db()
+    if database is None or not data:
         return None
     try:
         now = datetime.now(timezone.utc)
@@ -2456,7 +2489,7 @@ def add_gececom_product(data: dict) -> dict | None:
             "created_at": now,
             "updated_at": now
         }
-        res = db.gececom_products.insert_one(doc)
+        res = database.gececom_products.insert_one(doc)
         doc["_id"] = res.inserted_id
         return _format_gececom_product(doc)
     except Exception as e:
@@ -2464,121 +2497,175 @@ def add_gececom_product(data: dict) -> dict | None:
         return None
 
 
-def update_gececom_product_price(product_id: str, new_price: int) -> tuple[bool, dict | None]:
+def update_gececom_product_price(product_id: str, new_price: int, product_name: str = "") -> tuple[bool, dict | None]:
     """
     Update current price of a GEC ECom product and automatically synchronize the new price
     across all user profiles, selected products, search history, and price alerts in the database.
+    Also invalidates search and comparison caches so that all views (Comparison Table, GEC ECom,
+    Dashboard) immediately reflect the updated price.
     """
-    if db is None or not product_id or new_price <= 0:
+    database = get_db()
+    if database is None or not product_id or int(new_price) <= 0:
         return False, None
     try:
-        oid = to_object_id(product_id)
-        q = {"_id": oid} if oid else {"id": product_id}
+        new_price_num = int(new_price)
+        clean_id = str(product_id).strip()
+        raw_id = clean_id[4:] if clean_id.startswith("gec_") else clean_id
+        oid = to_object_id(raw_id) or to_object_id(clean_id)
+
+        # Multi-field query conditions to locate the product
+        q_conds = [{"id": clean_id}, {"id": raw_id}]
+        if oid:
+            q_conds.extend([{"_id": oid}, {"id": str(oid)}])
+        if product_name:
+            q_conds.append({"product_name": {"$regex": f"^{re.escape(str(product_name).strip())}$", "$options": "i"}})
+
+        doc = database.gececom_products.find_one({"$or": q_conds})
+        if not doc and not product_name and not oid:
+            doc = database.gececom_products.find_one({"product_name": {"$regex": f"^{re.escape(clean_id)}$", "$options": "i"}})
+        if not doc:
+            search_kw = str(product_name or clean_id).lower()
+            for gp in database.gececom_products.find():
+                gp_name = (gp.get("product_name") or "").lower()
+                if search_kw in gp_name or gp_name in search_kw:
+                    doc = gp
+                    break
+
+        if not doc:
+            logger.warning(f"[Price Update] Product not found for ID: {product_id}, name: {product_name}")
+            return False, None
+
         now = datetime.now(timezone.utc)
-        res = db.gececom_products.update_one(
-            q,
-            {"$set": {"current_price": int(new_price), "updated_at": now}}
+        orig_price = int(doc.get("original_price") or doc.get("current_price") or new_price_num)
+        discount_pct = int(round(((orig_price - new_price_num) / orig_price) * 100)) if orig_price > new_price_num else 0
+
+        database.gececom_products.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {
+                "current_price": new_price_num,
+                "discount_pct": discount_pct,
+                "updated_at": now
+            }}
         )
-        if res.modified_count > 0 or res.matched_count > 0:
-            doc = db.gececom_products.find_one(q)
-            if doc:
-                p_name = str(doc.get("product_name") or "").strip()
-                pid_str = str(doc.get("_id") or product_id)
-                fmt_price = f"₹{int(new_price):,}"
 
-                # 1. Update matching records in smartbuy_db.selected_products
-                try:
-                    sel_filter = {
-                        "$and": [
-                            {"$or": [
-                                {"product_url": {"$regex": re.escape(pid_str), "$options": "i"}},
-                                {"product_name": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
-                                {"title": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}}
-                            ]},
-                            {"$or": [
-                                {"platform": {"$regex": "gec", "$options": "i"}},
-                                {"product_url": {"$regex": "gececom|127.0.0.1:5000/gececom", "$options": "i"}}
-                            ]}
-                        ]
-                    }
-                    db.selected_products.update_many(
-                        sel_filter,
-                        {"$set": {
-                            "price": fmt_price,
-                            "price_num": int(new_price),
-                            "current_price": int(new_price),
-                            "updated_at": now
-                        }}
-                    )
-                except Exception as e_sel:
-                    logger.warning(f"Failed to sync selected_products for GEC item {pid_str}: {e_sel}")
+        p_name = str(doc.get("product_name") or product_name or "").strip()
+        pid_str = str(doc.get("_id"))
+        custom_id = str(doc.get("id") or "")
+        fmt_price = f"₹{new_price_num:,}"
 
-                # 2. Update matching records in smartbuy_db.search_history
-                try:
-                    search_filter = {
-                        "$and": [
-                            {"$or": [
-                                {"selected_product_url": {"$regex": re.escape(pid_str), "$options": "i"}},
-                                {"selected_product_title": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
-                                {"best_product_title": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
-                                {"best_product_url": {"$regex": re.escape(pid_str), "$options": "i"}},
-                                {"query": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
-                                {"product_name": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}}
-                            ]},
-                            {"$or": [
-                                {"selected_platform": {"$regex": "gec", "$options": "i"}},
-                                {"best_platform": {"$regex": "gec", "$options": "i"}},
-                                {"platform": {"$regex": "gec", "$options": "i"}},
-                                {"platforms_found": {"$regex": "gec", "$options": "i"}}
-                            ]}
-                        ]
-                    }
-                    db.search_history.update_many(
-                        search_filter,
-                        {"$set": {
-                            "selected_price": int(new_price),
-                            "selected_price_formatted": fmt_price,
-                            "price": fmt_price,
-                            "best_price": int(new_price),
-                            "updated_at": now
-                        }}
-                    )
-                except Exception as e_hist:
-                    logger.warning(f"Failed to sync search_history for GEC item {pid_str}: {e_hist}")
+        # 1. Update matching records in smartbuy_db.selected_products
+        try:
+            sel_filter = {
+                "$or": [
+                    {"product_url": {"$regex": re.escape(pid_str), "$options": "i"}},
+                    {"product_name": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
+                    {"title": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}}
+                ]
+            }
+            if custom_id:
+                sel_filter["$or"].append({"product_url": {"$regex": re.escape(custom_id), "$options": "i"}})
+            database.selected_products.update_many(
+                sel_filter,
+                {"$set": {
+                    "price": fmt_price,
+                    "price_num": new_price_num,
+                    "current_price": new_price_num,
+                    "updated_at": now
+                }}
+            )
+        except Exception as e_sel:
+            logger.warning(f"Failed to sync selected_products for GEC item {pid_str}: {e_sel}")
 
-                # 3. Update matching records in smartbuy_db.price_alerts
-                try:
-                    alert_filter = {
-                        "$or": [
-                            {"product_name": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
-                            {"product_url": {"$regex": re.escape(pid_str), "$options": "i"}}
-                        ]
-                    }
-                    db.price_alerts.update_many(
-                        alert_filter,
-                        {"$set": {
-                            "current_price": int(new_price),
-                            "updated_at": now
-                        }}
-                    )
-                except Exception as e_alt:
-                    logger.warning(f"Failed to sync price_alerts for GEC item {pid_str}: {e_alt}")
+        # 2. Update matching records in smartbuy_db.search_history
+        try:
+            search_filter = {
+                "$or": [
+                    {"selected_product_url": {"$regex": re.escape(pid_str), "$options": "i"}},
+                    {"selected_product_title": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
+                    {"best_product_title": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
+                    {"best_product_url": {"$regex": re.escape(pid_str), "$options": "i"}},
+                    {"query": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
+                    {"product_name": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}}
+                ]
+            }
+            database.search_history.update_many(
+                search_filter,
+                {"$set": {
+                    "selected_price": new_price_num,
+                    "selected_price_formatted": fmt_price,
+                    "price": fmt_price,
+                    "best_price": new_price_num,
+                    "updated_at": now
+                }}
+            )
+        except Exception as e_hist:
+            logger.warning(f"Failed to sync search_history for GEC item {pid_str}: {e_hist}")
 
-            return True, _format_gececom_product(doc)
-        return False, None
+        # 3. Update matching records in smartbuy_db.price_alerts
+        try:
+            alert_filter = {
+                "$or": [
+                    {"product_id": {"$in": [pid_str, f"gec_{pid_str}", custom_id, f"gec_{custom_id}"]}},
+                    {"product_id": doc["_id"]},
+                    {"product_name": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}},
+                    {"product_url": {"$regex": re.escape(pid_str), "$options": "i"}}
+                ]
+            }
+            database.price_alerts.update_many(
+                alert_filter,
+                {"$set": {
+                    "latest_price": new_price_num,
+                    "updated_at": now
+                }}
+            )
+        except Exception as e_alt:
+            logger.warning(f"Failed to sync price_alerts for GEC item {pid_str}: {e_alt}")
+
+        # 4. Invalidate search & comparison caches so Comparison Table reflects updated price immediately
+        try:
+            from cache import clear_cache
+            clear_cache()
+        except Exception as e_c:
+            logger.debug(f"Cache clear skipped: {e_c}")
+
+        try:
+            from comparison_engine import _url_comparison_cache
+            _url_comparison_cache.clear()
+        except Exception as e_uc:
+            logger.debug(f"URL comparison cache clear skipped: {e_uc}")
+
+        doc["current_price"] = new_price_num
+        doc["discount_pct"] = discount_pct
+
+        # 5. Automatically check and trigger matching price alerts immediately without waiting for worker cycle
+        try:
+            check_and_trigger_price_alerts(
+                product_name=p_name,
+                new_price=new_price_num,
+                platform="gececom",
+                product_id=pid_str
+            )
+        except Exception as e_trig:
+            logger.warning(f"Failed to auto-trigger price alerts on price update for {p_name}: {e_trig}")
+
+        return True, _format_gececom_product(doc)
+
     except Exception as e:
-        logger.error(f"Error updating price for {product_id}: {e}")
+        logger.error(f"Error updating price for {product_id}: {e}", exc_info=True)
         return False, None
 
 
 def delete_gececom_product(product_id: str) -> bool:
     """Delete a product from GEC ECom store."""
-    if db is None or not product_id:
+    database = get_db()
+    if database is None or not product_id:
         return False
     try:
-        oid = to_object_id(product_id)
-        q = {"_id": oid} if oid else {"id": product_id}
-        res = db.gececom_products.delete_one(q)
+        clean_id = str(product_id).strip()
+        raw_id = clean_id[4:] if clean_id.startswith("gec_") else clean_id
+        oid = to_object_id(raw_id) or to_object_id(clean_id)
+        q = {"_id": oid} if oid else {"id": clean_id}
+        res = database.gececom_products.delete_one(q)
         return res.deleted_count > 0
     except Exception as e:
         logger.error(f"Error deleting product {product_id}: {e}")
@@ -2642,42 +2729,75 @@ def create_price_alert(data: dict) -> tuple[bool, str, dict | None]:
             return False, "Target price or percentage must be greater than 0", None
 
         product_id = str(data.get("product_id") or "").strip() or None
-        if product_id and product_id.startswith("gec_"):
-            product_id = product_id[4:]
         product_url = str(data.get("product_url") or "").strip()
         product_name = str(data.get("product_name", "")).strip()
 
-        # If product_id not directly provided, extract from product_url if available
-        if not product_id and product_url and "#product-" in product_url:
+        # Robust GEC ECom product linking (by ID, URL, exact name, or title keyword)
+        prod = None
+        if product_id:
+            raw_pid = product_id[4:] if product_id.startswith("gec_") else product_id
+            p_oid = to_object_id(raw_pid)
+            prod = db.gececom_products.find_one({"_id": p_oid} if p_oid else {"id": raw_pid})
+            if not prod and product_id.startswith("gec_"):
+                prod = db.gececom_products.find_one({"id": product_id})
+
+        if not prod and product_url and "#product-" in product_url:
             m = re.search(r'#product-([0-9a-fA-F]{24})', product_url)
             if m:
-                product_id = m.group(1)
+                p_oid = to_object_id(m.group(1))
+                prod = db.gececom_products.find_one({"_id": p_oid})
 
-
-        # If still not found, search GEC ECom products by name
-        if not product_id and product_name:
-            matched_prod = db.gececom_products.find_one({
+        if not prod and product_name:
+            prod = db.gececom_products.find_one({
                 "product_name": {"$regex": f"^{re.escape(product_name)}$", "$options": "i"}
             })
-            if matched_prod:
-                product_id = str(matched_prod["_id"])
-                if not product_url:
-                    product_url = f"/gececom#product-{product_id}"
+            if not prod:
+                clean_kw = product_name.strip().lower()
+                for gp in db.gececom_products.find():
+                    gp_title = gp.get("product_name", "").lower()
+                    if clean_kw in gp_title or gp_title in clean_kw:
+                        prod = gp
+                        break
+
+        platform_val = str(data.get("platform", "gececom")).lower().strip()
+        if prod:
+            product_id = str(prod["_id"])
+            if not product_url or product_url == "/gececom":
+                product_url = f"/gececom#product-{product_id}"
+            if not data.get("product_image") and prod.get("product_image"):
+                data["product_image"] = prod.get("product_image")
+            if not current_price or current_price <= 0:
+                current_price = int(prod.get("current_price", 0))
+            platform_val = "gececom"
 
         now = datetime.now(timezone.utc)
         user_id = str(data.get("user_id") or "").strip()
-        if not user_id and email:
+        user_name = str(data.get("user_name") or "").strip()
+
+        # Lookup registered user account by user_id or email
+        u = None
+        if user_id:
+            u = get_user_by_id(user_id)
+        if not u and email:
             u = db.users.find_one({"email": email})
             if u:
                 user_id = str(u.get("id") or u.get("_id", ""))
 
+        if u:
+            # Enforce registered email from user model if user exists
+            if u.get("email"):
+                email = str(u.get("email")).strip().lower()
+            if not user_name:
+                user_name = str(u.get("name") or "").strip()
+
         alert_doc = {
             "user_id": user_id or None,
+            "user_name": user_name or "Valued Customer",
             "email": email,
             "product_id": product_id,
             "product_name": product_name,
             "product_url": product_url,
-            "platform": str(data.get("platform", "gececom")).lower().strip(),
+            "platform": platform_val,
             "current_price": current_price,
             "baseline_price": current_price,
             "previous_price": current_price,
@@ -2687,7 +2807,8 @@ def create_price_alert(data: dict) -> tuple[bool, str, dict | None]:
             "alert_mode": alert_mode or ("price" if data.get("target_price") else "percent"),
             "product_image": data.get("product_image", ""),
             "status": "monitoring",
-            "notification_status": "pending",
+            "notification_status": "monitoring",
+            "notification_timestamp": None,
             "last_checked_at": now,
             "last_email_sent_at": None,
             "last_notified_price": None,
@@ -2701,70 +2822,68 @@ def create_price_alert(data: dict) -> tuple[bool, str, dict | None]:
 
         # 1. Send instant confirmation email to recipient
         try:
-            from otp_utils import send_email_detailed
+            from otp_utils import send_email_async
             conf_drop_amount = max(0, current_price - target_price)
             conf_subject = f"SmartBuy Price Alert Activated: {product_name}"
+            greeting_name = user_name if user_name and user_name.lower() != "valued customer" else "Valued Customer"
             conf_body = (
-                f"Hello!\n\n"
+                f"Hello {greeting_name},\n\n"
                 f"Your Price Drop Alert for '{product_name}' has been successfully activated on SmartBuy!\n\n"
-                f"• Product: {product_name}\n"
-                f"• Platform: {alert_doc.get('platform', 'SmartBuy').upper()}\n"
-                f"• Current Baseline Price: ₹{current_price:,}\n"
-                f"• Target Trigger Price: ₹{target_price:,}\n"
-                f"• Price Reduction Needed: -₹{conf_drop_amount:,} (-{target_pct}%)\n\n"
-                f"SmartBuy is now monitoring this product 24/7. The moment the live price drops to or below ₹{target_price:,}, you will receive an instant price-drop notification!\n\n"
-                f"SmartBuy Dashboard: http://127.0.0.1:5000/my-price-alerts\n\n"
-                f"Best regards,\nSmartBuy Deal Watcher"
+                f"Product: {product_name}\n"
+                f"Platform: {alert_doc.get('platform', 'SmartBuy').upper()}\n"
+                f"Current Baseline Price: ₹{current_price:,}\n"
+                f"Target Trigger Price: ₹{target_price:,}\n"
+                f"Required Price Drop: -₹{conf_drop_amount:,} (-{target_pct}%)\n\n"
+                f"SmartBuy is now actively monitoring this product. The instant the price drops to or below ₹{target_price:,}, an automated price-drop notification will be sent directly to your inbox.\n\n"
+                f"Regards,\nSmartBuy Team"
             )
             conf_html = f"""
-            <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 620px; margin: auto; padding: 24px; border: 1px solid #cbd5e1; border-radius: 16px; background: #ffffff;">
-                <div style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); padding: 24px; border-radius: 12px; color: #fff; text-align: center;">
-                    <span style="background: rgba(255,255,255,0.22); padding: 4px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: uppercase;">
-                        Price Alert Activated
-                    </span>
-                    <h2 style="margin: 10px 0 0 0; font-size: 22px; font-weight: 800;">SmartBuy Price Drop Alert Activated!</h2>
-                    <p style="margin: 4px 0 0 0; opacity: 0.95; font-size: 14px;">24/7 Live Monitoring Registered</p>
+            <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <h2 style="color: #4f46e5; margin: 0; font-size: 24px;">SmartBuy</h2>
+                    <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Price Alert Activated</p>
                 </div>
 
-                <div style="padding: 22px 10px;">
-                    <div style="text-align: center; margin-bottom: 16px;">
-                        {f'<img src="{alert_doc.get("product_image")}" alt="{product_name}" style="max-height: 120px; max-width: 180px; object-fit: contain; margin-bottom: 10px; border-radius: 8px;">' if alert_doc.get("product_image") else ''}
-                        <h3 style="color: #0f172a; margin: 0; font-size: 17px; font-weight: 700;">{product_name}</h3>
-                        <span style="display: inline-block; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-top: 6px; text-transform: uppercase;">
-                            Platform: {alert_doc.get('platform', 'SmartBuy').upper()}
-                        </span>
-                    </div>
+                <p style="color: #1e293b; font-size: 15px; margin: 0 0 16px 0;">
+                    Hello {greeting_name},<br><br>
+                    Your price drop alert has been successfully activated. We are actively monitoring this item for you:
+                </p>
 
-                    <div style="background: #f0f9ff; border: 2px solid #0284c7; padding: 18px; border-radius: 12px; margin: 16px 0;">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #bae6fd;">
-                            <tr style="border-bottom: 1px solid #f1f5f9;">
-                                <td style="padding: 10px 14px; color: #64748b;">Current Baseline Price:</td>
-                                <td style="padding: 10px 14px; font-weight: 700; text-align: right; color: #0f172a;">₹{current_price:,}</td>
-                            </tr>
-                            <tr style="border-bottom: 1px solid #f1f5f9;">
-                                <td style="padding: 10px 14px; color: #64748b;">Target Trigger Price:</td>
-                                <td style="padding: 10px 14px; font-weight: 800; color: #059669; text-align: right; font-size: 16px;">₹{target_price:,}</td>
-                            </tr>
-                            <tr style="background: #ecfdf5;">
-                                <td style="padding: 10px 14px; color: #166534; font-weight: 700;">Required Price Drop:</td>
-                                <td style="padding: 10px 14px; font-weight: 800; color: #15803d; text-align: right;">-₹{conf_drop_amount:,} (-{target_pct}%)</td>
-                            </tr>
-                        </table>
+                <div style="background: #eff6ff; border: 1px solid #bfdbfe; padding: 18px; border-radius: 12px; text-align: center; margin-bottom: 20px;">
+                    <span style="font-size: 12px; color: #1e40af; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Target Trigger Price</span><br>
+                    <span style="font-size: 32px; font-weight: bold; color: #1d4ed8;">₹{target_price:,}</span>
+                    <div style="margin-top: 4px; font-size: 13px; color: #1e40af; font-weight: 600;">
+                        Required Drop: -₹{conf_drop_amount:,} (-{target_pct}%)
                     </div>
+                </div>
 
-                    <div style="background: #ecfdf5; border-left: 4px solid #10b981; padding: 12px 16px; border-radius: 6px; font-size: 13px; color: #065f46; margin-bottom: 18px;">
-                        <strong>🛡️ 24/7 Smart Monitor Active:</strong> We will automatically email you at <strong>{email}</strong> the instant this product's price reaches or drops below ₹{target_price:,}.
-                    </div>
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 20px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 6px 0; color: #64748b;">Product:</td>
+                            <td style="padding: 6px 0; font-weight: 600; color: #0f172a; text-align: right;">{product_name}</td>
+                        </tr>
+                        <tr style="border-bottom: 1px solid #e2e8f0;">
+                            <td style="padding: 6px 0; color: #64748b;">Platform:</td>
+                            <td style="padding: 6px 0; font-weight: 600; color: #0f172a; text-align: right;">{alert_doc.get('platform', 'SmartBuy').upper()}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 6px 0; color: #64748b;">Current Baseline Price:</td>
+                            <td style="padding: 6px 0; font-weight: 600; color: #0f172a; text-align: right;">₹{current_price:,}</td>
+                        </tr>
+                    </table>
+                </div>
 
-                    <div style="text-align: center;">
-                        <a href="http://127.0.0.1:5000/my-price-alerts" style="background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff; padding: 12px 28px; text-decoration: none; border-radius: 999px; font-weight: bold; font-size: 14px; display: inline-block;">
-                            📊 View Price Alerts Dashboard
-                        </a>
-                    </div>
+                <div style="background: #f0fdf4; border-left: 4px solid #16a34a; padding: 12px 14px; border-radius: 6px; font-size: 13px; color: #15803d; margin-bottom: 18px;">
+                    <strong>Automated Deal Watcher Active:</strong> The moment this product drops to or below ₹{target_price:,}, an email will automatically be dispatched to <strong>{email}</strong>.
+                </div>
+
+                <div style="border-top: 1px solid #f1f5f9; margin-top: 24px; padding-top: 16px; text-align: center;">
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">Regards,<br><strong>SmartBuy Team</strong></p>
                 </div>
             </div>
             """
-            send_email_detailed(email, conf_subject, conf_body, conf_html)
+            send_email_async(email, conf_subject, conf_body, conf_html)
         except Exception as mail_err:
             logger.warning(f"[Price Alert] Failed to send activation confirmation to {email}: {mail_err}")
 
@@ -2787,13 +2906,48 @@ def create_price_alert(data: dict) -> tuple[bool, str, dict | None]:
         return False, str(e), None
 
 
-def get_user_price_alerts(email: str = None) -> list[dict]:
-    """Retrieve all price alerts registered for an email (or all if email is None) with live latest prices and reduction calculations."""
-    if db is None:
+def get_user_price_alerts(email: str = None, user_id: str = None, allow_all: bool = False) -> list[dict]:
+    """Retrieve all price alerts registered for an email or user_id (only returns all if allow_all is True) with live latest prices and reduction calculations."""
+    database = get_db()
+    if database is None:
         return []
     try:
-        q = {"email": email.strip().lower()} if email else {}
-        docs = list(db.price_alerts.find(q).sort("created_at", DESCENDING))
+        or_filters = []
+        if email:
+            clean_e = str(email).strip().lower()
+            if clean_e:
+                or_filters.append({"email": clean_e})
+                or_filters.append({"email": {"$regex": f"^{re.escape(clean_e)}$", "$options": "i"}})
+                u = database.users.find_one({"email": clean_e})
+                if u:
+                    uid_str = str(u.get("id") or u.get("_id", ""))
+                    if uid_str:
+                        or_filters.append({"user_id": uid_str})
+        if user_id:
+            uid_str = str(user_id).strip()
+            if uid_str:
+                or_filters.append({"user_id": uid_str})
+                u = get_user_by_id(uid_str)
+                if u and u.get("email"):
+                    u_em = str(u["email"]).strip().lower()
+                    or_filters.append({"email": u_em})
+
+        if not or_filters:
+            if not allow_all:
+                return []
+            q = {}
+        else:
+            q = {"$or": or_filters}
+        raw_docs = list(database.price_alerts.find(q).sort("created_at", DESCENDING))
+        # Deduplicate by _id
+        seen_ids = set()
+        docs = []
+        for d in raw_docs:
+            d_id = str(d.get("_id"))
+            if d_id not in seen_ids:
+                seen_ids.add(d_id)
+                docs.append(d)
+
         formatted = []
         for d in docs:
             f = format_doc(d)
@@ -2802,17 +2956,38 @@ def get_user_price_alerts(email: str = None) -> list[dict]:
 
             # Link live price from gececom_products if available
             pid = f.get("product_id")
+            p_name = f.get("product_name") or ""
             live_store_price = None
+            prod = None
             if pid:
-                p_oid = to_object_id(pid)
-                prod = db.gececom_products.find_one({"_id": p_oid} if p_oid else {"id": pid})
-                if prod:
-                    live_store_price = prod.get("current_price")
-                    if not f.get("product_image") and prod.get("product_image"):
-                        f["product_image"] = prod.get("product_image")
+                clean_pid = str(pid).strip()
+                raw_pid = clean_pid[4:] if clean_pid.startswith("gec_") else clean_pid
+                p_oid = to_object_id(raw_pid) or to_object_id(clean_pid)
+                prod = database.gececom_products.find_one(
+                    {"$or": [{"_id": p_oid}, {"id": clean_pid}, {"id": raw_pid}]}
+                    if p_oid else {"$or": [{"id": clean_pid}, {"id": raw_pid}]}
+                )
+            if not prod and p_name:
+                prod = database.gececom_products.find_one({
+                    "product_name": {"$regex": f"^{re.escape(p_name.strip())}$", "$options": "i"}
+                })
+                if not prod:
+                    clean_kw = p_name.strip().lower()
+                    for gp in database.gececom_products.find():
+                        gp_title = gp.get("product_name", "").lower()
+                        if clean_kw in gp_title or gp_title in clean_kw:
+                            prod = gp
+                            break
+
+            if prod:
+                live_store_price = prod.get("current_price")
+                if not f.get("product_image") and prod.get("product_image"):
+                    f["product_image"] = prod.get("product_image")
+                if not f.get("product_id"):
+                    f["product_id"] = str(prod["_id"])
 
             # Baseline price at creation time
-            base_price = int(f.get("current_price") or f.get("baseline_price") or 0)
+            base_price = int(f.get("baseline_price") or f.get("current_price") or 0)
             f["baseline_price"] = base_price
 
             # Latest live price
@@ -2832,36 +3007,54 @@ def get_user_price_alerts(email: str = None) -> list[dict]:
             target_p = int(f.get("target_price") or 0)
             f["target_price"] = target_p
 
-            # Reduction calculation
-            reference_p = prev_p if prev_p > latest_p else base_price
-            if reference_p > latest_p:
-                reduction_amt = reference_p - latest_p
-                reduction_pct = round((reduction_amt / reference_p) * 100.0, 1)
+            # Reduction calculation against baseline or previous price
+            ref_p = base_price if base_price > latest_p else (prev_p if prev_p > latest_p else latest_p)
+            if ref_p > latest_p:
+                reduction_amt = ref_p - latest_p
+                reduction_pct = round((reduction_amt / ref_p) * 100.0, 1)
             else:
                 reduction_amt = 0
                 reduction_pct = 0.0
             f["reduction_amount"] = reduction_amt
             f["reduction_pct"] = reduction_pct
 
-            # Normalized status
-            st = f.get("status")
-            if st in ("active", None, ""):
-                st = "monitoring"
-            elif st == "triggered":
-                st = "email_sent" if f.get("last_email_sent_at") else "monitoring"
-            f["status"] = st
-
-            # Notification status
-            if f.get("last_email_sent_at"):
-                f["notification_status"] = "sent"
-            elif st == "email_failed":
-                f["notification_status"] = "failed"
-            elif st == "email_sending":
-                f["notification_status"] = "sending"
-            elif st == "target_reached":
-                f["notification_status"] = "reached"
+            # Normalized status mapping: only consider triggered/sent if current price is actually at or below target
+            raw_st = (f.get("status") or "").lower()
+            if raw_st == "email_failed":
+                st = "email_failed"
+                notif_st = "failed"
+            elif raw_st == "email_sending":
+                st = "email_sending"
+                notif_st = "sending"
+            elif latest_p <= target_p and target_p > 0:
+                if raw_st == "email_sent" or f.get("last_email_sent_at"):
+                    st = "email_sent"
+                    notif_st = "sent"
+                else:
+                    st = "target_reached"
+                    notif_st = "reached"
             else:
-                f["notification_status"] = f.get("notification_status") or "monitoring"
+                # Latest price is currently above target price: alert is actively monitoring
+                st = "monitoring"
+                notif_st = "monitoring"
+                if raw_st in ("email_sent", "target_reached"):
+                    # Re-arm in database if it was previously marked sent from a former price drop
+                    try:
+                        f_oid = to_object_id(f.get("_id") or f.get("id"))
+                        q_rearm = {"_id": f_oid} if f_oid else {"id": str(f.get("id"))}
+                        database.price_alerts.update_one(
+                            q_rearm,
+                            {"$set": {
+                                "status": "monitoring",
+                                "notification_status": "monitoring",
+                                "last_notified_price": None
+                            }}
+                        )
+                    except Exception:
+                        pass
+
+            f["status"] = st
+            f["notification_status"] = notif_st
 
             # Formatted timestamps for UI display
             def _format_time(dt_val):
@@ -2884,56 +3077,631 @@ def get_user_price_alerts(email: str = None) -> list[dict]:
 
 
 
-def delete_price_alert(alert_id: str) -> bool:
-    """Delete a price alert."""
-    if db is None or not alert_id:
+def delete_price_alert(alert_id: str, requesting_user_id: str = None, is_admin: bool = False) -> bool:
+    """Delete a price alert with user ownership validation."""
+    database = get_db()
+    if database is None or not alert_id:
         return False
     try:
         oid = to_object_id(alert_id)
-        q = {"_id": oid} if oid else {"id": alert_id}
-        res = db.price_alerts.delete_one(q)
+        q = {"_id": oid} if oid else {"id": str(alert_id)}
+        doc = database.price_alerts.find_one(q)
+        if not doc:
+            return False
+        if requesting_user_id and not is_admin:
+            owner_uid = str(doc.get("user_id") or "")
+            if owner_uid and owner_uid != str(requesting_user_id):
+                logger.warning(f"Unauthorized deletion attempt on alert {alert_id} by user {requesting_user_id}")
+                return False
+        res = database.price_alerts.delete_one(q)
         return res.deleted_count > 0
     except Exception as e:
         logger.error(f"Error deleting price alert {alert_id}: {e}")
         return False
 
 
-def trigger_test_price_alert(alert_id: str) -> tuple[bool, str, dict | None]:
+def get_alert_by_id(alert_id: str) -> dict | None:
+    """Retrieve single price alert by MongoDB ObjectId or string ID."""
+    database = get_db()
+    if database is None or not alert_id:
+        return None
+    try:
+        oid = to_object_id(alert_id)
+        q = {"_id": oid} if oid else {"id": str(alert_id)}
+        doc = database.price_alerts.find_one(q)
+        return format_doc(doc) if doc else None
+    except Exception as e:
+        logger.error(f"Error fetching alert by ID {alert_id}: {e}")
+        return None
+
+
+def log_notification_failure(alert_id: str, reason: str):
+    """Log and record notification failure in database for an alert."""
+    database = get_db()
+    if database is None or not alert_id:
+        return
+    try:
+        oid = to_object_id(alert_id)
+        q = {"_id": oid} if oid else {"id": str(alert_id)}
+        now = datetime.now(timezone.utc)
+        database.price_alerts.update_one(
+            q,
+            {"$set": {
+                "status": "email_failed",
+                "notification_status": "failed",
+                "last_error": reason,
+                "last_checked_at": now,
+                "updated_at": now
+            },
+            "$push": {
+                "notification_events": {
+                    "event": "price_drop_email_failed",
+                    "reason": reason,
+                    "timestamp": now,
+                    "status": "failed"
+                }
+            }}
+        )
+        logger.error(f"[Alert Notification Failure] Alert {alert_id}: {reason}")
+    except Exception as e:
+        logger.error(f"Error logging notification failure for {alert_id}: {e}")
+
+
+def send_price_drop_email(
+    alert: dict | str,
+    user: dict | str = None,
+    current_price: int = None,
+    **kwargs
+) -> tuple[bool, str]:
     """
-    Send a real test email for a specific price alert using the configured SMTP service.
+    Send an automated price-drop notification email to the verified registered alert owner.
+    - SENDER: Configured SmartBuy SMTP sender (buysmart260@gmail.com).
+    - RECIPIENT: The authenticated user's registered email address who created the alert.
+    Never uses the SmartBuy sender address or admin address as the recipient.
+    Never uses hard-coded fallbacks to other users.
+    Adheres strictly to the professional email template specified in the system requirements.
+    """
+    from otp_utils import send_email_detailed
+
+    database = get_db()
+    sender_acc = os.getenv("SMTP_USER", "buysmart260@gmail.com").strip().lower()
+
+    # Normalize alert and user parameters (supporting both (alert, user, current_price) and legacy positional kwargs)
+    alert_doc = {}
+    user_doc = None
+    recipient_email = ""
+    user_name = ""
+
+    if isinstance(alert, dict):
+        alert_doc = alert
+        if isinstance(user, dict):
+            user_doc = user
+            recipient_email = str(user.get("email") or "").strip().lower()
+            user_name = str(user.get("name") or "").strip()
+        elif isinstance(user, str) and "@" in user:
+            recipient_email = user.strip().lower()
+
+        new_price_num = int(current_price) if current_price is not None else int(alert_doc.get("latest_price") or alert_doc.get("current_price") or 0)
+    else:
+        # Legacy positional signature: send_price_drop_email(recipient, product_name, previous_price, current_price, target_price, ...)
+        recipient_email = str(alert or "").strip().lower()
+        product_name_param = str(user or kwargs.get("product_name") or "Tracked Product")
+        prev_p_param = int(current_price or kwargs.get("previous_price") or 0)
+        curr_p_param = int(kwargs.get("current_price") or 0)
+        t_price_param = int(kwargs.get("target_price") or 0)
+        alert_doc = {
+            "product_name": product_name_param,
+            "previous_price": prev_p_param,
+            "current_price": curr_p_param,
+            "latest_price": curr_p_param,
+            "target_price": t_price_param,
+            "platform": kwargs.get("platform", "GEC ECom"),
+            "product_url": kwargs.get("product_url", "/gececom"),
+            "product_image": kwargs.get("product_image", ""),
+            "user_name": kwargs.get("user_name", "")
+        }
+        new_price_num = curr_p_param
+
+    # 1. Resolve alert owner's verified registered email address
+    alert_owner_id = alert_doc.get("user_id")
+    alert_stored_email = str(alert_doc.get("email") or "").strip().lower()
+
+    if not recipient_email or recipient_email == sender_acc:
+        # Resolve from registered user account
+        if alert_owner_id and database is not None:
+            u = get_user_by_id(alert_owner_id)
+            if u and u.get("email"):
+                recipient_email = str(u["email"]).strip().lower()
+                user_name = str(u.get("name") or user_name).strip()
+        if (not recipient_email or recipient_email == sender_acc) and alert_stored_email and "@" in alert_stored_email:
+            if alert_stored_email != sender_acc:
+                recipient_email = alert_stored_email
+                if not user_name:
+                    user_name = str(alert_doc.get("user_name") or "").strip()
+
+    # Safety validation: recipient email must be present, valid, and NEVER the SMTP sender address
+    clean_to = str(recipient_email or "").strip().lower()
+    if not clean_to or "@" not in clean_to:
+        err_msg = f"Invalid or missing recipient email address: '{recipient_email}'"
+        logger.error(f"[Price Drop Email] {err_msg}")
+        return False, err_msg
+
+    if clean_to == sender_acc:
+        err_msg = f"Notification recipient cannot be the SmartBuy SMTP sender email ({sender_acc}). Must be the alert owner's email."
+        logger.error(f"[Price Drop Email] {err_msg}")
+        return False, err_msg
+
+    # 2. Extract product details and prices
+    product_name = str(alert_doc.get("product_name") or kwargs.get("product_name") or "Tracked Product").strip()
+    platform_raw = str(alert_doc.get("platform") or kwargs.get("platform") or "GEC ECom").strip()
+    target_price = int(alert_doc.get("target_price") or kwargs.get("target_price") or 0)
+
+    # Resolve previous price accurately
+    if kwargs.get("previous_price") and int(kwargs.get("previous_price")) > 0:
+        previous_price = int(kwargs["previous_price"])
+    elif alert_doc.get("previous_price") and int(alert_doc.get("previous_price")) > 0:
+        previous_price = int(alert_doc["previous_price"])
+    elif alert_doc.get("baseline_price") and int(alert_doc.get("baseline_price")) > 0:
+        previous_price = int(alert_doc["baseline_price"])
+    elif alert_doc.get("current_price") and int(alert_doc.get("current_price")) > 0:
+        previous_price = int(alert_doc["current_price"])
+    else:
+        previous_price = target_price
+
+    # Price drop & reduction calculation
+    ref_price = previous_price if previous_price > new_price_num else (target_price if target_price > new_price_num else new_price_num)
+    drop_amount = max(0, ref_price - new_price_num)
+    drop_pct = round(((ref_price - new_price_num) / ref_price * 100.0), 1) if ref_price > new_price_num and ref_price > 0 else 0.0
+
+    # User display name
+    if not user_name:
+        user_name = str(alert_doc.get("user_name") or (user_doc.get("name") if isinstance(user_doc, dict) else "") or "Valued Customer").strip()
+    greeting_name = user_name if user_name and user_name.lower() != "valued customer" else "Valued Customer"
+
+    # Platform display formatting
+    p_lower = platform_raw.lower()
+    if p_lower in ("gececom", "gec ecom", "gec"):
+        platform_display = "GEC ECom Store"
+    elif "amazon" in p_lower:
+        platform_display = "Amazon"
+    elif "flipkart" in p_lower:
+        platform_display = "Flipkart"
+    elif "meesho" in p_lower:
+        platform_display = "Meesho"
+    else:
+        platform_display = platform_raw.capitalize()
+
+    # Product URL and SmartBuy Dashboard URL
+    base_app_url = (os.getenv("BASE_URL") or os.getenv("APP_URL") or "http://localhost:5000").rstrip("/")
+    product_url = alert_doc.get("product_url") or kwargs.get("product_url") or "/my-price-alerts"
+    if str(product_url).startswith("http://") or str(product_url).startswith("https://"):
+        deal_url = product_url
+    elif str(product_url).startswith("/"):
+        deal_url = f"{base_app_url}{product_url}"
+    else:
+        deal_url = f"{base_app_url}/{product_url}"
+
+    dashboard_url = f"{base_app_url}/my-price-alerts"
+    raw_img = str(alert_doc.get("product_image") or kwargs.get("product_image") or "").strip()
+    valid_img_tag = f'<img src="{raw_img}" alt="{product_name}" style="max-height: 140px; max-width: 200px; object-fit: contain; margin-bottom: 12px; border-radius: 8px;">' if (raw_img.startswith("http://") or raw_img.startswith("https://")) else ''
+
+    clean_pname = re.sub(r'[\r\n\t]+', ' ', product_name).strip()
+    subject = "SmartBuy Price Drop Alert – Your Product Is Now Cheaper!"
+
+    # Plaintext message body matching OTP reliability standard
+    body_text = (
+        f"Hello {greeting_name},\n\n"
+        f"Good news! The price of a product you are tracking on SmartBuy has dropped to your target price.\n\n"
+        f"Product: {clean_pname}\n"
+        f"Platform: {platform_display}\n"
+        f"Previous Price: ₹{previous_price:,}\n"
+        f"Current Price: ₹{new_price_num:,}\n"
+        f"Your Target Price: ₹{target_price:,}\n"
+        f"You Save: ₹{drop_amount:,} (-{drop_pct}%)\n\n"
+        f"The latest price is now at or below your target price. Visit SmartBuy to check your alerts:\n"
+        f"{dashboard_url}\n\n"
+        f"Regards,\nSmartBuy Team"
+    )
+
+    # Clean, lightweight HTML matching send_otp_email structure (proven 100% inbox deliverability)
+    html_content = f"""
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+            <h2 style="color: #4f46e5; margin: 0; font-size: 24px;">SmartBuy</h2>
+            <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Price Drop Alert</p>
+        </div>
+
+        <p style="color: #1e293b; font-size: 15px; margin: 0 0 16px 0;">
+            Hello {greeting_name},<br><br>
+            Good news! A product you are tracking has dropped to your target price.
+        </p>
+
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; padding: 18px; border-radius: 12px; text-align: center; margin-bottom: 20px;">
+            <span style="font-size: 12px; color: #166534; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Current Dropped Price</span><br>
+            <span style="font-size: 32px; font-weight: bold; color: #15803d;">₹{new_price_num:,}</span>
+            <div style="margin-top: 4px; font-size: 13px; color: #166534; font-weight: 600;">
+                You Save: ₹{drop_amount:,} (-{drop_pct}%)
+            </div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 14px 16px; margin-bottom: 20px;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 6px 0; color: #64748b;">Product:</td>
+                    <td style="padding: 6px 0; font-weight: 600; color: #0f172a; text-align: right;">{clean_pname}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 6px 0; color: #64748b;">Platform:</td>
+                    <td style="padding: 6px 0; font-weight: 600; color: #0f172a; text-align: right;">{platform_display}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #e2e8f0;">
+                    <td style="padding: 6px 0; color: #64748b;">Previous Price:</td>
+                    <td style="padding: 6px 0; text-decoration: line-through; color: #94a3b8; text-align: right;">₹{previous_price:,}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0; color: #64748b;">Target Threshold:</td>
+                    <td style="padding: 6px 0; font-weight: 600; color: #4f46e5; text-align: right;">₹{target_price:,}</td>
+                </tr>
+            </table>
+        </div>
+
+        <div style="border-top: 1px solid #f1f5f9; margin-top: 24px; padding-top: 16px; text-align: center;">
+            <p style="color: #94a3b8; font-size: 12px; margin: 0;">Regards,<br><strong>SmartBuy Team</strong></p>
+        </div>
+    </div>
+    """
+
+    logger.info(
+        f"[Price Drop Dispatch] Product: '{product_name}' | Price: ₹{new_price_num:,} (was ₹{previous_price:,}) | "
+        f"Target: ₹{target_price:,} | Recipient: {clean_to} (Alert Owner)"
+    )
+
+    return send_email_detailed(clean_to, subject, body_text, html_content)
+
+
+def process_single_alert(
+    alert: dict,
+    current_price: int,
+    previous_price: int = None,
+    force_notify: bool = False
+) -> dict:
+    """
+    Core atomic price alert evaluation and notification dispatcher.
+    Evaluates: current_price <= target_price
+    - Validates numeric prices.
+    - Resolves the alert owner's verified registered email address (never SMTP sender address).
+    - Prevents duplicate notifications at the same price level.
+    - Re-arms alert to 'monitoring' if price rises above target price.
+    - Updates alert statuses: monitoring, email_sending, email_sent, email_failed.
+    - Records notification_timestamp, last_checked_at, reduction calculations, and in-app inbox messages.
+    """
+    database = get_db()
+    if database is None or not alert:
+        return {"alert_id": None, "error": "Database unavailable"}
+
+    aid_raw = alert.get("_id") or alert.get("id")
+    aid_str = str(aid_raw)
+    oid = to_object_id(aid_raw)
+    q_filter = {"_id": oid} if oid else {"id": aid_str}
+    t_price = int(alert.get("target_price") or 0)
+    c_price = int(alert.get("baseline_price") or alert.get("current_price") or t_price)
+    p_name = alert.get("product_name") or "Tracked Product"
+    pid_str = str(alert.get("product_id") or "")
+
+    try:
+        new_price_num = int(round(float(str(current_price).replace(',', '').replace('₹', '').strip())))
+    except (ValueError, TypeError):
+        logger.warning(f"[Alert Check] Invalid price provided for alert {aid_str}: {current_price}")
+        return {"alert_id": aid_str, "error": "Invalid price"}
+
+    if new_price_num <= 0:
+        return {"alert_id": aid_str, "error": "Price must be positive"}
+
+    # Determine genuine previous price
+    if previous_price is not None and int(previous_price) > 0:
+        prev_p = int(previous_price)
+    elif alert.get("previous_price") and int(alert.get("previous_price")) > 0:
+        prev_p = int(alert.get("previous_price"))
+    elif alert.get("latest_price") and int(alert.get("latest_price")) > 0:
+        prev_p = int(alert.get("latest_price"))
+    else:
+        prev_p = c_price
+
+    # 1. Resolve alert owner user document & verified registered email
+    u_id = alert.get("user_id")
+    stored_email = str(alert.get("email") or "").strip().lower()
+    owner_user = None
+
+    if u_id:
+        owner_user = get_user_by_id(u_id)
+    if not owner_user and stored_email:
+        owner_user = database.users.find_one({"email": stored_email})
+
+    sender_acc = os.getenv("SMTP_USER", "buysmart260@gmail.com").strip().lower()
+
+    if owner_user and owner_user.get("email"):
+        to_email = str(owner_user["email"]).strip().lower()
+        user_name = str(owner_user.get("name") or alert.get("user_name") or "Valued Customer").strip()
+        verified_uid = str(owner_user.get("id") or owner_user.get("_id"))
+    elif stored_email and stored_email != sender_acc:
+        to_email = stored_email
+        user_name = str(alert.get("user_name") or "Valued Customer").strip()
+        verified_uid = u_id
+    else:
+        to_email = ""
+        user_name = "Valued Customer"
+        verified_uid = u_id
+
+    now = datetime.now(timezone.utc)
+    condition_met = (new_price_num <= t_price)
+
+    # ════════════ CASE A: Price Above Target Price (Target Not Reached) ════════════
+    if not condition_met:
+        updates = {
+            "latest_price": new_price_num,
+            "previous_price": prev_p,
+            "last_checked_at": now,
+            "updated_at": now
+        }
+        # If alert was previously triggered or notified, re-arm it for future price drops!
+        if alert.get("status") in ("email_sent", "target_reached", "email_failed"):
+            updates["status"] = "monitoring"
+            updates["notification_status"] = "monitoring"
+            updates["last_notified_price"] = None
+
+        if verified_uid and not alert.get("user_id"):
+            updates["user_id"] = verified_uid
+        if to_email and not alert.get("email"):
+            updates["email"] = to_email
+
+        database.price_alerts.update_one(q_filter, {"$set": updates})
+
+        logger.info(
+            f"[Alert Check] Alert ID: {aid_str} | Product: '{p_name}' | Recipient: {to_email} | "
+            f"Previous: ₹{prev_p} | Current: ₹{new_price_num} | Target: ₹{t_price} | "
+            f"Condition Met: False | Email Sending Attempt: False | Status: {updates.get('status', alert.get('status'))}"
+        )
+        return {
+            "alert_id": aid_str,
+            "recipient": to_email,
+            "condition_met": False,
+            "email_sent": False,
+            "status": updates.get("status", alert.get("status")),
+            "latest_price": new_price_num,
+            "previous_price": prev_p
+        }
+
+    # ════════════ CASE B: Target Reached (Current Price <= Target Price) ════════════
+    if not to_email or "@" not in to_email:
+        log_notification_failure(aid_str, "Alert owner email not found")
+        logger.warning(f"[Alert Check] Registered email not found for alert {aid_str}. Notification skipped.")
+        return {
+            "alert_id": aid_str,
+            "recipient": None,
+            "condition_met": True,
+            "email_sent": False,
+            "status": "email_failed",
+            "error": "Alert owner email not found"
+        }
+
+    # Duplicate Prevention:
+    # Do not send duplicate emails if an alert has already sent a notification at this exact dropped price
+    current_status = alert.get("status", "monitoring")
+    last_notified = alert.get("last_notified_price")
+    is_duplicate = (
+        not force_notify and
+        current_status == "email_sent" and
+        (last_notified is not None and int(last_notified) == new_price_num)
+    )
+
+    if is_duplicate:
+        database.price_alerts.update_one(
+            q_filter,
+            {"$set": {
+                "latest_price": new_price_num,
+                "previous_price": prev_p,
+                "last_checked_at": now,
+                "updated_at": now
+            }}
+        )
+        logger.info(
+            f"[Alert Check] Alert ID: {aid_str} | Product: '{p_name}' | Recipient: {to_email} | "
+            f"Current: ₹{new_price_num} <= Target: ₹{t_price} | Skipped duplicate notification (already notified at ₹{last_notified})"
+        )
+        return {
+            "alert_id": aid_str,
+            "recipient": to_email,
+            "condition_met": True,
+            "email_sent": False,
+            "status": "email_sent",
+            "skipped_reason": "duplicate_prevention",
+            "latest_price": new_price_num,
+            "previous_price": prev_p
+        }
+
+    # Valid qualifying price drop: proceed to dispatch email
+    database.price_alerts.update_one(
+        q_filter,
+        {"$set": {
+            "status": "email_sending",
+            "notification_status": "sending",
+            "latest_price": new_price_num,
+            "previous_price": prev_p,
+            "last_checked_at": now
+        }}
+    )
+
+    drop_amount = max(0, prev_p - new_price_num)
+    drop_pct = round(((prev_p - new_price_num) / prev_p * 100.0), 1) if prev_p > new_price_num and prev_p > 0 else float(alert.get("target_pct") or 5.0)
+
+    email_ok, service_resp = send_price_drop_email(
+        alert=alert,
+        user=owner_user or {"email": to_email, "name": user_name},
+        current_price=new_price_num,
+        previous_price=prev_p
+    )
+
+    if email_ok:
+        final_status = "email_sent"
+        database.price_alerts.update_one(
+            q_filter,
+            {
+                "$set": {
+                    "status": "email_sent",
+                    "notification_status": "sent",
+                    "notification_timestamp": now,
+                    "last_email_sent_at": now,
+                    "last_notified_price": new_price_num,
+                    "latest_price": new_price_num,
+                    "previous_price": prev_p,
+                    "reduction_amount": drop_amount,
+                    "reduction_pct": drop_pct,
+                    "last_checked_at": now,
+                    "triggered_at": now,
+                    "triggered_price": new_price_num,
+                    "email": to_email,
+                    "user_id": verified_uid,
+                    "user_name": user_name,
+                    "last_error": None,
+                    "updated_at": now
+                },
+                "$push": {
+                    "notification_events": {
+                        "event": "price_drop_email_sent",
+                        "price": new_price_num,
+                        "recipient": to_email,
+                        "timestamp": now,
+                        "status": "sent"
+                    }
+                }
+            }
+        )
+        if verified_uid:
+            try:
+                platform_title = str(alert.get("platform") or "SmartBuy").capitalize()
+                create_inbox_message(
+                    user_id=verified_uid,
+                    message_type="price_alert",
+                    title="Price Alert Triggered! 🎉",
+                    message=f"'{p_name}' has dropped to ₹{new_price_num:,} (target: ₹{t_price:,}) on {platform_title}!"
+                )
+            except Exception:
+                pass
+
+        logger.info(
+            f"[Alert Check] SUCCESS: Email sent for alert {aid_str} to owner {to_email} | "
+            f"Price: ₹{new_price_num:,} (Target: ₹{t_price:,})"
+        )
+    else:
+        final_status = "email_failed"
+        log_notification_failure(aid_str, service_resp)
+        database.price_alerts.update_one(
+            q_filter,
+            {"$set": {
+                "status": "email_failed",
+                "notification_status": "failed",
+                "last_error": service_resp,
+                "latest_price": new_price_num,
+                "previous_price": prev_p,
+                "last_checked_at": now,
+                "updated_at": now
+            }}
+        )
+        logger.error(f"[Alert Check] FAILED: Email dispatch to owner {to_email} failed: {service_resp}")
+
+    return {
+        "alert_id": aid_str,
+        "recipient": to_email,
+        "condition_met": True,
+        "email_sent": email_ok,
+        "status": final_status,
+        "service_response": service_resp,
+        "latest_price": new_price_num,
+        "previous_price": prev_p
+    }
+
+
+def trigger_test_price_alert(alert_id: str, current_user_email: str = None) -> tuple[bool, str, dict | None]:
+    """
+    Send a real test email for a specific price alert to the verified registered email address
+    of the user who created the alert (or current authenticated user) using the configured SMTP service.
     Works independently of the automatic price-drop notification without changing the
     active monitoring status of the alert.
     """
-    if db is None or not alert_id:
+    database = get_db()
+    if database is None or not alert_id:
         return False, "Database unavailable", None
     try:
         oid = to_object_id(alert_id)
-        q = {"_id": oid} if oid else {"id": alert_id}
-        alert = db.price_alerts.find_one(q)
+        q = {"_id": oid} if oid else {"id": str(alert_id)}
+        alert = database.price_alerts.find_one(q)
         if not alert:
             return False, "Price alert not found", None
 
-        to_email = str(alert.get("email", "")).strip()
-        if not to_email or "@" not in to_email:
-            return False, "No valid registered recipient email for this alert.", None
+        sender_acc = os.getenv("SMTP_USER", "buysmart260@gmail.com").strip().lower()
+
+        # Resolve registered user who owns this alert
+        to_email = ""
+        user_name = "Valued Customer"
+        target_uid = alert.get("user_id")
+
+        if current_user_email and "@" in str(current_user_email):
+            test_target = str(current_user_email).strip().lower()
+            if test_target != sender_acc:
+                to_email = test_target
+                u = database.users.find_one({"email": to_email})
+                if u:
+                    target_uid = str(u.get("id") or u.get("_id", ""))
+                    user_name = str(u.get("name") or user_name).strip()
+
+        if (not to_email or to_email == sender_acc) and alert.get("user_id"):
+            u = get_user_by_id(alert.get("user_id"))
+            if u and u.get("email"):
+                to_email = str(u["email"]).strip().lower()
+                target_uid = str(u.get("id") or u.get("_id", ""))
+                user_name = str(u.get("name") or "Valued Customer").strip()
+
+        if (not to_email or to_email == sender_acc) and alert.get("email"):
+            raw_email = str(alert.get("email")).strip().lower()
+            if raw_email and "@" in raw_email and raw_email != sender_acc:
+                to_email = raw_email
+                u = database.users.find_one({"email": raw_email})
+                if u:
+                    target_uid = str(u.get("id") or u.get("_id", ""))
+                    user_name = str(u.get("name") or user_name).strip()
+
+        if not to_email or "@" not in to_email or to_email == sender_acc:
+            log_notification_failure(str(alert_id), "User email not found")
+            return False, "No valid registered recipient email found for the user who created this alert.", None
+
+        # Sync alert record with resolved user info
+        database.price_alerts.update_one(
+            q,
+            {"$set": {
+                "email": to_email,
+                "user_id": target_uid,
+                "user_name": user_name
+            }}
+        )
 
         t_price = int(alert.get("target_price") or 0)
-        c_price = int(alert.get("current_price") or t_price)
+        c_price = int(alert.get("latest_price") or alert.get("current_price") or t_price)
         p_name = alert.get("product_name") or "Tracked Product"
         platform = str(alert.get("platform") or "GEC ECom").upper()
-        p_url = alert.get("product_url") or "/gececom"
 
         from otp_utils import send_email_detailed
 
-        subject = f"🧪 [TEST EMAIL] SmartBuy Price Alert: '{p_name[:32]}'"
+        greeting = f"Hi {user_name}," if user_name and user_name.lower() != "valued customer" else "Hello,"
+        subject = f"SmartBuy Price Alert Notification: {p_name[:32]}"
         body_text = (
-            f"Hello!\n\n"
+            f"{greeting}\n\n"
             f"This is a TEST EMAIL for your tracked product on SmartBuy.\n\n"
+            f"• User: {user_name}\n"
             f"• Product: {p_name}\n"
             f"• Target Price: ₹{t_price:,}\n"
             f"• Baseline Price: ₹{c_price:,}\n"
             f"• Store / Platform: {platform}\n"
-            f"• Recipient Email: {to_email}\n\n"
+            f"• Registered Recipient: {to_email}\n\n"
             f"Your price alert is active and 24/7 automated monitoring is running.\n"
             f"When the price reaches or drops below ₹{t_price:,}, an automatic notification will be sent.\n\n"
             f"Best regards,\nSmartBuy Deal Watcher"
@@ -2950,11 +3718,15 @@ def trigger_test_price_alert(alert_id: str) -> tuple[bool, str, dict | None]:
 
             <div style="padding: 22px 10px;">
                 <p style="color: #334155; font-size: 15px; margin-top: 0;">
-                    This test email confirms that your email notifications for <strong>{p_name}</strong> are properly connected and delivering to <strong>{to_email}</strong>.
+                    {greeting} This test email confirms that your email notifications for <strong>{p_name}</strong> are properly connected and delivering to <strong>{to_email}</strong>.
                 </p>
 
                 <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 18px; margin: 18px 0;">
                     <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                        <tr style="border-bottom: 1px solid #f1f5f9;">
+                            <td style="padding: 8px 12px; color: #64748b;">Alert Owner:</td>
+                            <td style="padding: 8px 12px; font-weight: 700; color: #0f172a; text-align: right;">{user_name} ({to_email})</td>
+                        </tr>
                         <tr style="border-bottom: 1px solid #f1f5f9;">
                             <td style="padding: 8px 12px; color: #64748b;">Tracked Item:</td>
                             <td style="padding: 8px 12px; font-weight: 700; color: #0f172a; text-align: right;">{p_name}</td>
@@ -2975,7 +3747,7 @@ def trigger_test_price_alert(alert_id: str) -> tuple[bool, str, dict | None]:
                 </div>
 
                 <div style="background: #eff6ff; border-left: 4px solid #3b82f6; padding: 12px 16px; border-radius: 6px; font-size: 13px; color: #1e40af;">
-                    <strong>ℹ️ Monitoring Status:</strong> Active 24/7. When the live price drops to or below ₹{t_price:,}, an automatic price-drop email will be dispatched.
+                    <strong>ℹ️ Monitoring Status:</strong> Active 24/7. When the live price drops to or below ₹{t_price:,}, an automatic price-drop email will be dispatched to <strong>{to_email}</strong>.
                 </div>
             </div>
 
@@ -2985,12 +3757,12 @@ def trigger_test_price_alert(alert_id: str) -> tuple[bool, str, dict | None]:
         </div>
         """
 
-        logger.info(f"[Test Email Attempt] Alert ID: {alert_id} | Recipient: {to_email} | Product: '{p_name}'")
+        logger.info(f"[Test Email Attempt] Alert ID: {alert_id} | Alert Owner: {user_name} | Recipient: {to_email} | Product: '{p_name}'")
         email_ok, service_resp = send_email_detailed(to_email, subject, body_text, html_content)
         now = datetime.now(timezone.utc)
 
         if email_ok:
-            db.price_alerts.update_one(
+            database.price_alerts.update_one(
                 q,
                 {"$set": {
                     "last_test_email_at": now,
@@ -3005,7 +3777,7 @@ def trigger_test_price_alert(alert_id: str) -> tuple[bool, str, dict | None]:
                 "service_response": service_resp
             }
         else:
-            db.price_alerts.update_one(
+            database.price_alerts.update_one(
                 q,
                 {"$set": {
                     "last_test_email_at": now,
@@ -3024,75 +3796,148 @@ def trigger_test_price_alert(alert_id: str) -> tuple[bool, str, dict | None]:
         return False, f"Internal error sending test email: {e}", None
 
 
-def simulate_and_trigger_price_drop(alert_id: str, new_price: int = None) -> tuple[bool, str, dict | None]:
+def simulate_and_trigger_price_drop(
+    alert_id: str,
+    new_price: int = None,
+    current_user_id: str = None,
+    current_user_email: str = None,
+    current_user_name: str = None
+) -> tuple[bool, str, dict | None]:
     """
     Simulate or execute an immediate real-time price drop for an alert:
-    1. Updates the product price (in GEC ECom store if linked, and in price_alerts document).
-    2. Immediately triggers price-drop notification dispatch via SMTP to the user's email/phone in live.
-    3. Updates alert status to 'email_sent' with latest timestamps, previous price, and savings.
-    4. Returns updated alert details for immediate real-time dashboard display.
+    1. Resolves recipient strictly to the authenticated alert owner's email.
+    2. Updates the product price (in GEC ECom store if linked, and in price_alerts document).
+    3. Directly dispatches the live price-drop notification email via SMTP to the alert owner's email.
+    4. Updates alert status to 'email_sent' with latest timestamps, previous price, and savings.
+    5. Clears search and comparison caches so Comparison Table immediately displays the updated price.
+    6. Returns updated alert details for immediate real-time dashboard display.
     """
-    if db is None or not alert_id:
+    database = get_db()
+    if database is None or not alert_id:
         return False, "Database unavailable", None
     try:
         oid = to_object_id(alert_id)
-        q = {"_id": oid} if oid else {"id": alert_id}
-        alert = db.price_alerts.find_one(q)
+        q = {"_id": oid} if oid else {"id": str(alert_id)}
+        alert = database.price_alerts.find_one(q)
         if not alert:
             return False, "Price alert not found", None
+
+        # Resolve owner user
+        u_id = alert.get("user_id")
+        stored_email = str(alert.get("email") or "").strip().lower()
+        owner_user = None
+
+        if u_id:
+            owner_user = get_user_by_id(u_id)
+        if not owner_user and stored_email:
+            owner_user = database.users.find_one({"email": stored_email})
+
+        sender_acc = os.getenv("SMTP_USER", "buysmart260@gmail.com").strip().lower()
+
+        if owner_user and owner_user.get("email"):
+            target_email = str(owner_user["email"]).strip().lower()
+            target_name = str(owner_user.get("name") or alert.get("user_name") or "Valued Customer").strip()
+            target_uid = str(owner_user.get("id") or owner_user.get("_id"))
+        elif stored_email and stored_email != sender_acc:
+            target_email = stored_email
+            target_name = str(alert.get("user_name") or "Valued Customer").strip()
+            target_uid = u_id
+        elif current_user_email and "@" in current_user_email and current_user_email.strip().lower() != sender_acc:
+            target_email = current_user_email.strip().lower()
+            target_name = current_user_name or "Valued Customer"
+            target_uid = current_user_id
+        else:
+            return False, "No valid registered alert owner email found to receive price-drop alert.", None
 
         t_price = int(alert.get("target_price") or 0)
         c_price = int(alert.get("current_price") or alert.get("baseline_price") or t_price)
         latest_p = int(alert.get("latest_price") or c_price)
         p_name = alert.get("product_name") or "Tracked Product"
         pid = alert.get("product_id")
-        platform = str(alert.get("platform") or "gececom").lower()
 
-        # If new_price is not provided or <= 0, drop below target or drop by 15%
+        # If new_price is not provided or <= 0, drop below target or drop by 10%
         if not new_price or new_price <= 0:
             if t_price > 0:
                 new_price = max(1, t_price - max(1, int(t_price * 0.05)))
             else:
-                new_price = max(1, int(latest_p * 0.85))
+                new_price = max(1, int(latest_p * 0.90))
 
-        old_price = latest_p if latest_p > new_price else (c_price if c_price > new_price else (new_price + 150))
+        old_price = latest_p if latest_p > new_price else (c_price if c_price > new_price else (new_price + 100))
 
-        # 1. If linked to a GEC ECom product, update the live store product price in database
-        if pid:
-            try:
-                update_gececom_product_price(str(pid), new_price)
-            except Exception as e:
-                logger.warning(f"[Price Drop] Could not update store product price: {e}")
+        # 1. Update live store product in GEC ECom catalog if matched by ID, URL, or Name
+        try:
+            update_gececom_product_price(str(pid) if pid else "", new_price, product_name=p_name)
+        except Exception as e:
+            logger.warning(f"[Price Drop] Could not update store product price: {e}")
 
-        # 2. Trigger price alert with force_notify=True
-        results = check_and_trigger_price_alerts(
-            product_name=p_name,
-            new_price=new_price,
-            platform=platform,
-            product_id=str(pid) if pid else None,
-            previous_price=old_price,
-            force_notify=True
-        )
+        # 2. Synchronize all matching price alerts for this product
+        try:
+            now_dt = datetime.now(timezone.utc)
+            database.price_alerts.update_many(
+                {"$or": [
+                    {"product_id": str(pid)},
+                    {"product_name": {"$regex": f"^{re.escape(p_name)}$", "$options": "i"}}
+                ]},
+                {"$set": {"latest_price": int(new_price), "updated_at": now_dt}}
+            )
+        except Exception as e_sync:
+            logger.warning(f"[Price Drop] Could not sync price_alerts: {e_sync}")
 
-        updated_alert = db.price_alerts.find_one(q)
+        # 3. Invalidate search & comparison caches so Comparison Table immediately sees new price
+        try:
+            from cache import clear_cache
+            clear_cache()
+        except Exception:
+            pass
+        try:
+            from comparison_engine import _url_comparison_cache
+            _url_comparison_cache.clear()
+        except Exception:
+            pass
+
+        # 4. Dispatch live price drop notification email to alert owner via unified process_single_alert
+        res = process_single_alert(alert, new_price, previous_price=old_price, force_notify=True)
+        email_ok = res.get("email_sent", False)
+        service_resp = res.get("service_response", "Email processed")
+
+        # 5. Check and notify any other users tracking this product whose target is met
+        try:
+            check_and_trigger_price_alerts(
+                product_name=p_name,
+                new_price=int(new_price),
+                platform=str(alert.get("platform") or "gececom"),
+                product_id=str(pid) if pid else None,
+                previous_price=old_price,
+                force_notify=False
+            )
+        except Exception as e_chk:
+            logger.warning(f"[Price Drop] Error checking alerts for other users: {e_chk}")
+
+        updated_alert = database.price_alerts.find_one({"_id": alert["_id"]})
         formatted_alert = format_doc(updated_alert) if updated_alert else None
 
-        sent = (results.get("notifications_sent", 0) > 0)
-        to_email = alert.get("email", "")
-        if sent:
-            msg = f"Live price drop dispatched! '{p_name[:30]}' dropped to ₹{new_price:,} and live email notification sent to {to_email}."
+        if email_ok:
+            msg = f"Live price drop dispatched! '{p_name[:30]}' dropped to ₹{new_price:,} and email notification sent to {target_email}."
+            return True, msg, {
+                "new_price": new_price,
+                "previous_price": old_price,
+                "target_price": t_price,
+                "email_sent": True,
+                "to_email": target_email,
+                "alert": formatted_alert,
+                "service_response": service_resp
+            }
         else:
-            msg = f"Price updated to ₹{new_price:,}."
-
-        return True, msg, {
-            "new_price": new_price,
-            "previous_price": old_price,
-            "target_price": t_price,
-            "email_sent": sent,
-            "to_email": to_email,
-            "alert": formatted_alert,
-            "results": results
-        }
+            msg = f"Price updated to ₹{new_price:,}, but email dispatch to {target_email} failed: {service_resp}"
+            return False, msg, {
+                "new_price": new_price,
+                "previous_price": old_price,
+                "target_price": t_price,
+                "email_sent": False,
+                "to_email": target_email,
+                "alert": formatted_alert,
+                "service_response": service_resp
+            }
     except Exception as e:
         logger.error(f"[Price Drop Error] Exception in simulate_and_trigger_price_drop: {e}", exc_info=True)
         return False, f"Error processing price drop: {e}", None
@@ -3119,15 +3964,14 @@ def check_and_trigger_price_alerts(
 ) -> dict:
     """
     Evaluate all saved alerts for this product against the condition:
-        current_price <= target_price
-    - Reads validated numeric prices.
-    - Matches store product by product_id and/or product_name.
-    - Prevents duplicate emails for identical repetitive checks unless force_notify is True.
-    - Re-arms alerts when price rises above target threshold.
-    - Sends real email via SMTP automatically and records accurate dashboard statuses.
-    - Logs detailed operational info for every check.
+        latest_price <= target_price
+    - Validates numeric prices.
+    - Matches store products by product_id, product_url, exact name, and keywords.
+    - Uses unified process_single_alert for consistent, reliable email dispatch to the verified alert owner.
+    - Accurately tracks statuses: Monitoring, Email Sending, Email Sent, Email Failed.
     """
-    if db is None:
+    database = get_db()
+    if database is None:
         return {"checked": 0, "triggered": 0, "notifications_sent": 0, "error": "Database unavailable"}
 
     try:
@@ -3139,30 +3983,67 @@ def check_and_trigger_price_alerts(
     if new_price_num <= 0:
         return {"checked": 0, "triggered": 0, "notifications_sent": 0}
 
-    from otp_utils import send_email_detailed
-
     # 1. Locate candidate alerts for this product
     candidate_alerts = []
     pid_str = str(product_id).strip() if product_id else None
     clean_name = str(product_name or "").strip()
 
+    # Look up product in gececom_products to get all identifiers if available
+    prod = None
     if pid_str:
-        pid_oid = to_object_id(pid_str)
-        or_conds = [
-            {"product_id": pid_str},
-            {"product_url": {"$regex": re.escape(pid_str)}}
-        ]
-        if pid_oid:
-            or_conds.append({"product_id": pid_oid})
+        raw_pid = pid_str[4:] if pid_str.startswith("gec_") else pid_str
+        p_oid = to_object_id(raw_pid)
+        prod = database.gececom_products.find_one({"_id": p_oid} if p_oid else {"id": raw_pid})
+    if not prod and clean_name:
+        prod = database.gececom_products.find_one({"product_name": {"$regex": f"^{re.escape(clean_name)}$", "$options": "i"}})
+        if not prod:
+            clean_kw = clean_name.lower()
+            for gp in database.gececom_products.find():
+                gp_name = gp.get("product_name", "").lower()
+                if clean_kw in gp_name or gp_name in clean_kw:
+                    prod = gp
+                    break
+
+    or_conds = []
+    if prod:
+        prod_oid_str = str(prod["_id"])
+        prod_custom_id = str(prod.get("id") or "")
+        prod_full_name = str(prod.get("product_name") or "")
+        id_candidates = [prod_oid_str, f"gec_{prod_oid_str}"]
+        if prod_custom_id:
+            id_candidates.extend([prod_custom_id, f"gec_{prod_custom_id}"])
+
+        or_conds.extend([
+            {"product_id": {"$in": id_candidates}},
+            {"product_id": prod["_id"]},
+            {"product_url": {"$regex": re.escape(prod_oid_str)}},
+            {"product_name": {"$regex": f"^{re.escape(prod_full_name)}$", "$options": "i"}}
+        ])
+        if prod_custom_id:
+            or_conds.append({"product_url": {"$regex": re.escape(prod_custom_id)}})
+
+        name_words = [w for w in re.split(r'[\s(,-]+', prod_full_name) if len(w) > 2]
+        if len(name_words) >= 2:
+            core_kw = " ".join(name_words[:3])
+            or_conds.append({"product_name": {"$regex": re.escape(core_kw), "$options": "i"}})
+    elif pid_str:
+        raw_pid = pid_str[4:] if pid_str.startswith("gec_") else pid_str
+        p_oid = to_object_id(raw_pid)
+        or_conds.extend([
+            {"product_id": {"$in": [pid_str, raw_pid, f"gec_{raw_pid}"]}},
+            {"product_url": {"$regex": re.escape(raw_pid)}}
+        ])
+        if p_oid:
+            or_conds.append({"product_id": p_oid})
         if clean_name:
             or_conds.append({"product_name": {"$regex": f"^{re.escape(clean_name)}$", "$options": "i"}})
-        candidate_alerts = list(db.price_alerts.find({"$or": or_conds}))
     elif clean_name:
         tokens = [re.escape(t) for t in clean_name.split() if len(t) > 2]
         regex_pattern = "|".join(tokens[:3]) if tokens else re.escape(clean_name)
-        candidate_alerts = list(db.price_alerts.find({
-            "product_name": {"$regex": regex_pattern, "$options": "i"}
-        }))
+        or_conds.append({"product_name": {"$regex": regex_pattern, "$options": "i"}})
+
+    if or_conds:
+        candidate_alerts = list(database.price_alerts.find({"$or": or_conds}))
 
     # Deduplicate candidate alerts by _id
     seen_ids = set()
@@ -3175,282 +4056,20 @@ def check_and_trigger_price_alerts(
 
     triggered_count = 0
     sent_count = 0
-    now = datetime.now(timezone.utc)
     results_detail = []
 
     for alert in unique_alerts:
-        aid = alert["_id"]
-        aid_str = str(aid)
-        prod_id_str = str(alert.get("product_id") or pid_str or "")
-        to_email = str(alert.get("email", "")).strip()
-        t_price = int(alert.get("target_price") or 0)
-        c_price = int(alert.get("current_price") or alert.get("baseline_price") or t_price)
-        
-        # Determine genuine previous price: prioritize explicitly supplied previous_price
-        if previous_price is not None and int(previous_price) > 0:
-            prev_p = int(previous_price)
-        else:
-            prev_p = int(alert.get("previous_price") or alert.get("latest_price") or c_price)
-
-        p_name = alert.get("product_name") or clean_name
-        p_image = alert.get("product_image", "")
-        current_status = alert.get("status", "monitoring")
-        last_notified_price = alert.get("last_notified_price")
-        p_url = alert.get("product_url") or (f"/gececom#product-{pid_str}" if pid_str else "/gececom")
-
-        # Evaluate condition: latest_price <= target_price
-        condition_met = (new_price_num <= t_price)
-
-        # Case A: Target not reached (new_price > target_price)
-        if not condition_met:
-            # If alert was previously triggered/sent, re-arm it for future price drops
-            db.price_alerts.update_one(
-                {"_id": aid},
-                {"$set": {
-                    "status": "monitoring",
-                    "latest_price": new_price_num,
-                    "previous_price": prev_p,
-                    "last_checked_at": now,
-                    "last_notified_price": None if current_status in ("email_sent", "target_reached") else last_notified_price,
-                    "updated_at": now
-                }}
-            )
-            final_status = "monitoring"
-
-            logger.info(
-                f"[Alert Check] Alert ID: {aid_str} | Product ID: {prod_id_str} | "
-                f"Product: '{p_name}' | Recipient: {to_email} | Previous Price: ₹{prev_p} | "
-                f"Current Price: ₹{new_price_num} | Target Price: ₹{t_price} | "
-                f"Condition Met: False | Email Sending Attempt: False | Service Response: None | "
-                f"Final Notification Status: {final_status}"
-            )
-            results_detail.append({
-                "alert_id": aid_str,
-                "recipient": to_email,
-                "condition_met": False,
-                "email_sent": False,
-                "status": final_status,
-                "latest_price": new_price_num,
-                "previous_price": prev_p
-            })
-            continue
-
-        # Case B: Target reached or price falls below target (latest_price <= target_price)
-        # Check duplicate prevention:
-        # Only skip if NOT force_notify AND exact same price was already notified AND price hasn't changed
-        is_duplicate = (
-            not force_notify and
-            current_status == "email_sent" and
-            last_notified_price is not None and
-            int(last_notified_price) == new_price_num and
-            (prev_p is not None and int(prev_p) == new_price_num)
+        res = process_single_alert(
+            alert=alert,
+            current_price=new_price_num,
+            previous_price=previous_price,
+            force_notify=force_notify
         )
-
-        if is_duplicate:
-            db.price_alerts.update_one(
-                {"_id": aid},
-                {"$set": {
-                    "latest_price": new_price_num,
-                    "previous_price": prev_p,
-                    "last_checked_at": now,
-                    "updated_at": now
-                }}
-            )
-            logger.info(
-                f"[Alert Check] Alert ID: {aid_str} | Product ID: {prod_id_str} | "
-                f"Product: '{p_name}' | Recipient: {to_email} | Previous Price: ₹{prev_p} | "
-                f"Current Price: ₹{new_price_num} | Target Price: ₹{t_price} | "
-                f"Condition Met: True | Email Sending Attempt: Skipped (Duplicate Prevention - already notified at ₹{last_notified_price}) | "
-                f"Service Response: Skipped | Final Notification Status: email_sent"
-            )
-            results_detail.append({
-                "alert_id": aid_str,
-                "recipient": to_email,
-                "condition_met": True,
-                "email_sent": False,
-                "status": "email_sent",
-                "skipped_reason": "duplicate_prevention",
-                "latest_price": new_price_num,
-                "previous_price": prev_p
-            })
-            continue
-
-        # New qualifying event: proceed to send real email
-        triggered_count += 1
-        db.price_alerts.update_one(
-            {"_id": aid},
-            {"$set": {
-                "status": "email_sending",
-                "latest_price": new_price_num,
-                "previous_price": prev_p,
-                "last_checked_at": now
-            }}
-        )
-
-        # Calculate exact savings and reduction percentage
-        ref_price = prev_p if prev_p > new_price_num else (c_price if c_price > new_price_num else (t_price if t_price > new_price_num else new_price_num))
-        drop_amount = max(0, ref_price - new_price_num)
-        drop_pct = round(((ref_price - new_price_num) / ref_price * 100.0), 1) if ref_price > 0 and ref_price > new_price_num else float(alert.get("target_pct") or 5.0)
-
-        subject = f"🔥 Price Drop Alert: '{p_name[:32]}' dropped to ₹{new_price_num:,}!"
-        body_text = (
-            f"Hello!\n\n"
-            f"SmartBuy Price Alert: Your Tracked Product Price Has Dropped!\n\n"
-            f"• Product: {p_name}\n"
-            f"• Platform: {platform.upper()}\n"
-            f"• Previous Price: ₹{prev_p:,}\n"
-            f"• Latest Price: ₹{new_price_num:,}\n"
-            f"• Target Price: ₹{t_price:,}\n"
-            f"• Amount Saved: ₹{drop_amount:,}\n"
-            f"• Price Reduction: -{drop_pct}%\n\n"
-            f"View Deal: http://127.0.0.1:5000{p_url if p_url.startswith('/') else '/' + p_url}\n"
-            f"SmartBuy Dashboard: http://127.0.0.1:5000/my-price-alerts\n\n"
-            f"Best regards,\nSmartBuy Deal Watcher"
-        )
-        html_content = f"""
-        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 620px; margin: auto; padding: 24px; border: 1px solid #cbd5e1; border-radius: 16px; background: #ffffff;">
-            <div style="background: linear-gradient(135deg, #059669 0%, #047857 100%); padding: 24px; border-radius: 12px; color: #fff; text-align: center;">
-                <span style="background: rgba(255,255,255,0.22); padding: 4px 14px; border-radius: 999px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">
-                    Price Drop Alert
-                </span>
-                <h2 style="margin: 10px 0 0 0; font-size: 24px; font-weight: 800;">SmartBuy Live Deal Watcher</h2>
-                <p style="margin: 4px 0 0 0; opacity: 0.95; font-size: 14px;">Instant price-drop notification delivered to your inbox</p>
-            </div>
-
-            <div style="padding: 22px 10px;">
-                <div style="text-align: center; margin-bottom: 16px;">
-                    {f'<img src="{p_image}" alt="{p_name}" style="max-height: 140px; max-width: 200px; object-fit: contain; margin-bottom: 12px; border-radius: 8px;">' if p_image else ''}
-                    <h3 style="color: #0f172a; margin: 0; font-size: 18px; font-weight: 700;">{p_name}</h3>
-                    <span style="display: inline-block; background: #f1f5f9; color: #475569; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-top: 6px; text-transform: uppercase;">
-                        Platform: {platform.upper()}
-                    </span>
-                </div>
-
-                <div style="background: #ecfdf5; border: 2px solid #10b981; padding: 20px; border-radius: 12px; margin: 16px 0; text-align: center;">
-                    <div style="display: inline-block; background: #dc2626; color: #ffffff; font-size: 13px; font-weight: 800; padding: 4px 14px; border-radius: 999px; text-transform: uppercase; margin-bottom: 10px;">
-                        🔥 PRICE DROP: -₹{drop_amount:,} (-{drop_pct}%)
-                    </div>
-                    <div style="font-size: 13px; color: #047857; font-weight: 700; text-transform: uppercase;">Latest Dropped Price:</div>
-                    <div style="font-size: 34px; font-weight: 900; color: #065f46; margin: 4px 0 12px 0;">₹{new_price_num:,}</div>
-
-                    <table style="width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; background: #ffffff; border-radius: 8px; overflow: hidden; border: 1px solid #d1fae5;">
-                        <tr style="border-bottom: 1px solid #f1f5f9;">
-                            <td style="padding: 9px 14px; color: #64748b;">Previous Price:</td>
-                            <td style="padding: 9px 14px; font-weight: 700; text-decoration: line-through; text-align: right; color: #64748b;">₹{prev_p:,}</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid #f1f5f9;">
-                            <td style="padding: 9px 14px; color: #64748b;">Your Target Price:</td>
-                            <td style="padding: 9px 14px; font-weight: 700; color: #0284c7; text-align: right;">₹{t_price:,}</td>
-                        </tr>
-                        <tr style="border-bottom: 1px solid #f1f5f9; background: #f0fdf4;">
-                            <td style="padding: 9px 14px; color: #166534; font-weight: 700;">Amount Saved:</td>
-                            <td style="padding: 9px 14px; font-weight: 900; color: #15803d; text-align: right;">-₹{drop_amount:,} (-{drop_pct}%)</td>
-                        </tr>
-                        <tr style="background: #ecfdf5;">
-                            <td style="padding: 9px 14px; color: #047857; font-weight: 800;">Target Reached:</td>
-                            <td style="padding: 9px 14px; font-weight: 900; color: #047857; text-align: right;">₹{new_price_num:,} &le; ₹{t_price:,}</td>
-                        </tr>
-                    </table>
-                </div>
-
-                <div style="text-align: center; margin: 24px 0 14px 0;">
-                    <a href="http://127.0.0.1:5000{p_url if p_url.startswith('/') else '/' + p_url}" style="background: linear-gradient(135deg, #0284c7, #0369a1); color: #ffffff; padding: 13px 32px; text-decoration: none; border-radius: 999px; font-weight: bold; font-size: 15px; display: inline-block; margin-right: 8px;">
-                        🛒 View Deal &rarr;
-                    </a>
-                    <a href="http://127.0.0.1:5000/my-price-alerts" style="background: #f1f5f9; color: #334155; padding: 13px 24px; text-decoration: none; border-radius: 999px; font-weight: 600; font-size: 14px; display: inline-block;">
-                        📊 SmartBuy Dashboard
-                    </a>
-                </div>
-            </div>
-
-            <div style="border-top: 1px solid #f1f5f9; padding-top: 14px; font-size: 12px; color: #94a3b8; text-align: center;">
-                SmartBuy Price Alert Notification Service • <a href="http://127.0.0.1:5000/my-price-alerts" style="color: #0284c7; text-decoration: none;">Manage Alerts</a>
-            </div>
-        </div>
-        """
-
-        email_ok, service_resp = send_email_detailed(to_email, subject, body_text, html_content)
-
-        if email_ok:
+        if res.get("condition_met"):
+            triggered_count += 1
+        if res.get("email_sent"):
             sent_count += 1
-            final_status = "email_sent"
-            db.price_alerts.update_one(
-                {"_id": aid},
-                {"$set": {
-                    "status": "email_sent",
-                    "notification_status": "sent",
-                    "last_email_sent_at": now,
-                    "last_notified_price": new_price_num,
-                    "latest_price": new_price_num,
-                    "previous_price": prev_p,
-                    "reduction_amount": drop_amount,
-                    "reduction_pct": drop_pct,
-                    "last_checked_at": now,
-                    "triggered_at": now,
-                    "triggered_price": new_price_num,
-                    "product_id": prod_id_str or str(product_id),
-                    "last_error": None,
-                    "updated_at": now
-                }}
-            )
-            logger.info(
-                f"[Alert Check] Alert ID: {aid_str} | Product ID: {prod_id_str} | "
-                f"Product: '{p_name}' | Recipient: {to_email} | Previous Price: ₹{prev_p} | "
-                f"Current Price: ₹{new_price_num} | Target Price: ₹{t_price} | "
-                f"Condition Met: True | Email Sending Attempt: True | "
-                f"Service Response: {service_resp} | Final Notification Status: {final_status}"
-            )
-
-            # Add SmartBuy inbox message if user exists
-            user = get_user_by_email(to_email)
-            if user:
-                u_id = str(user.get("id") or user.get("_id", ""))
-                try:
-                    create_inbox_message(
-                        user_id=u_id,
-                        message_type="price_alert",
-                        title="Price Alert Triggered! 🎉",
-                        message=f"'{p_name}' has dropped to ₹{new_price_num:,} (target: ₹{t_price:,}) on {platform}!"
-                    )
-                except Exception:
-                    pass
-        else:
-            final_status = "email_failed"
-            db.price_alerts.update_one(
-                {"_id": aid},
-                {"$set": {
-                    "status": "email_failed",
-                    "notification_status": "failed",
-                    "last_error": service_resp,
-                    "latest_price": new_price_num,
-                    "previous_price": prev_p,
-                    "reduction_amount": drop_amount,
-                    "reduction_pct": drop_pct,
-                    "last_checked_at": now,
-                    "last_attempt_at": now,
-                    "triggered_at": now,
-                    "triggered_price": new_price_num,
-                    "product_id": prod_id_str or str(product_id),
-                    "updated_at": now
-                }}
-            )
-            logger.error(
-                f"[Alert Check] Alert ID: {aid_str} | Product ID: {prod_id_str} | "
-                f"Product: '{p_name}' | Recipient: {to_email} | Previous Price: ₹{prev_p} | "
-                f"Current Price: ₹{new_price_num} | Target Price: ₹{t_price} | "
-                f"Condition Met: True | Email Sending Attempt: True | "
-                f"Service Response: Failed | Final Notification Status: {final_status} | "
-                f"Error Details: {service_resp}"
-            )
-
-        results_detail.append({
-            "alert_id": aid_str,
-            "recipient": to_email,
-            "condition_met": True,
-            "email_sent": email_ok,
-            "status": final_status,
-            "service_response": service_resp
-        })
+        results_detail.append(res)
 
     return {
         "checked": len(unique_alerts),
@@ -3458,3 +4077,4 @@ def check_and_trigger_price_alerts(
         "notifications_sent": sent_count,
         "details": results_detail
     }
+

@@ -209,8 +209,11 @@
                 </div>
 
                 <div class="d-flex align-items-center gap-2">
-                    <span class="text-muted small fw-semibold">
-                        <i class="fas fa-info-circle text-primary me-1"></i>You can simulate a price drop on any alert to test live email delivery.
+                    <button type="button" id="checkAllPricesBtn" class="btn btn-outline-success btn-sm rounded-pill px-3 py-1.5 fw-bold" onclick="checkAllPricesNow()">
+                        <i class="fas fa-arrows-rotate me-1"></i>Check Live Prices Now
+                    </button>
+                    <span class="text-muted small fw-semibold d-none d-md-inline">
+                        <i class="fas fa-info-circle text-primary me-1"></i>24/7 monitor checks prices automatically and sends emails immediately.
                     </span>
                 </div>
             </form>
@@ -324,7 +327,7 @@
                             </div>
                             <div class="d-flex align-items-center gap-1 text-truncate pt-1 border-top mt-1">
                                 <i class="fas fa-envelope text-secondary"></i>
-                                <span class="text-truncate" title="{{ a.email }}">{{ a.email }}</span>
+                                <span class="text-truncate" title="{{ user_email or a.email }}">{{ user_email or a.email }}</span>
                             </div>
                         </div>
 
@@ -332,18 +335,18 @@
                         <div class="mt-auto d-flex flex-column gap-2">
                             <!-- 1. Live Price Drop Button (Updates Dashboard & Sends Real Email to Phone in Live) -->
                             <button type="button" class="btn btn-danger btn-sm rounded-pill fw-bold d-flex align-items-center justify-content-center gap-1.5 py-1.5 shadow-sm text-white"
-                                onclick="openDropPriceModal('{{ a.id }}', '{{ a.product_name|escape }}', {{ a.latest_price or a.current_price or 0 }}, {{ a.target_price or 0 }}, '{{ a.email }}')" id="dropPriceBtn-{{ a.id }}">
+                                onclick="openDropPriceModal('{{ a.id }}', '{{ a.product_name|escape }}', {{ a.latest_price or a.current_price or 0 }}, {{ a.target_price or 0 }}, '{{ user_email or a.email }}')" id="dropPriceBtn-{{ a.id }}">
                                 <i class="fas fa-arrow-down-long"></i><span>📉 Drop Price &amp; Send Live Alert</span>
                             </button>
 
                             <!-- 2. Test Trigger Button (Instant Email Verification) & Deal View -->
                             <div class="d-flex gap-1.5">
                                 <button type="button" class="btn btn-warning btn-sm rounded-pill fw-bold d-flex align-items-center justify-content-center gap-1 py-1 shadow-xs flex-grow-1" style="font-size: 0.78rem;"
-                                    onclick="testTriggerAlert('{{ a.id }}', '{{ a.product_name|escape }}', '{{ a.email }}')">
-                                    <i class="fas fa-paper-plane"></i><span>Send Test Email</span>
+                                    onclick="testTriggerAlert('{{ a.id }}', '{{ a.product_name|escape }}', '{{ user_email or a.email }}')">
+                                    <i class="fas fa-paper-plane"></i><span>Send Test Email Now</span>
                                 </button>
-                                <a href="{{ a.product_url or '/gececom' }}" target="_blank" class="btn btn-outline-primary btn-sm rounded-pill fw-semibold py-1 px-2.5" style="font-size: 0.78rem;" id="alertDealBtn-{{ a.id }}" title="View Deal">
-                                    <i class="fas fa-external-link-alt"></i>
+                                <a href="{{ a.product_url or '/gececom' }}" target="_blank" class="btn btn-outline-primary btn-sm rounded-pill fw-semibold py-1 px-2.5 d-flex align-items-center gap-1" style="font-size: 0.78rem;" id="alertDealBtn-{{ a.id }}" title="View Deal">
+                                    <i class="fas fa-external-link-alt"></i><span>View Deal</span>
                                 </a>
                                 <button type="button" class="btn btn-outline-danger btn-sm rounded-circle d-flex align-items-center justify-content-center"
                                     style="width: 29px; height: 29px; padding: 0; min-width: 29px;" title="Remove Alert"
@@ -891,9 +894,11 @@
         let activeDpTargetPrice = 0;
 
         function openDropPriceModal(alertId, productName, currentPrice, targetPrice, email) {
+            const currentAuthEmail = "{{ user_email or '' }}".trim();
+            const effectiveEmail = (currentAuthEmail && currentAuthEmail.length > 3) ? currentAuthEmail : (email || '').trim();
             document.getElementById('dpAlertId').value = alertId;
             document.getElementById('dpProductName').innerText = productName;
-            document.getElementById('dpRecipientEmail').innerText = email;
+            document.getElementById('dpRecipientEmail').innerText = effectiveEmail;
             activeDpCurrentPrice = parseInt(currentPrice) || 0;
             activeDpTargetPrice = parseInt(targetPrice) || 0;
 
@@ -955,7 +960,8 @@
             const newPrice = parseInt(document.getElementById('dpNewPriceInput').value) || 0;
             const errEl = document.getElementById('dpErrorAlert');
             const btn = document.getElementById('dpSubmitBtn');
-            const email = document.getElementById('dpRecipientEmail').innerText;
+            const authEmail = "{{ user_email or '' }}".trim();
+            const email = (authEmail && authEmail.length > 3) ? authEmail : document.getElementById('dpRecipientEmail').innerText.trim();
 
             if (newPrice <= 0) {
                 errEl.innerText = "Please enter a valid dropped price greater than ₹0.";
@@ -971,13 +977,20 @@
                 const resp = await fetch(`/api/price-alerts/${alertId}/simulate-drop`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ new_price: newPrice })
+                    body: JSON.stringify({ new_price: newPrice, email: email })
                 });
                 const data = await resp.json();
 
                 if (resp.ok && data.success) {
                     bootstrap.Modal.getInstance(document.getElementById('dropPriceModal')).hide();
-                    showToast(`🔥 Live price dropped to ₹${newPrice.toLocaleString('en-IN')}! Email alert sent directly to ${email}!`, true);
+                    const destEmail = (data.data && data.data.to_email) ? data.data.to_email : email;
+                    const isEmailSent = data.data && data.data.email_sent;
+                    if (isEmailSent) {
+                        showToast(`🔥 Price dropped to ₹${newPrice.toLocaleString('en-IN')}! Email notification sent to ${destEmail}.`, true);
+                    } else {
+                        const errReason = (data.data && data.data.service_response) || "SMTP delivery failed";
+                        showToast(`⚠️ Price updated to ₹${newPrice.toLocaleString('en-IN')}, but email delivery failed: ${errReason}`, false);
+                    }
                     
                     // Immediately update UI card with green pulse animation
                     const cardCol = document.getElementById(`alertCardCol-${alertId}`);
@@ -1000,23 +1013,53 @@
         }
 
         async function testTriggerAlert(alertId, productName, email) {
-            showToast(`Sending real test email for "${productName}" to ${email}...`);
+            const authEmail = "{{ user_email or '' }}".trim();
+            const targetEmail = (authEmail && authEmail.length > 3) ? authEmail : (email || '').trim();
+            showToast(`Sending test email for "${productName}" to ${targetEmail}...`);
             try {
                 const res = await fetch(`/api/price-alerts/${alertId}/trigger`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
+                    body: JSON.stringify({ email: targetEmail })
                 });
                 const data = await res.json();
-                if (data.success) {
-                    showToast(`✅ Test email dispatched successfully to ${email}! Check your inbox.`, true);
+                if (data.success && data.result && data.result.email_sent) {
+                    const finalEmail = (data.result && data.result.recipient) ? data.result.recipient : targetEmail;
+                    showToast(`✅ Test email dispatched to ${finalEmail}! Check your inbox.`, true);
                     pollPriceAlerts();
                 } else {
-                    showToast(`❌ Test email failed: ${data.message || 'Service refused delivery'}`, false);
+                    const errDetail = (data.result && data.result.error) || data.message || 'Service refused delivery';
+                    showToast(`❌ Test email failed: ${errDetail}`, false);
                     pollPriceAlerts();
                 }
             } catch (err) {
                 showToast(`❌ Network error: ${err.message}`, false);
+            }
+        }
+
+        async function checkAllPricesNow() {
+            showToast("🔍 Checking latest prices and evaluating active alerts...");
+            const btn = document.getElementById('checkAllPricesBtn');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Checking...';
+            }
+            try {
+                const res = await fetch('/api/price-alerts/check-all', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`✅ ${data.message}`, true);
+                    pollPriceAlerts();
+                } else {
+                    showToast(`❌ ${data.message || 'Check failed'}`, false);
+                }
+            } catch (err) {
+                showToast(`❌ Network error: ${err.message}`, false);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-arrows-rotate me-1"></i>Check Live Prices Now';
+                }
             }
         }
 

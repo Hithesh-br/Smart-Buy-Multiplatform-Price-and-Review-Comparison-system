@@ -198,6 +198,36 @@
             transform: scale(1.05);
         }
 
+        .gec-img-wrap {
+            cursor: pointer;
+        }
+
+        .gec-img-overlay {
+            position: absolute;
+            bottom: 12px;
+            left: 0;
+            right: 0;
+            opacity: 0;
+            transform: translateY(6px);
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .gec-card:hover .gec-img-overlay {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .gec-product-title {
+            cursor: pointer;
+            transition: color 0.2s ease;
+        }
+
+        .gec-product-title:hover {
+            color: #0284c7;
+        }
+
         /* Chips & Badges */
         .gec-tag-verified {
             background: #ecfdf5;
@@ -643,13 +673,19 @@
                 <div class="gec-card position-relative" id="productCard-{{ prod.id }}">
 
                     <!-- Product Image & Tag Wrappers -->
-                    <div class="gec-img-wrap">
+                    <div class="gec-img-wrap position-relative" onclick="openProductDetailsModal('{{ prod.id }}')" title="Click image to view product details">
                         {% if prod.product_image %}
                         <img src="{{ prod.product_image }}" alt="{{ prod.product_name }}"
                             onerror="this.src='https://placehold.co/240x220?text=GEC+ECom'">
                         {% else %}
                         <img src="https://placehold.co/240x220?text=GEC+ECom" alt="GEC ECom Item">
                         {% endif %}
+
+                        <div class="gec-img-overlay d-flex align-items-center justify-content-center">
+                            <span class="badge bg-dark bg-opacity-75 text-white rounded-pill px-2.5 py-1 small shadow-sm">
+                                <i class="fas fa-eye me-1"></i>View Details
+                            </span>
+                        </div>
 
                         <!-- Discount Chip -->
                         {% if prod.is_discounted %}
@@ -662,7 +698,7 @@
                         <button type="button"
                             class="btn btn-sm btn-light rounded-circle shadow-xs position-absolute top-0 end-0 m-2 border"
                             title="Remove from GEC ECom"
-                            onclick="deleteMockProduct('{{ prod.id }}', '{{ prod.product_name }}')">
+                            onclick="event.stopPropagation(); deleteMockProduct('{{ prod.id }}', '{{ prod.product_name }}')">
                             <i class="fas fa-trash-alt text-danger" style="font-size:0.75rem;"></i>
                         </button>
                     </div>
@@ -681,7 +717,7 @@
                         </div>
 
                         <!-- Product Title -->
-                        <h6 class="gec-product-title" title="{{ prod.product_name }}">
+                        <h6 class="gec-product-title" title="{{ prod.product_name }}" onclick="openProductDetailsModal('{{ prod.id }}')">
                             {{ prod.product_name }}
                         </h6>
 
@@ -785,6 +821,121 @@
         {% endif %}
 
     </main>
+
+    <!-- ════════════════════ 0. PRODUCT DETAILS MODAL (GEC ECOM) ════════════════════ -->
+    <div class="modal fade" id="productDetailsModal" tabindex="-1" aria-labelledby="productDetailsModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content rounded-4 border-0 shadow-lg overflow-hidden">
+                <div class="modal-header border-bottom py-3 px-4" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff;">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-primary rounded-pill px-3 py-1 fw-bold text-uppercase" style="font-size: 0.75rem;">
+                            <i class="fas fa-store me-1"></i>GEC ECom Exclusive
+                        </span>
+                        <h5 class="modal-title fw-bold mb-0 fs-6 text-white" id="productDetailsModalLabel">Product Details &amp; Specifications</h5>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4 bg-white">
+                    <div class="row g-4 align-items-start">
+                        <!-- Left: Large Image Preview -->
+                        <div class="col-md-5">
+                            <div class="p-3 rounded-4 border bg-light d-flex align-items-center justify-content-center position-relative" style="min-height: 280px; max-height: 340px; overflow: hidden;">
+                                <img id="pdModalImg" src="https://placehold.co/320x300?text=Product" alt="Product Image" style="max-height: 260px; max-width: 100%; object-fit: contain; transition: transform 0.3s ease;">
+                                <span class="position-absolute top-0 start-0 m-2.5 badge bg-danger text-white rounded-pill px-2.5 py-1 fw-bold shadow-xs d-none" id="pdModalDiscountBadge"></span>
+                            </div>
+                            <div class="d-flex justify-content-center gap-2 mt-2.5">
+                                <span class="badge bg-success-subtle text-success border border-success fw-bold px-2.5 py-1 rounded-pill" style="font-size:0.75rem;">
+                                    <i class="fas fa-check-circle me-1"></i>100% Authentic
+                                </span>
+                                <span class="badge bg-info-subtle text-info-emphasis border border-info fw-bold px-2.5 py-1 rounded-pill" style="font-size:0.75rem;">
+                                    <i class="fas fa-shield-alt me-1"></i>1-Year Warranty
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Right: Info, Price, Specs -->
+                        <div class="col-md-7">
+                            <div class="d-flex align-items-center justify-content-between mb-2">
+                                <span class="badge bg-light text-secondary border px-2.5 py-1 rounded-pill text-uppercase fw-bold" id="pdModalCategory" style="font-size: 0.72rem;">Category</span>
+                                <div class="small text-warning" id="pdModalRatingWrap" style="font-size: 0.85rem;">
+                                    <i class="fas fa-star text-warning"></i>
+                                    <span class="fw-bold text-dark ms-1" id="pdModalRating">4.5</span>
+                                    <span class="text-muted" id="pdModalReviews">(320 reviews)</span>
+                                </div>
+                            </div>
+
+                            <h4 class="fw-bold text-dark mb-2" id="pdModalTitle" style="font-size: 1.25rem; line-height: 1.35;"></h4>
+
+                            <!-- Price Block -->
+                            <div class="p-3 rounded-3 bg-light border mb-3">
+                                <div class="d-flex align-items-baseline gap-2">
+                                    <span class="fs-3 fw-extrabold text-success" id="pdModalCurrentPrice">₹0</span>
+                                    <span class="text-muted text-decoration-line-through fs-6" id="pdModalOrigPrice">₹0</span>
+                                    <span class="badge bg-danger text-white fw-bold px-2 py-1 ms-1" id="pdModalSavingsText">0% OFF</span>
+                                </div>
+                                <div class="small text-success fw-bold mt-1">
+                                    <i class="fas fa-truck-fast me-1"></i>Free Express Delivery Across India · In Stock
+                                </div>
+                            </div>
+
+                            <!-- Specifications / Key Highlights -->
+                            <div class="mb-3">
+                                <h6 class="fw-bold small text-muted text-uppercase mb-2" style="letter-spacing: 0.5px;">Highlights &amp; Specifications</h6>
+                                <table class="table table-sm table-bordered mb-0" style="font-size: 0.82rem;">
+                                    <tbody>
+                                        <tr>
+                                            <td class="text-muted bg-light" style="width: 38%;">Brand / Platform:</td>
+                                            <td class="fw-semibold text-dark">GEC ECom Direct Verified</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="text-muted bg-light">Category:</td>
+                                            <td class="fw-semibold text-dark" id="pdModalSpecCategory">—</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="text-muted bg-light">Product ID:</td>
+                                            <td class="fw-semibold text-dark font-monospace" id="pdModalSpecId">—</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="text-muted bg-light">Return Policy:</td>
+                                            <td class="fw-semibold text-success"><i class="fas fa-rotate-left me-1"></i>7-Day Free Replacement / Return</td>
+                                        </tr>
+                                        <tr>
+                                            <td class="text-muted bg-light">Payment Modes:</td>
+                                            <td class="fw-semibold text-dark">UPI, Cards, NetBanking &amp; Cash on Delivery</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Quick Action Buttons -->
+                            <div class="d-flex flex-column gap-2 pt-1">
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-primary btn-lg flex-grow-1 rounded-pill fw-bold shadow-sm d-flex align-items-center justify-content-center gap-2" id="pdModalAddToCartBtn">
+                                        <i class="fas fa-cart-plus"></i>Add to Cart
+                                    </button>
+                                    <button type="button" class="btn btn-warning rounded-pill px-3.5 fw-bold shadow-sm d-flex align-items-center justify-content-center gap-1.5" id="pdModalSetAlertBtn" title="Set Price Drop Alert">
+                                        <i class="fas fa-bell"></i><span class="d-none d-sm-inline">Set Alert</span>
+                                    </button>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <a href="#" id="pdModalCompareBtn" class="btn btn-outline-primary btn-sm flex-grow-1 rounded-pill fw-bold py-1.5 shadow-xs d-flex align-items-center justify-content-center gap-1.5">
+                                        <i class="fas fa-balance-scale"></i>Compare on SmartBuy
+                                    </a>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-3 py-1.5 fw-bold shadow-xs" id="pdModalEditPriceBtn">
+                                        <i class="fas fa-pencil me-1"></i>Simulator
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer border-top py-2.5 px-4 bg-light d-flex justify-content-between align-items-center">
+                    <span class="small text-muted"><i class="fas fa-shield-alt text-success me-1"></i>SmartBuy Multiplatform Price &amp; Review Comparison Verified</span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm rounded-pill px-4 fw-semibold" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- ════════════════════ 1. PRICE EDITOR MODAL ════════════════════ -->
     <div class="modal fade" id="editPriceModal" tabindex="-1" aria-labelledby="editPriceModalLabel" aria-hidden="true">
@@ -1100,39 +1251,32 @@
                         </div>
                     </div>
 
-                    {% if current_user %}
                     <div class="mb-4">
                         <div class="d-flex align-items-center justify-content-between mb-2">
                             <label for="paModalEmail" class="form-label fw-bold text-dark mb-0" style="font-size: 1.15rem;">
-                                Notification Email
+                                Notification Email <span class="text-danger">*</span>
                             </label>
+                            {% if current_user %}
                             <span class="badge bg-success bg-opacity-10 text-success fw-bold px-2.5 py-1">
                                 <i class="fas fa-check-circle me-1"></i>Verified Account
                             </span>
+                            {% else %}
+                            <span class="badge bg-primary bg-opacity-10 text-primary fw-bold px-2.5 py-1">
+                                <i class="fas fa-paper-plane me-1"></i>Direct Email Alert
+                            </span>
+                            {% endif %}
                         </div>
                         <div class="input-group">
                             <span class="input-group-text bg-light text-muted px-3" style="font-size: 1.2rem;"><i
                                     class="fas fa-envelope"></i></span>
-                            <input type="email" id="paModalEmail" class="form-control ps-2 bg-light fw-bold"
-                                value="{{ current_user.email }}" readonly
-                                style="font-size: 1.18rem; height: 54px;">
+                            <input type="email" id="paModalEmail" class="form-control ps-2 fw-bold {% if current_user %}bg-light{% endif %}"
+                                value="{{ current_user.email if current_user else '' }}"
+                                placeholder="Enter your email to receive price drop alerts (e.g. user@gmail.com)"
+                                {% if current_user %}readonly{% endif %}
+                                style="font-size: 1.18rem; height: 54px;" required>
                         </div>
+                        <div class="form-text text-muted small mt-1">We will send immediate notifications directly to this email whenever the price reaches your target or drops.</div>
                     </div>
-                    {% else %}
-                    <div class="alert alert-warning border-0 rounded-4 p-3.5 mb-4 shadow-xs">
-                        <div class="d-flex align-items-center gap-2 mb-2">
-                            <i class="fas fa-lock text-warning fs-4"></i>
-                            <div class="fw-bold text-dark fs-6">Sign In Required to Set Price Alerts</div>
-                        </div>
-                        <p class="text-muted small mb-3">
-                            You must be signed in to your SmartBuy account to set up custom percentage price drop alerts and track them in your dashboard.
-                        </p>
-                        <a href="/signin?next=/gececom" class="btn btn-warning w-100 rounded-pill py-2.5 fw-bold">
-                            <i class="fas fa-sign-in-alt me-1.5"></i>Sign In to Activate Alert
-                        </a>
-                    </div>
-                    <input type="hidden" id="paModalEmail" value="">
-                    {% endif %}
 
                     <div id="paModalErrorAlert" class="alert alert-danger py-3 px-4 d-none rounded-3 mb-0"
                         style="font-size: 1.08rem;"></div>
@@ -1143,17 +1287,11 @@
                     id="paModalFooter">
                     <button type="button" class="btn btn-outline-secondary rounded-pill px-4 py-2"
                         data-bs-dismiss="modal" style="font-size: 1.12rem;">Cancel</button>
-                    {% if current_user %}
                     <button type="button" id="paModalSubmitBtn"
                         class="btn btn-success rounded-pill fw-bold px-5 py-2.5 shadow-sm" onclick="submitPriceAlert()"
                         style="font-size: 1.22rem;">
                         <i class="fas fa-bell me-2"></i>Create Alert &amp; View in Dashboard
                     </button>
-                    {% else %}
-                    <a href="/signin?next=/gececom" class="btn btn-primary rounded-pill fw-bold px-5 py-2.5 shadow-sm" style="font-size: 1.22rem;">
-                        <i class="fas fa-sign-in-alt me-2"></i>Sign In Now
-                    </a>
-                    {% endif %}
                 </div>
             </div>
         </div>
@@ -1277,6 +1415,104 @@
     <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // ════════════════════ PRODUCT DETAILS MODAL LOGIC ════════════════════
+        window.gececomCatalog = {{ products|tojson|safe }};
+
+        function openProductDetailsModal(productId) {
+            if (!window.gececomCatalog || !window.gececomCatalog.length) return;
+            const cleanId = String(productId).trim();
+            const prod = window.gececomCatalog.find(p => String(p.id).trim() === cleanId || String(p._id).trim() === cleanId);
+            if (!prod) return;
+
+            document.getElementById('pdModalTitle').innerText = prod.product_name;
+            const imgEl = document.getElementById('pdModalImg');
+            imgEl.src = prod.product_image || 'https://placehold.co/320x300?text=GEC+ECom';
+            imgEl.alt = prod.product_name;
+
+            const curPrice = parseInt(prod.current_price) || 0;
+            const origPrice = parseInt(prod.original_price) || curPrice;
+            document.getElementById('pdModalCurrentPrice').innerText = '₹' + curPrice.toLocaleString('en-IN');
+            
+            const origEl = document.getElementById('pdModalOrigPrice');
+            const saveEl = document.getElementById('pdModalSavingsText');
+            const discBadge = document.getElementById('pdModalDiscountBadge');
+            if (origPrice > curPrice) {
+                origEl.innerText = '₹' + origPrice.toLocaleString('en-IN');
+                origEl.classList.remove('d-none');
+                const pct = Math.round(((origPrice - curPrice) / origPrice) * 100);
+                saveEl.innerText = pct + '% OFF';
+                saveEl.classList.remove('d-none');
+                discBadge.innerText = pct + '% OFF';
+                discBadge.classList.remove('d-none');
+            } else {
+                origEl.classList.add('d-none');
+                saveEl.classList.add('d-none');
+                discBadge.classList.add('d-none');
+            }
+
+            const catText = (prod.category || 'General').toUpperCase();
+            document.getElementById('pdModalCategory').innerText = catText;
+            document.getElementById('pdModalSpecCategory').innerText = catText;
+            document.getElementById('pdModalSpecId').innerText = prod.id || prod._id;
+            document.getElementById('pdModalRating').innerText = prod.rating || '4.5';
+            document.getElementById('pdModalReviews').innerText = '(' + (prod.reviews_count || 120) + ' reviews)';
+
+            // Wire Add to Cart button
+            const addCartBtn = document.getElementById('pdModalAddToCartBtn');
+            addCartBtn.onclick = function() {
+                addToCart(prod.product_name, prod.current_price);
+            };
+
+            // Wire Set Alert button
+            const alertBtn = document.getElementById('pdModalSetAlertBtn');
+            alertBtn.onclick = function() {
+                const modalEl = document.getElementById('productDetailsModal');
+                const bsModal = bootstrap.Modal.getInstance(modalEl);
+                if (bsModal) bsModal.hide();
+                setTimeout(() => {
+                    const fakeBtn = {
+                        getAttribute: function(attr) {
+                            if (attr === 'data-product-id') return prod.id;
+                            if (attr === 'data-product-name') return prod.product_name;
+                            if (attr === 'data-product-image') return prod.product_image;
+                            if (attr === 'data-platform') return 'gececom';
+                            if (attr === 'data-current-price') return prod.current_price;
+                            if (attr === 'data-product-url') return prod.amazon_url || ('/gececom#product-' + prod.id);
+                            return '';
+                        }
+                    };
+                    openPriceAlertModal(fakeBtn);
+                }, 300);
+            };
+
+            // Wire Compare on SmartBuy button
+            const compareBtn = document.getElementById('pdModalCompareBtn');
+            compareBtn.href = '/search?url=' + encodeURIComponent('/gececom#product-' + (prod.id || prod._id));
+
+            // Wire Edit Price (Simulator) button
+            const editBtn = document.getElementById('pdModalEditPriceBtn');
+            editBtn.onclick = function() {
+                const modalEl = document.getElementById('productDetailsModal');
+                const bsModal = bootstrap.Modal.getInstance(modalEl);
+                if (bsModal) bsModal.hide();
+                setTimeout(() => {
+                    openEditPriceModal(prod.id, prod.product_name, prod.current_price, prod.formatted_current_price || ('₹' + curPrice.toLocaleString('en-IN')));
+                }, 300);
+            };
+
+            const detailsModal = new bootstrap.Modal(document.getElementById('productDetailsModal'));
+            detailsModal.show();
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.location.hash && window.location.hash.startsWith('#product-')) {
+                const pid = window.location.hash.replace('#product-', '');
+                if (pid) {
+                    setTimeout(() => openProductDetailsModal(pid), 400);
+                }
+            }
+        });
+
         // ════════════════════ PRICE EDITOR LOGIC ════════════════════
         function openEditPriceModal(id, name, currentPrice, formattedPrice) {
             document.getElementById('epProductId').value = id;

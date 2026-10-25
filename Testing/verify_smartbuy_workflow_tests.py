@@ -27,7 +27,7 @@ if sys.stdout.encoding != 'utf-8':
     except Exception:
         pass
 
-import requests
+from app import app
 from database import (
     get_db,
     update_gececom_product_price,
@@ -37,7 +37,7 @@ from database import (
     get_user_price_alerts
 )
 
-BASE_URL = "http://127.0.0.1:5000"
+client = app.test_client()
 
 def run_tests():
     db = get_db()
@@ -91,7 +91,7 @@ def run_tests():
         })
     primary_alert_id = str(primary_alert["_id"])
 
-    # Reset alert to clean state
+    # Reset alert to clean monitoring state
     db.price_alerts.update_one(
         {"_id": ObjectId(primary_alert_id)},
         {"$set": {
@@ -114,13 +114,13 @@ def run_tests():
     # Expected: Dashboard shows latest price; no price-drop email is sent.
     # ----------------------------------------------------
     print("\n--- TEST 1: Target not reached ---")
-    resp1 = requests.post(
-        f"{BASE_URL}/api/gececom/products/{prod_id}/price",
+    resp1 = client.post(
+        f"/api/gececom/products/{prod_id}/price",
         json={"price": 21000}
     )
     print(f"Price update HTTP status: {resp1.status_code}")
     # Verify via dashboard API
-    dash_res1 = requests.get(f"{BASE_URL}/api/price-alerts?email={test_user_email}").json()
+    dash_res1 = client.get(f"/api/price-alerts?email={test_user_email}").get_json()
     alert_card_1 = next((a for a in dash_res1.get("alerts", []) if a.get("id") == primary_alert_id), None)
     
     test_1_passed = (
@@ -144,11 +144,11 @@ def run_tests():
     # Expected: Dashboard updates and one email is sent to registered user.
     # ----------------------------------------------------
     print("\n--- TEST 2: Target reached ---")
-    resp2 = requests.post(
-        f"{BASE_URL}/api/gececom/products/{prod_id}/price",
+    resp2 = client.post(
+        f"/api/gececom/products/{prod_id}/price",
         json={"price": 20898}
     )
-    dash_res2 = requests.get(f"{BASE_URL}/api/price-alerts?email={test_user_email}").json()
+    dash_res2 = client.get(f"/api/price-alerts?email={test_user_email}").get_json()
     alert_card_2 = next((a for a in dash_res2.get("alerts", []) if a.get("id") == primary_alert_id), None)
 
     test_2_passed = (
@@ -204,11 +204,11 @@ def run_tests():
     # Expected: Dashboard displays Rs. 20,000, calculates reduction, sends one email.
     # ----------------------------------------------------
     print("\n--- TEST 3: Price drops below target ---")
-    resp3 = requests.post(
-        f"{BASE_URL}/api/gececom/products/{prod_id}/price",
+    resp3 = client.post(
+        f"/api/gececom/products/{prod_id}/price",
         json={"price": 20000}
     )
-    dash_res3 = requests.get(f"{BASE_URL}/api/price-alerts?email={test_user_email}").json()
+    dash_res3 = client.get(f"/api/price-alerts?email={test_user_email}").get_json()
     alert_card_3 = next((a for a in dash_res3.get("alerts", []) if a.get("id") == primary_alert_id), None)
 
     reduction_amt = alert_card_3.get("reduction_amount", 0) if alert_card_3 else 0
@@ -235,9 +235,9 @@ def run_tests():
     # ----------------------------------------------------
     print("\n--- TEST 4: Dashboard auto-update verification ---")
     # Change price to Rs. 20,500
-    requests.post(f"{BASE_URL}/api/gececom/products/{prod_id}/price", json={"price": 20500})
+    client.post(f"/api/gececom/products/{prod_id}/price", json={"price": 20500})
     # Query dashboard endpoint (used by client-side polling)
-    dash_poll = requests.get(f"{BASE_URL}/api/price-alerts?email={test_user_email}").json()
+    dash_poll = client.get(f"/api/price-alerts?email={test_user_email}").get_json()
     poll_card = next((a for a in dash_poll.get("alerts", []) if a.get("id") == primary_alert_id), None)
     
     test_4_passed = (
@@ -351,7 +351,7 @@ def run_tests():
     # Step 1: Drop price to Rs. 20,800
     # Condition: 20800 <= 21000 (Alice TRUE), 20800 <= 20000 (Bob FALSE)
     print("\nStep 1: Dropping price to Rs. 20,800 (Meets Alice target <= 21000, Bob <= 20000 not met)")
-    requests.post(f"{BASE_URL}/api/gececom/products/{prod_id}/price", json={"price": 20800})
+    client.post(f"/api/gececom/products/{prod_id}/price", json={"price": 20800})
     
     doc_alice_1 = db.price_alerts.find_one({"_id": ObjectId(alice_id)})
     doc_bob_1 = db.price_alerts.find_one({"_id": ObjectId(bob_id)})
@@ -365,7 +365,7 @@ def run_tests():
     # Step 2: Drop price to Rs. 19,500
     # Condition: Bob <= 20000 now met
     print("\nStep 2: Dropping price to Rs. 19,500 (Bob target <= 20000 now also met)")
-    requests.post(f"{BASE_URL}/api/gececom/products/{prod_id}/price", json={"price": 19500})
+    client.post(f"/api/gececom/products/{prod_id}/price", json={"price": 19500})
     
     doc_bob_2 = db.price_alerts.find_one({"_id": ObjectId(bob_id)})
     step2_ok = (doc_bob_2.get("status") == "email_sent")

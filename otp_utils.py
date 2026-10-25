@@ -92,38 +92,50 @@ def send_email_detailed(to_email: str, subject: str, body_text: str, html_conten
         return False, msg_str
 
     try:
+        import email.utils
         msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = f"{from_name} <{smtp_user}>"
         msg["To"] = clean_to
-        msg["Importance"] = "high"
-        msg["X-Priority"] = "1"
-        msg["Priority"] = "urgent"
+        msg["Reply-To"] = smtp_user
+        msg["Date"] = email.utils.formatdate(localtime=True)
+        msg["X-Mailer"] = "SmartBuy Price Monitor"
+        msg["Auto-Submitted"] = "auto-generated"
         msg.set_content(body_text)
 
         if html_content:
             msg.add_alternative(html_content, subtype="html")
 
-        # Primary delivery attempt
-        def _send_via_ssl():
-            with smtplib.SMTP_SSL(smtp_host, 465, timeout=25) as server:
-                server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
+        # Primary and fallback delivery attempts (Port 587 STARTTLS & Port 465 SSL)
+        ports_to_try = [smtp_port, 465 if smtp_port != 465 else 587]
+        delivered = False
+        last_err = None
 
-        def _send_via_starttls(port=587):
-            with smtplib.SMTP(smtp_host, port, timeout=25) as server:
-                server.starttls()
-                server.login(smtp_user, smtp_pass)
-                server.send_message(msg)
-
-        if smtp_port == 465:
-            _send_via_ssl()
-        else:
+        for port in ports_to_try:
             try:
-                _send_via_starttls(smtp_port)
-            except (smtplib.SMTPServerDisconnected, TimeoutError, OSError) as transient_err:
-                logger.warning(f"[Email] Port {smtp_port} STARTTLS encountered {transient_err}. Retrying via Port 465 SSL...")
-                _send_via_ssl()
+                if port == 465:
+                    with smtplib.SMTP_SSL(smtp_host, 465, timeout=15) as server:
+                        server.login(smtp_user, smtp_pass)
+                        server.send_message(msg)
+                else:
+                    with smtplib.SMTP(smtp_host, port, timeout=15) as server:
+                        server.starttls()
+                        server.login(smtp_user, smtp_pass)
+                        server.send_message(msg)
+                delivered = True
+                smtp_port = port
+                break
+            except (smtplib.SMTPAuthenticationError, smtplib.SMTPRecipientsRefused):
+                # Credentials or address rejected — retrying other port won't help
+                raise
+            except Exception as attempt_err:
+                last_err = attempt_err
+                logger.warning(f"[Email] Delivery via {smtp_host}:{port} failed ({attempt_err}). Trying alternate port...")
+
+        if not delivered:
+            if last_err:
+                raise last_err
+            raise Exception("Unable to deliver email via SMTP.")
 
         success_msg = f"Email accepted by SMTP server for delivery to {clean_to}"
         logger.info(f"[Email] Successfully sent email '{subject}' to {clean_to} via SMTP ({smtp_host}:{smtp_port})")
@@ -157,6 +169,22 @@ def send_email(to_email: str, subject: str, body_text: str, html_content: str = 
     """
     ok, _ = send_email_detailed(to_email, subject, body_text, html_content)
     return ok
+
+
+def send_email_async(to_email: str, subject: str, body_text: str, html_content: str = None, on_complete=None):
+    """Dispatch email via background daemon thread so web responses remain snappy and never timeout."""
+    import threading
+    def _worker():
+        ok, res = send_email_detailed(to_email, subject, body_text, html_content)
+        if on_complete:
+            try:
+                on_complete(ok, res)
+            except Exception as cb_err:
+                logger.warning(f"[Email Async] on_complete callback error: {cb_err}")
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return t
 
 
 def send_otp_email(to_email: str, otp_code: str, purpose: str = "signup", **kwargs) -> tuple[bool, str]:
@@ -220,25 +248,11 @@ SmartBuy Team"""
     </div>
     """
 
-    try:
-        msg = EmailMessage()
-        msg["Subject"] = subject
-        msg["From"] = f"{from_name} <{smtp_user}>"
-        msg["To"] = clean_email
-        msg.set_content(plain_text)
-        msg.add_alternative(html_content, subtype='html')
-
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=12) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_pass)
-            server.send_message(msg)
-
+    ok, resp = send_email_detailed(clean_email, subject, plain_text, html_content)
+    if ok:
         logger.info(f"Successfully sent OTP email to {clean_email} via SMTP ({smtp_host}:{smtp_port})")
         return True, "OTP sent successfully"
-
-    except Exception as e:
-        logger.error(f"Failed to send OTP email via SMTP to {clean_email}: {e}")
-        return False, f"Failed to send email via SMTP: {str(e)}"
+    return False, resp
 
 
 # Alias for compatibility

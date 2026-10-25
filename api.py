@@ -192,13 +192,15 @@ def normalize_external_url(url: str, platform: str = "") -> str:
         return base + u
 
 
-# ── Buy Button Routes (/buy/amazon, /buy/flipkart, /buy/meesho, /deal/redirect) ──
+# ── Buy Button Routes (/buy/amazon, /buy/flipkart, /buy/meesho, /buy/gececom, /deal/redirect) ──
 @api_bp.route('/buy/amazon', methods=['GET'])
 @api_bp.route('/buy/flipkart', methods=['GET'])
 @api_bp.route('/buy/meesho', methods=['GET'])
+@api_bp.route('/buy/gececom', methods=['GET'])
+@api_bp.route('/buy/gecm', methods=['GET'])
 @api_bp.route('/deal/redirect', methods=['GET'])
 def handle_buy_click():
-    """Handler for user clicking Buy on Amazon/Flipkart/Meesho. Checks auth; saves product in session; redirects to signup if unauthenticated."""
+    """Handler for user clicking Buy on Amazon/Flipkart/Meesho/GEC ECom. Checks auth; saves product in session; redirects to signup if unauthenticated."""
     deal_url_raw = request.args.get('url', '').strip()
     platform = request.args.get('platform', '').strip()
     if not platform:
@@ -209,6 +211,8 @@ def handle_buy_click():
             platform = 'Flipkart'
         elif 'meesho' in path:
             platform = 'Meesho'
+        elif 'gec' in path:
+            platform = 'GEC ECom'
         else:
             platform = 'Online Store'
 
@@ -221,6 +225,8 @@ def handle_buy_click():
         platform_clean = 'Flipkart'
     elif 'meesho' in p_low:
         platform_clean = 'Meesho'
+    elif 'gec' in p_low:
+        platform_clean = 'GEC ECom'
     elif platform_clean:
         platform_clean = platform_clean.capitalize()
     else:
@@ -1973,14 +1979,13 @@ def api_update_gececom_product_price(product_id):
     trigger_results = {"checked": 0, "triggered": 0, "notifications_sent": 0, "details": []}
     if trigger_check:
         p_name = updated.get("product_name", "")
-        price_dropped = (prev_price is not None and db_price < int(prev_price))
         trigger_results = check_and_trigger_price_alerts(
             product_name=p_name,
             new_price=db_price,
             platform="gececom",
             product_id=str(product_id),
             previous_price=prev_price,
-            force_notify=price_dropped
+            force_notify=False
         )
 
     # Immediately sync current session if matching product is active in session
@@ -1995,6 +2000,18 @@ def api_update_gececom_product_price(product_id):
                 prod['price_num'] = db_price
                 prod['current_price'] = db_price
                 session[s_key] = prod
+
+    # Clear cache so search comparison table immediately reflects new price
+    try:
+        from cache import clear_cache
+        clear_cache()
+    except Exception:
+        pass
+    try:
+        from comparison_engine import _url_comparison_cache
+        _url_comparison_cache.clear()
+    except Exception:
+        pass
 
     return jsonify({
         "success": True,
@@ -2017,26 +2034,38 @@ def api_delete_gececom_product(product_id):
 
 @api_bp.route('/api/price-alerts', methods=['GET', 'POST'])
 def api_price_alerts():
-    """Register a new price drop alert or list active alerts."""
-    from database import create_price_alert, get_user_price_alerts
+    """Register a new price drop alert or list active alerts with strict user ownership."""
+    from database import create_price_alert, get_user_price_alerts, get_user_by_id, get_user_by_email
     if request.method == 'POST':
         data = request.get_json(silent=True) or request.form.to_dict()
         if not data:
             return jsonify({"success": False, "message": "Payload required."}), 400
 
-        # Require login for setting price alerts
+        # Resolve recipient email (authenticated session user takes strict precedence)
         if 'user_id' in session:
             user = get_user_by_id(session['user_id'])
             if user:
                 data['user_id'] = str(user.get('id') or user.get('_id', ''))
-                # User's verified email from session takes precedence
-                data['email'] = user.get('email', data.get('email', ''))
-        elif not data.get('email'):
+                data['email'] = str(user.get('email', '')).strip().lower()
+                data['user_name'] = str(user.get('name', '')).strip()
+        elif data.get('email'):
+            clean_email = str(data.get('email', '')).strip().lower()
+            reg_user = get_user_by_email(clean_email)
+            if reg_user:
+                data['user_id'] = str(reg_user.get('id') or reg_user.get('_id', ''))
+                data['email'] = clean_email
+                data['user_name'] = str(reg_user.get('name', '')).strip()
+            else:
+                data['user_id'] = None
+                data['email'] = clean_email
+
+        email = str(data.get('email', '')).strip().lower()
+        if not email or '@' not in email:
             return jsonify({
                 "success": False,
-                "login_required": True,
-                "message": "Please sign in to your SmartBuy account to set price alerts."
-            }), 401
+                "login_required": False,
+                "message": "Please enter a valid email address to receive price alert notifications."
+            }), 400
 
         ok, msg, alert_doc = create_price_alert(data)
         if ok:
@@ -2048,13 +2077,41 @@ def api_price_alerts():
             }), 201
         return jsonify({"success": False, "message": msg}), 400
 
-    # GET: return list of alerts
-    email = request.args.get('email', '').strip()
-    if not email and 'user_id' in session:
+    # GET: return list of alerts scoped strictly to the authenticated user
+    email = None
+    user_id = None
+    if 'user_id' in session:
         user = get_user_by_id(session['user_id'])
         if user:
-            email = user.get('email', '')
-    alerts = get_user_price_alerts(email if email else None)
+            is_admin = bool(user.get('is_admin') or user.get('role') == 'admin')
+            if is_admin and request.args.get('email'):
+                email = request.args.get('email', '').strip().lower()
+                user_id = None
+            else:
+                email = str(user.get('email', '')).strip().lower()
+                user_id = str(user.get('id') or user.get('_id', ''))
+        else:
+            user_id = str(session['user_id'])
+    elif request.args.get('email'):
+        clean_email = request.args.get('email', '').strip().lower()
+        reg_user = get_user_by_email(clean_email)
+        if reg_user:
+            email = clean_email
+            user_id = str(reg_user.get('id') or reg_user.get('_id', ''))
+        else:
+            email = clean_email
+            user_id = None
+    else:
+        # Prevent leaking all private alerts when unauthenticated and no email provided
+        return jsonify({
+            "success": True,
+            "alerts": [],
+            "count": 0,
+            "active_count": 0,
+            "triggered_count": 0
+        })
+
+    alerts = get_user_price_alerts(email=email, user_id=user_id, allow_all=False)
     active_count = sum(1 for a in alerts if a.get('status') in ('active', 'monitoring'))
     triggered_count = sum(1 for a in alerts if a.get('status') in ('triggered', 'email_sent', 'target_reached'))
     return jsonify({
@@ -2066,15 +2123,14 @@ def api_price_alerts():
     })
 
 
-
 @api_bp.route('/api/price-alerts/<alert_id>/simulate-drop', methods=['POST'])
 @api_bp.route('/api/price-alerts/<alert_id>/drop-price', methods=['POST'])
 def api_simulate_price_drop(alert_id):
     """
     Simulate or trigger an immediate live price drop for a tracked product.
-    Updates the price in database and dispatches the live price drop email alert to the user.
+    Updates the price in database and dispatches the live price drop email alert directly to the authenticated user's email.
     """
-    from database import simulate_and_trigger_price_drop
+    from database import simulate_and_trigger_price_drop, get_user_by_id, get_user_by_email, get_alert_by_id
     data = request.get_json(silent=True) or request.form.to_dict() or {}
     raw_price = data.get("new_price")
     try:
@@ -2082,7 +2138,62 @@ def api_simulate_price_drop(alert_id):
     except (ValueError, TypeError):
         new_price_num = None
 
-    ok, msg, res = simulate_and_trigger_price_drop(alert_id, new_price_num)
+    current_user_id = None
+    current_user_email = None
+    current_user_name = None
+    is_admin = False
+
+    # Priority 1: Logged-in session user
+    if 'user_id' in session:
+        u = get_user_by_id(session['user_id'])
+        if u:
+            current_user_id = str(u.get('id') or u.get('_id', ''))
+            current_user_email = str(u.get('email', '')).strip().lower()
+            current_user_name = str(u.get('name', '')).strip()
+            is_admin = bool(u.get('is_admin') or u.get('role') == 'admin')
+
+    # Priority 2: Email explicitly passed in payload
+    req_email = str(data.get('email') or data.get('user_email') or '').strip().lower()
+    if not current_user_email and req_email and '@' in req_email:
+        reg = get_user_by_email(req_email)
+        if reg:
+            current_user_id = str(reg.get('id') or reg.get('_id', ''))
+            current_user_email = str(reg.get('email', '')).strip().lower()
+            current_user_name = str(reg.get('name', '')).strip()
+        else:
+            current_user_email = req_email
+
+    # Ownership verification: ensure requesting user owns this alert
+    alert = get_alert_by_id(alert_id)
+    if not alert:
+        return jsonify({"success": False, "message": "Price alert not found."}), 404
+
+    owner_uid = str(alert.get("user_id") or "")
+    owner_email = str(alert.get("email") or "").strip().lower()
+    if current_user_id and not is_admin:
+        if owner_uid and owner_uid != current_user_id and owner_email != current_user_email:
+            return jsonify({"success": False, "message": "Unauthorized: you do not own this price alert."}), 403
+
+    ok, msg, res = simulate_and_trigger_price_drop(
+        alert_id=alert_id,
+        new_price=new_price_num,
+        current_user_id=current_user_id,
+        current_user_email=current_user_email,
+        current_user_name=current_user_name
+    )
+
+    # Invalidate all caches so Comparison Table immediately reflects the updated price
+    try:
+        from cache import clear_cache
+        clear_cache()
+    except Exception:
+        pass
+    try:
+        from comparison_engine import _url_comparison_cache
+        _url_comparison_cache.clear()
+    except Exception:
+        pass
+
     if ok:
         return jsonify({"success": True, "message": msg, "data": res}), 200
     return jsonify({"success": False, "message": msg, "data": res}), 400
@@ -2091,8 +2202,33 @@ def api_simulate_price_drop(alert_id):
 @api_bp.route('/api/price-alerts/<alert_id>/trigger', methods=['POST'])
 def api_trigger_price_alert(alert_id):
     """Send a real test email for a specific alert without altering its active monitoring status."""
-    from database import trigger_test_price_alert
-    ok, msg, res = trigger_test_price_alert(alert_id)
+    from database import trigger_test_price_alert, get_user_by_id, get_alert_by_id
+    data = request.get_json(silent=True) or request.form.to_dict() or {}
+    current_user_email = None
+    current_user_id = None
+    is_admin = False
+
+    if 'user_id' in session:
+        u = get_user_by_id(session['user_id'])
+        if u and u.get('email'):
+            current_user_id = str(u.get('id') or u.get('_id', ''))
+            current_user_email = str(u['email']).strip().lower()
+            is_admin = bool(u.get('is_admin') or u.get('role') == 'admin')
+    if not current_user_email and (data.get('email') or data.get('user_email')):
+        current_user_email = str(data.get('email') or data.get('user_email')).strip().lower()
+
+    # Ownership validation: non-admin cannot trigger test email for other users' alerts
+    alert = get_alert_by_id(alert_id)
+    if not alert:
+        return jsonify({"success": False, "message": "Price alert not found."}), 404
+
+    owner_uid = str(alert.get("user_id") or "")
+    owner_email = str(alert.get("email") or "").strip().lower()
+    if current_user_id and not is_admin:
+        if owner_uid and owner_uid != current_user_id and owner_email != current_user_email:
+            return jsonify({"success": False, "message": "Unauthorized: you do not own this price alert."}), 403
+
+    ok, msg, res = trigger_test_price_alert(alert_id, current_user_email=current_user_email)
     if ok:
         return jsonify({"success": True, "message": msg, "result": res})
     return jsonify({"success": False, "message": msg, "result": res}), 400
@@ -2100,12 +2236,32 @@ def api_trigger_price_alert(alert_id):
 
 @api_bp.route('/api/price-alerts/<alert_id>', methods=['DELETE'])
 def api_delete_price_alert(alert_id):
-    """Delete a price alert."""
-    from database import delete_price_alert
-    ok = delete_price_alert(alert_id)
+    """Delete a price alert with verified ownership protection."""
+    from database import delete_price_alert, get_user_by_id
+    current_user_id = None
+    is_admin = False
+    if 'user_id' in session:
+        u = get_user_by_id(session['user_id'])
+        if u:
+            current_user_id = str(u.get('id') or u.get('_id', ''))
+            is_admin = bool(u.get('is_admin') or u.get('role') == 'admin')
+
+    ok = delete_price_alert(alert_id, requesting_user_id=current_user_id, is_admin=is_admin)
     if ok:
         return jsonify({"success": True, "message": "Price alert deleted successfully."})
-    return jsonify({"success": False, "message": "Failed to delete alert or not found."}), 404
+    return jsonify({"success": False, "message": "Failed to delete alert: not found or unauthorized."}), 403
+
+
+@api_bp.route('/api/price-alerts/check-all', methods=['GET', 'POST'])
+def api_check_all_price_alerts():
+    """Trigger an immediate check of all active price alerts and send email notifications for any price drops."""
+    from services.price_monitor_service import check_all_active_price_alerts
+    result = check_all_active_price_alerts()
+    return jsonify({
+        "success": True,
+        "message": f"Checked {result.get('checked', 0)} alerts; {result.get('notifications_sent', 0)} email notifications dispatched.",
+        "data": result
+    })
 
 
 @api_bp.route('/my-price-alerts', methods=['GET'])
@@ -2118,15 +2274,17 @@ def my_price_alerts_page():
 
     user_email = ""
     current_user_obj = None
+    current_user_id = None
     if 'user_id' in session:
         user = get_user_by_id(session['user_id'])
         if user:
             user_email = user.get('email', '')
             current_user_obj = user
+            current_user_id = str(user.get('id') or user.get('_id', ''))
     if not user_email:
         user_email = request.args.get('email', '').strip()
 
-    alerts = get_user_price_alerts(user_email if user_email else None)
+    alerts = get_user_price_alerts(email=user_email if user_email else None, user_id=current_user_id)
     active_count = sum(1 for a in alerts if a.get('status') in ('active', 'monitoring'))
     triggered_count = sum(1 for a in alerts if a.get('status') in ('triggered', 'email_sent', 'target_reached'))
 
