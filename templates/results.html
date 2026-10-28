@@ -779,113 +779,121 @@
     <div class="row g-3">
         <!-- ════ FILTER SIDEBAR ════ -->
         <div class="col-lg-2 col-md-3">
-            <div class="filter-panel">
-                <div class="d-flex align-items-center justify-content-between mb-3">
-                    <h6 class="fw-bold mb-0"><i class="fas fa-sliders-h me-2 text-primary"></i>Filters</h6>
-                    <a href="/search?q={{ query | urlencode }}" class="text-muted small" title="Clear all filters">Reset</a>
+            <!-- Mobile Filter Toggle Button -->
+            <button type="button" class="mobile-filter-btn" onclick="const p = document.getElementById('filterPanelWrapper'); p.classList.toggle('show-mobile'); const i = this.querySelector('.fa-chevron-down, .fa-chevron-up'); if(i) { i.classList.toggle('fa-chevron-down'); i.classList.toggle('fa-chevron-up'); }">
+                <span><i class="fas fa-sliders-h me-2"></i>Filter &amp; Sort Products</span>
+                <i class="fas fa-chevron-down"></i>
+            </button>
+
+            <div class="filter-panel-wrapper" id="filterPanelWrapper">
+                <div class="filter-panel">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <h6 class="fw-bold mb-0"><i class="fas fa-sliders-h me-2 text-primary"></i>Filters</h6>
+                        <a href="/search?q={{ query | urlencode }}" class="text-muted small" title="Clear all filters">Reset</a>
+                    </div>
+
+                    <form method="GET" action="/search" id="filterForm">
+                        <input type="hidden" name="q" value="{{ query }}">
+
+                        {% if dynamic_filters %}
+
+                        <!-- Price Range -->
+                        {% if dynamic_filters.price_ranges %}
+                        <div class="mb-3">
+                            <div class="filter-section-title"><i class="fas fa-tag me-1"></i>Price</div>
+                            <label class="filter-option">
+                                <input type="radio" name="price_range" value=""
+                                       {% if not filter_params.get('price_min') %}checked{% endif %}> Any Price
+                            </label>
+                            {% for pr in dynamic_filters.price_ranges %}
+                            <label class="filter-option">
+                                <input type="radio" name="price_range" value="{{ pr.min }}-{{ pr.max }}"
+                                       {% if filter_params.get('price_min') == pr.min and filter_params.get('price_max') == pr.max %}checked{% endif %}>
+                                {{ pr.label }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Rating -->
+                        {% if dynamic_filters.ratings %}
+                        <div class="mb-3">
+                            <div class="filter-section-title"><i class="fas fa-star me-1"></i>Rating</div>
+                            <label class="filter-option">
+                                <input type="radio" name="min_rating" value=""
+                                       {% if not filter_params.get('min_rating') %}checked{% endif %}> Any Rating
+                            </label>
+                            {% for r in dynamic_filters.ratings %}
+                            <label class="filter-option">
+                                <input type="radio" name="min_rating" value="{{ r.rstrip('+') }}"
+                                       {% if filter_params.get('min_rating') | string == r.rstrip('+') %}checked{% endif %}>
+                                <i class="fas fa-star text-warning" style="font-size:0.75rem;"></i> {{ r }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Brands -->
+                        {% if dynamic_filters.brands %}
+                        <div class="mb-3">
+                            <div class="filter-section-title"><i class="fas fa-copyright me-1"></i>Brand</div>
+                            <label class="filter-option">
+                                <input type="radio" name="brand" value=""
+                                       {% if not filter_params.get('brand') %}checked{% endif %}> All Brands
+                            </label>
+                            {% for brand in dynamic_filters.brands[:8] %}
+                            <label class="filter-option">
+                                <input type="radio" name="brand" value="{{ brand }}"
+                                       {% if filter_params.get('brand') == brand %}checked{% endif %}>
+                                {{ brand }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Discounts -->
+                        {% if dynamic_filters.discounts %}
+                        <div class="mb-3">
+                            <div class="filter-section-title"><i class="fas fa-percent me-1"></i>Discount</div>
+                            <label class="filter-option">
+                                <input type="radio" name="min_discount" value=""
+                                       {% if not filter_params.get('min_discount') %}checked{% endif %}> Any Discount
+                            </label>
+                            {% for d in dynamic_filters.discounts %}
+                            <label class="filter-option">
+                                <input type="radio" name="min_discount" value="{{ d.rstrip('%+') }}"
+                                       {% if filter_params.get('min_discount') | string == d.rstrip('%+') %}checked{% endif %}>
+                                {{ d }} off
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Platforms -->
+                        {% if dynamic_filters.platforms and dynamic_filters.platforms | length > 1 %}
+                        <div class="mb-3">
+                            <div class="filter-section-title"><i class="fas fa-store me-1"></i>Platform</div>
+                            <label class="filter-option">
+                                <input type="radio" name="platform" value=""
+                                       {% if not filter_params.get('platform') %}checked{% endif %}> All Platforms
+                            </label>
+                            {% for p in dynamic_filters.platforms %}
+                            <label class="filter-option">
+                                <input type="radio" name="platform" value="{{ p }}"
+                                       {% if filter_params.get('platform') == p %}checked{% endif %}>
+                                {{ p }}
+                            </label>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+
+                        {% endif %}{# end dynamic_filters #}
+
+                        <button type="submit" class="btn btn-primary btn-sm w-100 rounded-pill mt-1 fw-semibold" onclick="showLoading()">
+                            <i class="fas fa-filter me-1"></i> Apply Filters
+                        </button>
+                    </form>
                 </div>
-
-                <form method="GET" action="/search" id="filterForm">
-                    <input type="hidden" name="q" value="{{ query }}">
-
-                    {% if dynamic_filters %}
-
-                    <!-- Price Range -->
-                    {% if dynamic_filters.price_ranges %}
-                    <div class="mb-3">
-                        <div class="filter-section-title"><i class="fas fa-tag me-1"></i>Price</div>
-                        <label class="filter-option">
-                            <input type="radio" name="price_range" value=""
-                                   {% if not filter_params.get('price_min') %}checked{% endif %}> Any Price
-                        </label>
-                        {% for pr in dynamic_filters.price_ranges %}
-                        <label class="filter-option">
-                            <input type="radio" name="price_range" value="{{ pr.min }}-{{ pr.max }}"
-                                   {% if filter_params.get('price_min') == pr.min and filter_params.get('price_max') == pr.max %}checked{% endif %}>
-                            {{ pr.label }}
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% endif %}
-
-                    <!-- Rating -->
-                    {% if dynamic_filters.ratings %}
-                    <div class="mb-3">
-                        <div class="filter-section-title"><i class="fas fa-star me-1"></i>Rating</div>
-                        <label class="filter-option">
-                            <input type="radio" name="min_rating" value=""
-                                   {% if not filter_params.get('min_rating') %}checked{% endif %}> Any Rating
-                        </label>
-                        {% for r in dynamic_filters.ratings %}
-                        <label class="filter-option">
-                            <input type="radio" name="min_rating" value="{{ r.rstrip('+') }}"
-                                   {% if filter_params.get('min_rating') | string == r.rstrip('+') %}checked{% endif %}>
-                            <i class="fas fa-star text-warning" style="font-size:0.75rem;"></i> {{ r }}
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% endif %}
-
-                    <!-- Brands -->
-                    {% if dynamic_filters.brands %}
-                    <div class="mb-3">
-                        <div class="filter-section-title"><i class="fas fa-copyright me-1"></i>Brand</div>
-                        <label class="filter-option">
-                            <input type="radio" name="brand" value=""
-                                   {% if not filter_params.get('brand') %}checked{% endif %}> All Brands
-                        </label>
-                        {% for brand in dynamic_filters.brands[:8] %}
-                        <label class="filter-option">
-                            <input type="radio" name="brand" value="{{ brand }}"
-                                   {% if filter_params.get('brand') == brand %}checked{% endif %}>
-                            {{ brand }}
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% endif %}
-
-                    <!-- Discounts -->
-                    {% if dynamic_filters.discounts %}
-                    <div class="mb-3">
-                        <div class="filter-section-title"><i class="fas fa-percent me-1"></i>Discount</div>
-                        <label class="filter-option">
-                            <input type="radio" name="min_discount" value=""
-                                   {% if not filter_params.get('min_discount') %}checked{% endif %}> Any Discount
-                        </label>
-                        {% for d in dynamic_filters.discounts %}
-                        <label class="filter-option">
-                            <input type="radio" name="min_discount" value="{{ d.rstrip('%+') }}"
-                                   {% if filter_params.get('min_discount') | string == d.rstrip('%+') %}checked{% endif %}>
-                            {{ d }} off
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% endif %}
-
-                    <!-- Platforms -->
-                    {% if dynamic_filters.platforms and dynamic_filters.platforms | length > 1 %}
-                    <div class="mb-3">
-                        <div class="filter-section-title"><i class="fas fa-store me-1"></i>Platform</div>
-                        <label class="filter-option">
-                            <input type="radio" name="platform" value=""
-                                   {% if not filter_params.get('platform') %}checked{% endif %}> All Platforms
-                        </label>
-                        {% for p in dynamic_filters.platforms %}
-                        <label class="filter-option">
-                            <input type="radio" name="platform" value="{{ p }}"
-                                   {% if filter_params.get('platform') == p %}checked{% endif %}>
-                            {{ p }}
-                        </label>
-                        {% endfor %}
-                    </div>
-                    {% endif %}
-
-                    {% endif %}{# end dynamic_filters #}
-
-                    <button type="submit" class="btn btn-primary btn-sm w-100 rounded-pill mt-1 fw-semibold" onclick="showLoading()">
-                        <i class="fas fa-filter me-1"></i> Apply Filters
-                    </button>
-                </form>
             </div>
         </div>
 
@@ -893,7 +901,7 @@
         <div class="col-lg-10 col-md-9">
 
             <!-- View Tabs (Side-by-Side Platforms | Quality Comparison Table | Specification Table | All Product Cards) -->
-            <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+            <div class="view-tabs-strip">
                 <button class="view-tab-btn active" id="tabPlatform" onclick="switchView('platform')">
                     <i class="fas fa-columns me-1"></i> Side-by-Side Platforms (Amazon | Flipkart | Meesho | GEC ECom)
                 </button>
@@ -904,7 +912,7 @@
                     {% endif %}
                 </button>
                 <button class="view-tab-btn" id="tabSpecTable" onclick="switchView('specTable')">
-                    <i class="fas fa-table me-1"></i> Product Specification Table
+                    <i class="fas fa-table me-1"></i> Specification Table
                     <span class="badge bg-primary text-white rounded-pill ms-1">{{ all_results | length }}</span>
                 </button>
                 <button class="view-tab-btn" id="tabAll" onclick="switchView('all')">
@@ -2325,8 +2333,8 @@
                     {% for platform_name in ['Amazon', 'Flipkart', 'Meesho'] %}
                     {% set p_info = top_prices.get(platform_name) if top_prices else None %}
                     <div class="col-lg-4 col-md-6 col-12">
-                        <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden top-price-card {% if p_info and p_info.is_overall_best %}highlight-lowest-card{% endif %}"
-                             style="background: rgba(255,255,255,0.85); border: 1.5px solid {% if p_info and p_info.is_overall_best %}#10b981{% else %}rgba(0,0,0,0.08){% endif %} !important; transition: all 0.25s ease;">
+                        <div class="card h-100 border-0 shadow-sm rounded-4 overflow-hidden top-price-card {% if p_info and p_info.is_lowest_price %}highlight-lowest-card{% elif p_info and p_info.is_overall_best %}highlight-best-card{% endif %}"
+                             style="background: rgba(255,255,255,0.85); border: 2px solid {% if p_info and p_info.is_lowest_price %}#10b981{% elif p_info and p_info.is_overall_best %}#3b82f6{% else %}rgba(0,0,0,0.08){% endif %} !important; transition: all 0.25s ease;">
                             
                             <!-- Platform Header -->
                             <div class="card-header border-0 py-3 px-3 d-flex align-items-center justify-content-between text-white
@@ -2341,9 +2349,17 @@
                                     {% endif %}
                                     <span class="fw-bold fs-6">{{ platform_name }}</span>
                                 </div>
-                                {% if p_info and p_info.is_overall_best %}
+                                {% if p_info and p_info.is_lowest_price and p_info.is_overall_best %}
                                 <span class="badge bg-white text-success fw-bold px-2 py-1 shadow-sm" style="font-size:0.72rem;">
-                                    <i class="fas fa-crown me-1"></i>Lowest Price
+                                    <i class="fas fa-crown text-warning me-1"></i>Best Deal &amp; Lowest Price
+                                </span>
+                                {% elif p_info and p_info.is_lowest_price %}
+                                <span class="badge bg-white text-success fw-bold px-2 py-1 shadow-sm" style="font-size:0.72rem;">
+                                    <i class="fas fa-tag text-success me-1"></i>Lowest Price
+                                </span>
+                                {% elif p_info and p_info.is_overall_best %}
+                                <span class="badge bg-white text-primary fw-bold px-2 py-1 shadow-sm" style="font-size:0.72rem;">
+                                    <i class="fas fa-award text-primary me-1"></i>Best Verified Deal
                                 </span>
                                 {% endif %}
                             </div>
@@ -2360,7 +2376,7 @@
                                         </div>
                                         <div class="text-end">
                                             {% if p_info.quality_score %}
-                                            <span class="badge bg-primary-subtle text-primary border border-primary px-2 py-1" style="font-size:0.75rem;" title="Product Quality Score">
+                                             <span class="badge bg-primary-subtle text-primary border border-primary px-2 py-1" style="font-size:0.75rem;" title="Product Quality Score">
                                                 <i class="fas fa-award me-1"></i>Quality: {{ p_info.quality_score|round|int }}/100
                                             </span>
                                             {% endif %}
@@ -2397,7 +2413,7 @@
                                         <span class="badge bg-light text-muted border">{{ p_info.quantity }}</span>
                                         {% endif %}
                                         {% if p_info.seller and p_info.seller != 'N/A' %}
-                                        <span class="text-truncate" style="max-width:120px;" title="{{ p_info.seller }}"><i class="fas fa-store me-1"></i>{{ p_info.seller }}</span>
+                                        <span class="text-truncate" style="max-width:180px;" title="{{ p_info.seller }}"><i class="fas fa-store me-1"></i>{{ p_info.seller }}</span>
                                         {% endif %}
                                     </div>
 
@@ -2420,8 +2436,10 @@
                                             <span class="badge bg-success-subtle text-success border border-success px-2 py-1" style="font-size:0.72rem;"><i class="fas fa-check-double me-1"></i>Exact Match</span>
                                             {% elif p_info.match_status == 'VARIANT_MATCH' %}
                                             <span class="badge bg-info-subtle text-info border border-info px-2 py-1" style="font-size:0.72rem;"><i class="fas fa-layer-group me-1"></i>Variant Match</span>
+                                            {% elif p_info.match_status == 'SIMILAR_PRODUCT' or p_info.match_type == 'SIMILAR' %}
+                                            <span class="badge bg-secondary-subtle text-secondary border border-secondary px-2 py-1" style="font-size:0.72rem;"><i class="fas fa-sliders-h me-1"></i>Similar Product</span>
                                             {% else %}
-                                            <span class="badge bg-light text-secondary border px-2 py-1" style="font-size:0.72rem;">{{ p_info.match_status or 'Verified' }}</span>
+                                            <span class="badge bg-light text-secondary border px-2 py-1" style="font-size:0.72rem;">{{ (p_info.match_status or 'Verified')|replace('_', ' ')|title }}</span>
                                             {% endif %}
                                         </div>
                                     </div>

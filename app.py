@@ -33,8 +33,8 @@ app.secret_key = os.getenv("SECRET_KEY", "smartbuy_super_secret_key_2026")
 # Vercel has no local MongoDB service, so avoid blocking function startup there.
 if not os.getenv("VERCEL") or os.getenv("MONGO_URI"):
     if init_db(app):
-        # Start background monitor worker in single-process or main reloader worker
-        if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') is None:
+        # Start background monitor worker in single-process or main reloader worker (skip on serverless Vercel)
+        if (os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') is None) and not os.getenv("VERCEL"):
             try:
                 from services.price_monitor_service import start_price_monitor
                 start_price_monitor(interval_seconds=15)
@@ -54,6 +54,22 @@ def inject_user():
                 admin_unread = get_admin_unread_count()
             return dict(current_user=user, unread_inbox_count=unread_count, admin_unread_count=admin_unread)
     return dict(current_user=None, unread_inbox_count=0, admin_unread_count=0)
+
+# Configure production CORS
+try:
+    from flask_cors import CORS
+    cors_env = os.getenv("CORS_ORIGINS", "*").strip()
+    cors_origins = [o.strip() for o in cors_env.split(",") if o.strip()]
+    CORS(app, resources={r"/api/*": {"origins": cors_origins if cors_origins != ["*"] else "*"}}, supports_credentials=True)
+except ImportError:
+    pass
+
+@app.after_request
+def set_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 # Register Blueprint
 app.register_blueprint(api_bp)

@@ -110,24 +110,24 @@ def parse_flipkart_card(card: bs4.element.Tag) -> Optional[Dict[str, Any]]:
 
         # Image extraction with multi-layer fallback
         image = ""
-        # 1. Primary product image selector for Flipkart
-        img_elem = card.select_one('img.UCc1lI, img.DByuf4, img._396cs4, img._2r_T1I, img._530RAn, img._0DkuPH, img.q6DClP')
+        # 1. Primary product image selector for Flipkart (including modern MZeksS, DByuf4, UCc1lI)
+        img_elem = card.select_one('img.MZeksS, img.DByuf4, img.UCc1lI, img._530RAn, img._0DkuPH, img.q6DClP, img._396cs4, img._2r_T1I, img[src*="flixcart"], img[src*="rukminim"]')
         if img_elem:
-            for attr in ('src', 'data-src', 'srcset'):
+            for attr in ('data-resolved-src', 'src', 'data-src', 'srcset'):
                 val = img_elem.get(attr)
                 if val:
                     if attr == 'srcset':
                         val = val.split(',')[0].strip().split(' ')[0]
                     if val.startswith('//'):
                         val = 'https:' + val
-                    if not val.startswith('data:') and 'static-assets' not in val:
+                    if not val.startswith('data:') and 'static-assets' not in val and 'fa_9e47c1' not in val:
                         image = val
                         break
 
         # 2. Search all img tags in card for Flipkart CDN product images
         if not image:
             for img in card.select('img'):
-                for attr in ('src', 'data-src', 'srcset'):
+                for attr in ('data-resolved-src', 'src', 'data-src', 'srcset'):
                     val = img.get(attr)
                     if not val:
                         continue
@@ -135,7 +135,7 @@ def parse_flipkart_card(card: bs4.element.Tag) -> Optional[Dict[str, Any]]:
                         val = val.split(',')[0].strip().split(' ')[0]
                     if val.startswith('//'):
                         val = 'https:' + val
-                    if ('rukminim' in val or 'flixcart.com/image/' in val) and not val.startswith('data:'):
+                    if ('rukminim' in val or 'flixcart.com/image/' in val or 'xif0q' in val) and not val.startswith('data:') and 'fa_9e47c1' not in val:
                         image = val
                         break
                 if image:
@@ -144,12 +144,17 @@ def parse_flipkart_card(card: bs4.element.Tag) -> Optional[Dict[str, Any]]:
         # 3. Fallback to any non-static, non-data img tag
         if not image:
             for img in card.select('img'):
-                val = img.get('src') or img.get('data-src') or ''
+                val = img.get('data-resolved-src') or img.get('src') or img.get('data-src') or ''
                 if val.startswith('//'):
                     val = 'https:' + val
-                if val and not val.startswith('data:') and 'static-assets' not in val and 'fa_9e47c1' not in val:
+                if val and not val.startswith('data:') and 'static-assets' not in val and 'fa_9e47c1' not in val and 'plus_' not in val:
                     image = val
                     break
+
+        # Normalize Flipkart image URL dimensions if template tokens are present
+        if image:
+            image = re.sub(r'\{@width\}', '612', image)
+            image = re.sub(r'\{@height\}', '612', image)
 
         # Product Link
         link_elem = card.select_one('a.CGtC5Q, a._1fQZEK, a.s1Q9rs, a.VJA3rP, a.k7wcnx, a[href*="/p/"]')

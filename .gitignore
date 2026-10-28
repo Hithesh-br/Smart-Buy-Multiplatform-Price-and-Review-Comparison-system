@@ -39,6 +39,8 @@ logs/
 *.log
 *.sqlite
 *.sqlite3
+*.db
+
 
 # Unit test & coverage artifacts
 .pytest_cache/
@@ -62,3 +64,5 @@ scratch/*.jpg
 price_prediction_chart_test.png
 .vercel
 .env*.local
+
+.vercel

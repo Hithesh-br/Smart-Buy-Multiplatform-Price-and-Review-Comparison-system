@@ -292,6 +292,7 @@ def get_top_best_prices_data(platform_results: dict) -> dict:
                 "image": best_product.get("image"),
                 "link": best_product.get("link", "#"),
                 "is_overall_best": False,
+                "is_lowest_price": False,
             }
             top_prices[platform] = item_data
             valid_platform_deals.append(item_data)
@@ -308,6 +309,7 @@ def get_top_best_prices_data(platform_results: dict) -> dict:
                 "image": None,
                 "link": None,
                 "is_overall_best": False,
+                "is_lowest_price": False,
             }
 
     best_overall = None
@@ -319,6 +321,7 @@ def get_top_best_prices_data(platform_results: dict) -> dict:
         for platform in target_platforms:
             if top_prices[platform]["available"] and top_prices[platform]["platform"] == best_overall["platform"]:
                 top_prices[platform]["is_overall_best"] = True
+                top_prices[platform]["is_lowest_price"] = True
 
         if len(valid_platform_deals) >= 2:
             highest_deal = max(valid_platform_deals, key=lambda x: x["price_num"])

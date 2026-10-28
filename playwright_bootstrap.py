@@ -8,8 +8,13 @@ import sys
 
 
 def _default_browsers_path() -> str:
-    local = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
-    return os.path.join(local, "ms-playwright")
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
+        return os.path.join(local, "ms-playwright")
+    # On Linux / Docker / Container environments, standard default path is /ms-playwright or ~/.cache/ms-playwright
+    if os.path.exists("/ms-playwright"):
+        return "/ms-playwright"
+    return os.path.expanduser("~/.cache/ms-playwright")
 
 
 def configure_playwright_environment() -> None:

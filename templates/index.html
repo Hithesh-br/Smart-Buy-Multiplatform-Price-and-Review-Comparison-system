@@ -489,21 +489,23 @@
             </div>
 
             <!-- URL Input Pill with Paste and Compare Button -->
-            <div class="hero-search-box position-relative mb-3" style="border-radius:50px; background:#fff; border:1.5px solid #3b82f6; padding:6px 6px 6px 20px; box-shadow: 0 8px 30px rgba(59, 130, 246, 0.15);">
-                <i class="fas fa-globe me-3 text-primary" style="font-size:1.2rem; flex-shrink:0;"></i>
-                <input
-                    type="url"
-                    id="productUrlInput"
-                    class="hero-search-input"
-                    placeholder="Paste Amazon / Flipkart / Meesho product URL (e.g. https://www.amazon.in/dp/...)"
-                    autocomplete="off"
-                    aria-label="Paste Product URL"
-                >
-                <button type="button" class="btn btn-light btn-sm rounded-pill px-3 me-2 fw-semibold text-secondary d-none d-sm-inline-flex align-items-center gap-1" onclick="pasteClipboardToUrl()" title="Paste from clipboard">
-                    <i class="fas fa-paste"></i> Paste
-                </button>
-                <button type="button" class="hero-search-btn" id="urlCompareBtn" onclick="startUrlComparison()" style="background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); border-radius:40px; padding:12px 32px; font-weight:700;">
-                    <i class="fas fa-balance-scale me-2"></i>
+            <div class="hero-search-box position-relative mb-3" style="border: 1.5px solid #3b82f6; box-shadow: 0 8px 30px rgba(59, 130, 246, 0.15);">
+                <div class="search-input-wrapper d-flex align-items-center flex-grow-1 w-100">
+                    <i class="fas fa-globe me-2 text-primary" style="font-size:1.15rem; flex-shrink:0;"></i>
+                    <input
+                        type="url"
+                        id="productUrlInput"
+                        class="hero-search-input"
+                        placeholder="Paste Amazon / Flipkart / Meesho product URL (e.g. https://www.amazon.in/dp/...)"
+                        autocomplete="off"
+                        aria-label="Paste Product URL"
+                    >
+                    <button type="button" class="btn btn-light btn-sm rounded-pill px-3 me-2 fw-semibold text-secondary d-none d-sm-inline-flex align-items-center gap-1 flex-shrink-0" onclick="pasteClipboardToUrl()" title="Paste from clipboard">
+                        <i class="fas fa-paste"></i> Paste
+                    </button>
+                </div>
+                <button type="button" class="hero-search-btn" id="urlCompareBtn" onclick="startUrlComparison()" style="background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%); font-weight:700;">
+                    <i class="fas fa-balance-scale me-1"></i>
                     <span>Compare Product</span>
                 </button>
             </div>
@@ -577,18 +579,20 @@
                 </div>
 
                 <!-- Bottom Search Input Pill -->
-                <div class="hero-search-box position-relative" id="searchBoxContainer" style="border-radius:50px; background:#fff; border:1.5px solid #cbd5e1; padding:6px 6px 6px 24px;">
-                    <i class="fas fa-search me-3" style="color:#94a3b8; font-size:1.1rem; flex-shrink:0;"></i>
-                    <input
-                        type="text"
-                        name="q"
-                        id="specSearchInput"
-                        class="hero-search-input autocomplete-input"
-                        placeholder="Enter product name or paste Amazon / Flipkart / Meesho URL..."
-                        autocomplete="off"
-                        aria-label="Search Product"
-                    >
-                    <button type="submit" class="hero-search-btn" id="searchBtn" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); border-radius:40px; padding:12px 32px; font-weight:700;">
+                <div class="hero-search-box position-relative" id="searchBoxContainer" style="border: 1.5px solid #cbd5e1;">
+                    <div class="search-input-wrapper d-flex align-items-center flex-grow-1 w-100">
+                        <i class="fas fa-search me-2" style="color:#94a3b8; font-size:1.1rem; flex-shrink:0;"></i>
+                        <input
+                            type="text"
+                            name="q"
+                            id="specSearchInput"
+                            class="hero-search-input autocomplete-input"
+                            placeholder="Enter product name or paste Amazon / Flipkart / Meesho URL..."
+                            autocomplete="off"
+                            aria-label="Search Product"
+                        >
+                    </div>
+                    <button type="submit" class="hero-search-btn" id="searchBtn" style="background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); font-weight:700;">
                         <i class="fas fa-search me-2"></i>
                         <span>Search Products</span>
                     </button>

@@ -8,7 +8,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PORT=5000 \
-    MEESHO_HEADLESS=true
+    MEESHO_HEADLESS=true \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Copy dependency files
 COPY requirements.txt .

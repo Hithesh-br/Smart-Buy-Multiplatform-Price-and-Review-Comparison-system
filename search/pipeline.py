@@ -276,7 +276,8 @@ def run_comparison_pipeline(
                 "match_status": best_p.get("match_status", "SIMILAR_PRODUCT"),
                 "match_score": best_p.get("match_score", 0.0),
                 "link": best_p.get("product_url") or best_p.get("link", "#"),
-                "is_overall_best": False
+                "is_overall_best": False,
+                "is_lowest_price": False
             }
             top_verified_offers[plat] = offer_data
             all_available_deals.append(offer_data)
@@ -301,7 +302,8 @@ def run_comparison_pipeline(
                 "has_sufficient_data": False,
                 "review_signals": {},
                 "quality_attributes": {},
-                "is_overall_best": False
+                "is_overall_best": False,
+                "is_lowest_price": False
             }
 
     # 6. Category-Specific Specification Matrix (Section 13 & 19)
@@ -647,6 +649,15 @@ def run_comparison_pipeline(
         }
     else:
         no_deal_message = "No exact cross-platform match available"
+
+    # Accurately determine the true lowest price offer among all displayed platform offers
+    available_with_price = [
+        deal for deal in top_verified_offers.values()
+        if deal.get("available") and deal.get("price_num") and deal["price_num"] > 0
+    ]
+    if available_with_price:
+        lowest_deal = min(available_with_price, key=lambda x: x["price_num"])
+        lowest_deal["is_lowest_price"] = True
 
     # 9. Pairwise Matching Status Summary
     match_pairs = {}

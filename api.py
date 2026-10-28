@@ -108,6 +108,8 @@ def internal_server_error(error):
     return render_template('index.html', category_hints=CATEGORY_HINTS, trending_searches=get_trending_queries(limit=8)), 500
 
 
+
+
 # Category hint chips for home page
 CATEGORY_HINTS = [
     {"label": "Mobiles",         "icon": "fas fa-mobile-alt",   "query": "Mobile Phone"},
@@ -1742,10 +1744,21 @@ def search_suggestions():
 @api_bp.route('/health', methods=['GET'])
 @api_bp.route('/api/health', methods=['GET'])
 def health_check():
-    """System and provider health check endpoint."""
+    """Production system, database, and scraper provider health check endpoint."""
     from scrapers.meesho.meesho_provider import MeeshoProvider
     from scrapers.amazon import AmazonProvider
     from scrapers.flipkart import FlipkartProvider
+
+    db_status = "connected"
+    try:
+        from database import client
+        if client:
+            client.admin.command('ping')
+        else:
+            db_status = "uninitialized"
+    except Exception as e:
+        logger.warning(f"Database health check error: {e}")
+        db_status = "disconnected"
 
     try:
         mee_health = MeeshoProvider().health_check()
@@ -1762,17 +1775,21 @@ def health_check():
     except Exception as e:
         fk_health = {"platform": "flipkart", "status": "unavailable", "error": str(e)}
 
+    overall_status = "online" if db_status == "connected" else "degraded"
+
     return jsonify({
-        "status": "online",
+        "status": overall_status,
         "system": "Smart-Buy: Multiplatform Price Review Comparison System",
-        "timestamp": time.time(),
+        "version": "1.0.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "database": db_status,
         "database_queries_logged": get_query_count(),
         "providers": {
             "amazon": amz_health,
             "flipkart": fk_health,
             "meesho": mee_health
         }
-    })
+    }), (200 if overall_status == "online" else 503)
 
 
 @api_bp.route('/api/debug/scrapers', methods=['GET'])

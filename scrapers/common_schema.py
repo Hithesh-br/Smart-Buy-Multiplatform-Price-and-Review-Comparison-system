@@ -16,34 +16,15 @@ from typing import Dict, Any, Optional, List
 
 
 FLIPKART_FALLBACK_IMAGE = (
-    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'>"
-    "<rect width='200' height='200' fill='#f1f3f6'/>"
-    "<rect x='30' y='30' width='140' height='140' rx='12' fill='#ffffff' stroke='#2874f0' stroke-width='2'/>"
-    "<path d='M70 75 L130 75 L122 135 L78 135 Z' fill='#2874f0'/>"
-    "<path d='M85 75 C85 60 115 60 115 75' stroke='#ff9f00' stroke-width='4' fill='none' stroke-linecap='round'/>"
-    "<text x='100' y='160' font-family='Arial,sans-serif' font-size='13' font-weight='bold' fill='#2874f0' text-anchor='middle'>Flipkart</text>"
-    "</svg>"
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScyMDAnIGhlaWdodD0nMjAwJyB2aWV3Qm94PScwIDAgMjAwIDIwMCc+PHJlY3Qgd2lkdGg9JzIwMCcgaGVpZ2h0PScyMDAnIGZpbGw9JyNmMWYzZjYnLz48cmVjdCB4PSczMCcgeT0nMzAnIHdpZHRoPScxNDAnIGhlaWdodD0nMTQwJyByeD0nMTInIGZpbGw9JyNmZmZmZmYnIHN0cm9rZT0nIzI4NzRmMCcgc3Ryb2tlLXdpZHRoPScyJy8+PHBhdGggZD0nTTcwIDc1IEwxMzAgNzUgTDEyMiAxMzUgTDc4IDEzNSBaJyBmaWxsPScjMjg3NGYwJy8+PHBhdGggZD0nTTg1IDc1IEM4NSA2MCAxMTUgNjAgMTE1IDc1JyBzdHJva2U9JyNmZjlmMDAnIHN0cm9rZS13aWR0aD0nNCcgZmlsbD0nbm9uZScgc3Ryb2tlLWxpbmVjYXA9J3JvdW5kJy8+PHRleHQgeD0nMTAwJyB5PScxNjAnIGZvbnQtZmFtaWx5PSdBcmlhbCxzYW5zLXNlcmlmJyBmb250LXNpemU9JzEzJyBmb250LXdlaWdodD0nYm9sZCcgZmlsbD0nIzI4NzRmMCcgdGV4dC1hbmNob3I9J21pZGRsZSc+RmxpcGthcnQ8L3RleHQ+PC9zdmc+"
 )
 
 AMAZON_FALLBACK_IMAGE = (
-    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'>"
-    "<rect width='200' height='200' fill='#f7f7f7'/>"
-    "<rect x='30' y='30' width='140' height='140' rx='12' fill='#ffffff' stroke='#ff9900' stroke-width='2'/>"
-    "<path d='M65 80 L75 80 L90 120 L125 120 L135 90 L80 90' stroke='#232f3e' stroke-width='4' fill='none' stroke-linecap='round' stroke-linejoin='round'/>"
-    "<circle cx='92' cy='132' r='6' fill='#ff9900'/>"
-    "<circle cx='123' cy='132' r='6' fill='#ff9900'/>"
-    "<text x='100' y='160' font-family='Arial,sans-serif' font-size='13' font-weight='bold' fill='#232f3e' text-anchor='middle'>Amazon</text>"
-    "</svg>"
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScyMDAnIGhlaWdodD0nMjAwJyB2aWV3Qm94PScwIDAgMjAwIDIwMCc+PHJlY3Qgd2lkdGg9JzIwMCcgaGVpZ2h0PScyMDAnIGZpbGw9JyNmN2Y3ZjcnLz48cmVjdCB4PSczMCcgeT0nMzAnIHdpZHRoPScxNDAnIGhlaWdodD0nMTQwJyByeD0nMTInIGZpbGw9JyNmZmZmZmYnIHN0cm9rZT0nI2ZmOTkwMCcgc3Ryb2tlLXdpZHRoPScyJy8+PHBhdGggZD0nTTY1IDgwIEw3NSA4MCBMOTAgMTIwIEwxMjUgMTIwIEwxMzUgOTAgTDgwIDkwJyBzdHJva2U9JyMyMzJmM2UnIHN0cm9rZS13aWR0aD0nNCcgZmlsbD0nbm9uZScgc3Ryb2tlLWxpbmVjYXA9J3JvdW5kJyBzdHJva2UtbGluZWpvaW49J3JvdW5kJy8+PGNpcmNsZSBjeD0nOTInIGN5PScxMzInIHI9JzYnIGZpbGw9JyNmZjk5MDAnLz48Y2lyY2xlIGN4PScxMjMnIGN5PScxMzInIHI9JzYnIGZpbGw9JyNmZjk5MDAnLz48dGV4dCB4PScxMDAnIHk9JzE2MCcgZm9udC1mYW1pbHk9J0FyaWFsLHNhbnMtc2VyaWYnIGZvbnQtc2l6ZT0nMTMnIGZvbnQtd2VpZ2h0PSdib2xkJyBmaWxsPScjMjMyZjNlJyB0ZXh0LWFuY2hvcj0nbWlkZGxlJz5BbWF6b248L3RleHQ+PC9zdmc+"
 )
 
 MEESHO_FALLBACK_IMAGE = (
-    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200' viewBox='0 0 200 200'>"
-    "<rect width='200' height='200' fill='#fdf2f8'/>"
-    "<rect x='30' y='30' width='140' height='140' rx='12' fill='#ffffff' stroke='#f43397' stroke-width='2'/>"
-    "<path d='M70 75 L130 75 L122 135 L78 135 Z' fill='#f43397'/>"
-    "<path d='M85 75 C85 60 115 60 115 75' stroke='#831843' stroke-width='4' fill='none' stroke-linecap='round'/>"
-    "<text x='100' y='160' font-family='Arial,sans-serif' font-size='13' font-weight='bold' fill='#f43397' text-anchor='middle'>Meesho</text>"
-    "</svg>"
+    "data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScyMDAnIGhlaWdodD0nMjAwJyB2aWV3Qm94PScwIDAgMjAwIDIwMCc+PHJlY3Qgd2lkdGg9JzIwMCcgaGVpZ2h0PScyMDAnIGZpbGw9JyNmZGYyZjgnLz48cmVjdCB4PSczMCcgeT0nMzAnIHdpZHRoPScxNDAnIGhlaWdodD0nMTQwJyByeD0nMTInIGZpbGw9JyNmZmZmZmYnIHN0cm9rZT0nI2Y0MzM5Nycgc3Ryb2tlLXdpZHRoPScyJy8+PHBhdGggZD0nTTcwIDc1IEwxMzAgNzUgTDEyMiAxMzUgTDc4IDEzNSBaJyBmaWxsPScjZjQzMzk3Jy8+PHBhdGggZD0nTTg1IDc1IEM4NSA2MCAxMTUgNjAgMTE1IDc1JyBzdHJva2U9JyM4MzE4NDMnIHN0cm9rZS13aWR0aD0nNCcgZmlsbD0nbm9uZScgc3Ryb2tlLWxpbmVjYXA9J3JvdW5kJy8+PHRleHQgeD0nMTAwJyB5PScxNjAnIGZvbnQtZmFtaWx5PSdBcmlhbCxzYW5zLXNlcmlmJyBmb250LXNpemU9JzEzJyBmb250LXdlaWdodD0nYm9sZCcgZmlsbD0nI2Y0MzM5NycgdGV4dC1hbmNob3I9J21pZGRsZSc+TWVlc2hvPC90ZXh0Pjwvc3ZnPg=="
 )
 
 

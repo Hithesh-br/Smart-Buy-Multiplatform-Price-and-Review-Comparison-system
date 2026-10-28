@@ -179,16 +179,16 @@
                     </p>
                 </div>
 
-                <div class="d-flex gap-2.5 flex-wrap">
-                    <div class="bg-white bg-opacity-10 border border-white border-opacity-20 rounded-4 px-3.5 py-2 text-center">
+                <div class="d-flex gap-2 flex-wrap w-100 w-md-auto justify-content-between justify-content-md-end mt-2 mt-md-0">
+                    <div class="bg-white bg-opacity-10 border border-white border-opacity-20 rounded-4 px-3 py-2 text-center flex-grow-1 flex-md-grow-0">
                         <div class="fs-4 fw-extrabold" id="statTotalCount">{{ alerts | length }}</div>
                         <small class="text-white-50 text-uppercase fw-bold" style="font-size: 0.72rem;">Total Tracked</small>
                     </div>
-                    <div class="bg-white bg-opacity-10 border border-white border-opacity-20 rounded-4 px-3.5 py-2 text-center">
+                    <div class="bg-white bg-opacity-10 border border-white border-opacity-20 rounded-4 px-3 py-2 text-center flex-grow-1 flex-md-grow-0">
                         <div class="fs-4 fw-extrabold text-warning" id="statActiveCount">{{ active_count }}</div>
                         <small class="text-white-50 text-uppercase fw-bold" style="font-size: 0.72rem;">Monitoring Live</small>
                     </div>
-                    <div class="bg-white bg-opacity-10 border border-white border-opacity-20 rounded-4 px-3.5 py-2 text-center">
+                    <div class="bg-white bg-opacity-10 border border-white border-opacity-20 rounded-4 px-3 py-2 text-center flex-grow-1 flex-md-grow-0">
                         <div class="fs-4 fw-extrabold text-success" id="statTriggeredCount">{{ triggered_count }}</div>
                         <small class="text-white-50 text-uppercase fw-bold" style="font-size: 0.72rem;">Emails Triggered</small>
                     </div>
@@ -199,12 +199,12 @@
         <!-- Filter & Search Bar -->
         <div class="card border-0 shadow-sm rounded-4 p-3 mb-4 bg-white">
             <form action="/my-price-alerts" method="GET" class="d-flex flex-wrap align-items-center justify-content-between gap-3">
-                <div class="d-flex align-items-center gap-2 flex-grow-1" style="max-width: 480px;">
-                    <i class="fas fa-filter text-muted"></i>
-                    <input type="email" name="email" value="{{ user_email }}" class="form-control rounded-pill px-3 py-2" placeholder="Filter alerts by your email (e.g. user@gmail.com)...">
-                    <button type="submit" class="btn btn-outline-primary rounded-pill px-3 fw-bold">Filter</button>
+                <div class="d-flex align-items-center gap-2 flex-grow-1 w-100" style="max-width: 480px;">
+                    <i class="fas fa-filter text-muted flex-shrink-0"></i>
+                    <input type="email" name="email" value="{{ user_email }}" class="form-control rounded-pill px-3 py-2" placeholder="Filter alerts by email...">
+                    <button type="submit" class="btn btn-outline-primary rounded-pill px-3 fw-bold flex-shrink-0">Filter</button>
                     {% if user_email %}
-                    <a href="/my-price-alerts" class="btn btn-outline-secondary rounded-pill px-3">Clear</a>
+                    <a href="/my-price-alerts" class="btn btn-outline-secondary rounded-pill px-3 flex-shrink-0">Clear</a>
                     {% endif %}
                 </div>
 
