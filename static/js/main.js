@@ -128,7 +128,7 @@ function handleBuyRedirect(targetLink, platform = '', productName = '', price = 
         buyEndpoint = '/buy/flipkart';
     } else if (platformLower.includes('meesho')) {
         buyEndpoint = '/buy/meesho';
-    } else if (platformLower.includes('gec')) {
+    } else if (platformLower.includes('gec') || (targetLink && targetLink.toLowerCase().includes('gececom'))) {
         buyEndpoint = '/buy/gececom';
     }
 

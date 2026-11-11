@@ -66,3 +66,4 @@ price_prediction_chart_test.png
 .env*.local
 
 .vercel
+.env*

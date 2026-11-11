@@ -34,7 +34,7 @@ class TestPriceAlerts(unittest.TestCase):
         print("PASS: No email sent on alert creation/activation.")
 
         # Now test triggering when price actually drops to 19,999 (<= target_price 20000)
-        with patch('otp_utils.send_email', return_value=True) as mock_trigger_email:
+        with patch('otp_utils.send_email_detailed', return_value=(True, 'OK')) as mock_trigger_email:
             results = check_and_trigger_price_alerts("Test Smartphone XYZ", 19999, platform="gececom")
             self.assertGreater(results["triggered"], 0, "Alert should have triggered for price 19999 <= 20000")
             mock_trigger_email.assert_called()

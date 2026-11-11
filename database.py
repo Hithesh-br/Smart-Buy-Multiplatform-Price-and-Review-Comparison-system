@@ -2497,7 +2497,7 @@ def add_gececom_product(data: dict) -> dict | None:
         return None
 
 
-def update_gececom_product_price(product_id: str, new_price: int, product_name: str = "") -> tuple[bool, dict | None]:
+def update_gececom_product_price(product_id: str, new_price: int, product_name: str = "", auto_trigger_alerts: bool = True) -> tuple[bool, dict | None]:
     """
     Update current price of a GEC ECom product and automatically synchronize the new price
     across all user profiles, selected products, search history, and price alerts in the database.
@@ -2638,15 +2638,16 @@ def update_gececom_product_price(product_id: str, new_price: int, product_name: 
         doc["discount_pct"] = discount_pct
 
         # 5. Automatically check and trigger matching price alerts immediately without waiting for worker cycle
-        try:
-            check_and_trigger_price_alerts(
-                product_name=p_name,
-                new_price=new_price_num,
-                platform="gececom",
-                product_id=pid_str
-            )
-        except Exception as e_trig:
-            logger.warning(f"Failed to auto-trigger price alerts on price update for {p_name}: {e_trig}")
+        if auto_trigger_alerts:
+            try:
+                check_and_trigger_price_alerts(
+                    product_name=p_name,
+                    new_price=new_price_num,
+                    platform="gececom",
+                    product_id=pid_str
+                )
+            except Exception as e_trig:
+                logger.warning(f"Failed to auto-trigger price alerts on price update for {p_name}: {e_trig}")
 
         return True, _format_gececom_product(doc)
 
@@ -3485,13 +3486,18 @@ def process_single_alert(
         }
 
     # Duplicate Prevention:
-    # Do not send duplicate emails if an alert has already sent a notification at this exact dropped price
+    # Do not send duplicate emails if an alert has already sent a notification (status == "email_sent")
+    # or if a notification was already sent at this exact dropped price
     current_status = alert.get("status", "monitoring")
+    notif_status = alert.get("notification_status", "monitoring")
     last_notified = alert.get("last_notified_price")
     is_duplicate = (
         not force_notify and
-        current_status == "email_sent" and
-        (last_notified is not None and int(last_notified) == new_price_num)
+        (
+            current_status == "email_sent" or
+            (current_status != "monitoring" and notif_status == "sent") or
+            (last_notified is not None and int(last_notified) == new_price_num)
+        )
     )
 
     if is_duplicate:
@@ -3866,7 +3872,7 @@ def simulate_and_trigger_price_drop(
 
         # 1. Update live store product in GEC ECom catalog if matched by ID, URL, or Name
         try:
-            update_gececom_product_price(str(pid) if pid else "", new_price, product_name=p_name)
+            update_gececom_product_price(str(pid) if pid else "", new_price, product_name=p_name, auto_trigger_alerts=False)
         except Exception as e:
             logger.warning(f"[Price Drop] Could not update store product price: {e}")
 
@@ -3908,7 +3914,8 @@ def simulate_and_trigger_price_drop(
                 platform=str(alert.get("platform") or "gececom"),
                 product_id=str(pid) if pid else None,
                 previous_price=old_price,
-                force_notify=False
+                force_notify=False,
+                exclude_alert_id=str(alert.get("_id") or alert_id)
             )
         except Exception as e_chk:
             logger.warning(f"[Price Drop] Error checking alerts for other users: {e_chk}")
@@ -3960,7 +3967,8 @@ def check_and_trigger_price_alerts(
     platform: str = "gececom",
     product_id: str = None,
     previous_price: int = None,
-    force_notify: bool = False
+    force_notify: bool = False,
+    exclude_alert_id: str = None
 ) -> dict:
     """
     Evaluate all saved alerts for this product against the condition:
@@ -4059,6 +4067,9 @@ def check_and_trigger_price_alerts(
     results_detail = []
 
     for alert in unique_alerts:
+        aid_str = str(alert.get("_id") or alert.get("id"))
+        if exclude_alert_id and (aid_str == str(exclude_alert_id) or str(alert.get("_id")) == str(exclude_alert_id)):
+            continue
         res = process_single_alert(
             alert=alert,
             current_price=new_price_num,

@@ -159,10 +159,12 @@ def about():
 
 
 def normalize_external_url(url: str, platform: str = "") -> str:
-    """Ensure external product link starts with valid http/https protocol."""
+    """Ensure external product link starts with valid http/https protocol, or routes to internal /gececom."""
+    plat_lower = (platform or "").lower()
     if not url or url.strip() in ["#", "None", "null", "undefined", "javascript:void(0)"]:
-        plat_lower = (platform or "").lower()
-        if "amazon" in plat_lower:
+        if "gec" in plat_lower:
+            return "/gececom"
+        elif "amazon" in plat_lower:
             return "https://www.amazon.in"
         elif "flipkart" in plat_lower:
             return "https://www.flipkart.com"
@@ -171,12 +173,22 @@ def normalize_external_url(url: str, platform: str = "") -> str:
         return "https://www.google.com"
 
     u = url.strip()
+    if "gec" in plat_lower or u.startswith("/gececom") or "gececom" in u.lower():
+        if u.startswith("/gececom") or u.startswith("http://") or u.startswith("https://"):
+            return u
+        if u.startswith("#product-"):
+            return f"/gececom{u}"
+        if "#product-" in u:
+            m = re.search(r'#product-[0-9a-fA-F]+', u)
+            if m:
+                return f"/gececom{m.group(0)}"
+        return "/gececom"
+
     if u.startswith("//"):
         return "https:" + u
     if u.startswith("http://") or u.startswith("https://"):
         return u
 
-    plat_lower = (platform or "").lower()
     if "amazon" in plat_lower:
         base = "https://www.amazon.in"
     elif "flipkart" in plat_lower:
@@ -325,7 +337,15 @@ def handle_buy_click():
             product_url=pending_product.get('product_url', deal_url),
             image_url=pending_product.get('image_url', image)
         )
+        if 'gec' in platform_clean.lower() or request.path in ('/buy/gececom', '/buy/gecm'):
+            target_store = deal_url if (deal_url and ('/gececom' in deal_url)) else '/gececom'
+            return redirect(target_store)
         return redirect(url_for('api.profile'))
+
+    # If user clicks Buy GEC ECom, navigate directly to GEC ECom dummy dashboard
+    if 'gec' in platform_clean.lower() or request.path in ('/buy/gececom', '/buy/gecm'):
+        target_store = deal_url if (deal_url and ('/gececom' in deal_url)) else '/gececom'
+        return redirect(target_store)
 
     # Unauthenticated -> redirect to Sign Up
     flash("Please create an account or sign in to continue your purchase.", "info")

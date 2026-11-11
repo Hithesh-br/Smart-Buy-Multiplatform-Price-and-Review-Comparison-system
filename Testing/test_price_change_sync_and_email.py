@@ -44,6 +44,10 @@ def run_sync_verification():
         return False
 
     prod_id = str(prod["_id"])
+
+    # Ensure baseline state before test execution
+    db.gececom_products.update_one({"_id": prod["_id"]}, {"$set": {"current_price": 699}})
+    prod = db.gececom_products.find_one({"_id": prod["_id"]})
     print(f"Product found: ID={prod_id}, Initial current_price=₹{prod.get('current_price')}")
 
     # Find the user's price alert for this product
@@ -54,6 +58,15 @@ def run_sync_verification():
     if not alert:
         print("[FAIL] Alert for hitheshharsha486@gmail.com not found.")
         return False
+
+    db.price_alerts.update_one({"_id": alert["_id"]}, {"$set": {
+        "latest_price": 699,
+        "previous_price": 699,
+        "status": "monitoring",
+        "notification_status": "monitoring",
+        "last_notified_price": None
+    }})
+    alert = db.price_alerts.find_one({"_id": alert["_id"]})
 
     alert_id = str(alert["_id"])
     target_price = alert.get("target_price", 600)

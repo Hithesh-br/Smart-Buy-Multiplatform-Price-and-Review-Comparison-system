@@ -365,15 +365,33 @@
         /* Cart Floating Pill */
         .cart-indicator {
             background: #eff6ff;
-            border: 1px solid #bfdbfe;
+            border: 1.5px solid #bfdbfe;
             color: #1d4ed8;
             font-weight: 700;
             font-size: 1.02rem;
             border-radius: 999px;
-            padding: 8px 16px;
+            padding: 8px 18px;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            user-select: none;
+            outline: none;
+        }
+
+        .cart-indicator:hover,
+        .cart-indicator:focus {
+            background: #dbeafe;
+            border-color: #93c5fd;
+            color: #1e40af;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(29, 78, 216, 0.18);
+        }
+
+        .cart-indicator:active {
+            transform: scale(0.96);
         }
 
         /* ── Desktop Widescreen Layout & Large Typography Overrides ── */
@@ -512,10 +530,10 @@
 
             <!-- Right-hand shopping actions -->
             <div class="d-flex align-items-center gap-2">
-                <div class="cart-indicator d-none d-sm-inline-flex" id="cartDisplay">
+                <button type="button" class="cart-indicator d-inline-flex" id="cartDisplay" onclick="openCartDrawer()" title="View Shopping Cart">
                     <i class="fas fa-cart-shopping"></i>
                     <span>Cart (<span id="cartCount">0</span>)</span>
-                </div>
+                </button>
                 <button type="button" class="btn btn-outline-info btn-sm rounded-pill fw-bold px-3 shadow-xs"
                     onclick="copyStoreUrl()" title="Copy GEC ECom Store Link">
                     <i class="fas fa-link me-1"></i>Copy Store Link
@@ -698,7 +716,7 @@
                         <button type="button"
                             class="btn btn-sm btn-light rounded-circle shadow-xs position-absolute top-0 end-0 m-2 border"
                             title="Remove from GEC ECom"
-                            onclick="event.stopPropagation(); deleteMockProduct('{{ prod.id }}', '{{ prod.product_name }}')">
+                            onclick="event.stopPropagation(); deleteMockProductById('{{ prod.id }}')">
                             <i class="fas fa-trash-alt text-danger" style="font-size:0.75rem;"></i>
                         </button>
                     </div>
@@ -744,7 +762,7 @@
                             <div class="d-flex gap-1.5">
                                 <button type="button"
                                     class="btn btn-gec-buy flex-grow-1 d-flex align-items-center justify-content-center gap-1.5"
-                                    onclick="addToCart('{{ prod.product_name }}', '{{ prod.current_price }}')">
+                                    onclick="addToCartByProductId('{{ prod.id }}', this)">
                                     <i class="fas fa-cart-plus"></i>Add to Cart
                                 </button>
                                 <button type="button"
@@ -763,7 +781,7 @@
                             <!-- 2. Store Price Editor (The Core Simulator & Price Manager) -->
                             <button type="button"
                                 class="btn btn-gec-edit w-100 d-flex align-items-center justify-content-center gap-1.5"
-                                onclick="openEditPriceModal('{{ prod.id }}', '{{ prod.product_name|escape }}', '{{ prod.current_price }}', '{{ prod.formatted_current_price }}')"
+                                onclick="openEditPriceModalById('{{ prod.id }}')"
                                 title="Edit price for GEC ECom and compare instantly">
                                 <i class="fas fa-pencil"></i><span>✏️ Edit Price (Simulator)</span>
                             </button>
@@ -772,7 +790,7 @@
                             <button type="button"
                                 class="btn btn-outline-primary w-100 d-flex align-items-center justify-content-center gap-1.5 rounded-pill fw-bold shadow-xs py-1.5"
                                 style="font-size: 0.85rem; border-color: #0284c7; color: #0284c7;"
-                                onclick="openGecPredictionModal('{{ prod.product_name|escape }}', '{{ prod.current_price }}')"
+                                onclick="openGecPredictionModalById('{{ prod.id }}')"
                                 title="View historical price trend and 60-day AI price prediction across 4 platforms">
                                 <i class="fas fa-chart-line text-primary"></i><span>📈 4-Store Price Graph &amp; AI</span>
                             </button>
@@ -821,6 +839,99 @@
         {% endif %}
 
     </main>
+
+    <!-- ════════════════════ SHOPPING CART OFFCANVAS ════════════════════ -->
+    <div class="offcanvas offcanvas-end shadow-lg border-0" tabindex="-1" id="gecCartOffcanvas" aria-labelledby="gecCartOffcanvasLabel" style="width: 440px; max-width: 95vw;">
+        <div class="offcanvas-header border-bottom py-3 px-4" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #fff;">
+            <div class="d-flex align-items-center gap-2">
+                <i class="fas fa-cart-shopping text-info fs-5"></i>
+                <h5 class="offcanvas-title fw-bold mb-0 fs-6 text-white" id="gecCartOffcanvasLabel">Your Shopping Cart</h5>
+                <span class="badge bg-info text-dark rounded-pill fw-bold" id="cartDrawerCountBadge">0 items</span>
+            </div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+
+        <div class="offcanvas-body p-3 d-flex flex-column bg-white" id="cartDrawerBody">
+            <!-- Empty Cart State -->
+            <div id="cartEmptyState" class="text-center my-auto py-5">
+                <div class="mb-3">
+                    <div class="rounded-circle bg-light d-inline-flex align-items-center justify-content-center" style="width: 84px; height: 84px;">
+                        <i class="fas fa-cart-arrow-down text-muted fs-1 opacity-50"></i>
+                    </div>
+                </div>
+                <h5 class="fw-bold text-dark mb-1">Your cart is empty</h5>
+                <p class="text-muted small mb-4">Looks like you haven't added any GEC ECom items yet.</p>
+                <button type="button" class="btn btn-primary rounded-pill px-4 fw-bold shadow-sm" data-bs-dismiss="offcanvas">
+                    <i class="fas fa-store me-1.5"></i>Start Shopping
+                </button>
+            </div>
+
+            <!-- Cart Items List -->
+            <div id="cartItemsList" class="flex-grow-1 overflow-auto d-none pe-1"></div>
+
+            <!-- Order Confirmation View -->
+            <div id="cartCheckoutSuccessView" class="text-center my-auto py-4 d-none">
+                <div class="mb-3">
+                    <div class="rounded-circle bg-success bg-opacity-10 text-success d-inline-flex align-items-center justify-content-center" style="width: 88px; height: 88px;">
+                        <i class="fas fa-circle-check fs-1"></i>
+                    </div>
+                </div>
+                <span class="badge bg-success-subtle text-success border border-success fw-bold px-3 py-1 rounded-pill mb-2">Order Confirmed</span>
+                <h4 class="fw-bold text-dark mb-1">Thank You For Your Order!</h4>
+                <p class="text-muted small mb-3">Your order <strong class="text-dark" id="checkoutOrderId">#GEC-100001</strong> has been placed with GEC ECom Direct Delivery.</p>
+
+                <div class="card bg-light border-0 rounded-3 p-3 mb-4 text-start small">
+                    <div class="d-flex justify-content-between mb-1.5">
+                        <span class="text-muted">Estimated Delivery:</span>
+                        <strong class="text-dark" id="checkoutDeliveryDate">In 2-3 Business Days</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1.5">
+                        <span class="text-muted">Express Shipping:</span>
+                        <strong class="text-success">FREE</strong>
+                    </div>
+                    <div class="d-flex justify-content-between border-top pt-2 mt-1">
+                        <span class="text-muted fw-bold">Total Amount:</span>
+                        <strong class="text-primary fs-6" id="checkoutTotalPaid">₹0</strong>
+                    </div>
+                </div>
+
+                <button type="button" class="btn btn-outline-primary rounded-pill px-4 fw-bold" onclick="resetCartAfterCheckout()">
+                    <i class="fas fa-arrow-left me-1"></i>Continue Shopping
+                </button>
+            </div>
+        </div>
+
+        <!-- Offcanvas Footer / Checkout Summary -->
+        <div class="offcanvas-footer border-top p-3 bg-light d-none" id="cartDrawerFooter">
+            <div class="d-flex justify-content-between align-items-center mb-1.5 small">
+                <span class="text-muted">Subtotal:</span>
+                <span class="fw-bold text-dark" id="cartDrawerSubtotal">₹0</span>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mb-1.5 small">
+                <span class="text-muted"><i class="fas fa-truck-fast text-success me-1"></i>Express Shipping:</span>
+                <span class="fw-bold text-success">FREE</span>
+            </div>
+            <div class="d-flex justify-content-between align-items-center mb-3 pt-1 border-top">
+                <span class="fw-bold text-dark fs-6">Total Payable:</span>
+                <span class="fs-5 fw-extrabold text-primary" id="cartDrawerTotal">₹0</span>
+            </div>
+
+            <div class="d-grid gap-2">
+                <button type="button" class="btn btn-primary rounded-pill fw-bold py-2.5 shadow-sm d-flex align-items-center justify-content-center gap-2" id="cartCheckoutBtn" onclick="proceedToCheckout()">
+                    <span>Proceed to Checkout</span>
+                    <i class="fas fa-arrow-right"></i>
+                </button>
+                <div class="d-flex justify-content-between align-items-center pt-1">
+                    <button type="button" class="btn btn-link text-danger text-decoration-none p-0 small fw-semibold" onclick="clearCart()">
+                        <i class="fas fa-trash-alt me-1"></i>Clear Cart
+                    </button>
+                    <span class="text-muted small" style="font-size: 0.78rem;">
+                        <i class="fas fa-shield-halved text-success me-1"></i>100% Secure Direct Order
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- ════════════════════ 0. PRODUCT DETAILS MODAL (GEC ECOM) ════════════════════ -->
     <div class="modal fade" id="productDetailsModal" tabindex="-1" aria-labelledby="productDetailsModalLabel" aria-hidden="true">
@@ -1460,7 +1571,7 @@
             // Wire Add to Cart button
             const addCartBtn = document.getElementById('pdModalAddToCartBtn');
             addCartBtn.onclick = function() {
-                addToCart(prod.product_name, prod.current_price);
+                addToCartByProductId(prod.id, this);
             };
 
             // Wire Set Alert button
@@ -1505,6 +1616,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            updateCartBadge();
             if (window.location.hash && window.location.hash.startsWith('#product-')) {
                 const pid = window.location.hash.replace('#product-', '');
                 if (pid) {
@@ -1512,6 +1624,30 @@
                 }
             }
         });
+
+        function openEditPriceModalById(id) {
+            const cleanId = String(id).trim();
+            const prod = (window.gececomCatalog || []).find(p => String(p.id).trim() === cleanId || String(p._id).trim() === cleanId);
+            if (prod) {
+                const curPrice = parseInt(prod.current_price) || 0;
+                openEditPriceModal(prod.id, prod.product_name, prod.current_price, prod.formatted_current_price || ('₹' + curPrice.toLocaleString('en-IN')));
+            }
+        }
+
+        function openGecPredictionModalById(id) {
+            const cleanId = String(id).trim();
+            const prod = (window.gececomCatalog || []).find(p => String(p.id).trim() === cleanId || String(p._id).trim() === cleanId);
+            if (prod) {
+                openGecPredictionModal(prod.product_name, prod.current_price);
+            }
+        }
+
+        function deleteMockProductById(id) {
+            const cleanId = String(id).trim();
+            const prod = (window.gececomCatalog || []).find(p => String(p.id).trim() === cleanId || String(p._id).trim() === cleanId);
+            const name = prod ? prod.product_name : 'this item';
+            deleteMockProduct(id, name);
+        }
 
         // ════════════════════ PRICE EDITOR LOGIC ════════════════════
         function openEditPriceModal(id, name, currentPrice, formattedPrice) {
@@ -1589,6 +1725,24 @@
                     const displayEl = document.getElementById(`displayPrice-${id}`);
                     if (displayEl) displayEl.innerText = data.formatted_new_price;
 
+                    // Sync catalog & cart prices
+                    if (window.gececomCatalog) {
+                        const prod = window.gececomCatalog.find(p => String(p.id) === String(id) || String(p._id) === String(id));
+                        if (prod) {
+                            prod.current_price = newPrice;
+                            prod.formatted_current_price = data.formatted_new_price;
+                        }
+                    }
+                    let cart = getCart();
+                    let cartChanged = false;
+                    cart.forEach(item => {
+                        if (String(item.id) === String(id)) {
+                            item.price = newPrice;
+                            cartChanged = true;
+                        }
+                    });
+                    if (cartChanged) saveCart(cart);
+
                     bootstrap.Modal.getInstance(document.getElementById('editPriceModal')).hide();
 
                     // Show toast notification
@@ -1601,6 +1755,13 @@
                         toastMsg += ` Evaluated active price drop alerts for this product.`;
                     }
                     document.getElementById('simToastBody').innerText = toastMsg;
+                    const actionBtn = document.getElementById('simToastCompareBtn');
+                    if (actionBtn) {
+                        actionBtn.onclick = null;
+                        actionBtn.href = '/search?q=Vivo+T4';
+                        actionBtn.className = 'btn btn-sm btn-success rounded-pill fw-bold px-3 py-1 shadow-xs text-white';
+                        actionBtn.innerHTML = '<i class="fas fa-external-link-alt me-1"></i>Check on SmartBuy Compare';
+                    }
                     toast.classList.remove('d-none');
                     toast.classList.add('show');
                 } else {
@@ -2090,20 +2251,295 @@
             items.forEach(item => grid.appendChild(item));
         }
 
-        let cartCount = 0;
-        function addToCart(name, price) {
-            cartCount++;
-            const el = document.getElementById('cartCount');
-            if (el) el.innerText = cartCount;
+        // ════════════════════ PERSISTENT SHOPPING CART SYSTEM ════════════════════
+        let fallbackCart = [];
+        let cartToastTimer = null;
 
+        function getCart() {
+            try {
+                const stored = localStorage.getItem('gececom_cart');
+                if (stored !== null) {
+                    const parsed = JSON.parse(stored);
+                    if (Array.isArray(parsed)) {
+                        fallbackCart = parsed;
+                        return parsed;
+                    }
+                }
+            } catch (e) { }
+            return fallbackCart;
+        }
+
+        function saveCart(cart) {
+            fallbackCart = cart;
+            try {
+                localStorage.setItem('gececom_cart', JSON.stringify(cart));
+            } catch (e) { }
+            renderCartUI();
+        }
+
+        function updateCartBadge() {
+            const cart = getCart();
+            const count = cart.reduce((acc, item) => acc + (parseInt(item.quantity) || 1), 0);
+            const el = document.getElementById('cartCount');
+            if (el) el.innerText = count;
+            const drawerBadge = document.getElementById('cartDrawerCountBadge');
+            if (drawerBadge) drawerBadge.innerText = count + (count === 1 ? ' item' : ' items');
+        }
+
+        function animateCartBadge() {
+            const display = document.getElementById('cartDisplay');
+            if (display) {
+                display.style.transform = 'scale(1.15)';
+                display.style.transition = 'transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+                setTimeout(() => {
+                    display.style.transform = '';
+                }, 250);
+            }
+        }
+
+        function addToCartByProductId(productId, btnElement) {
+            const cleanId = String(productId || '').trim();
+            let prod = null;
+            if (window.gececomCatalog && window.gececomCatalog.length) {
+                prod = window.gececomCatalog.find(p => String(p.id).trim() === cleanId || String(p._id).trim() === cleanId);
+            }
+
+            let name = 'GEC ECom Product';
+            let price = 0;
+            let image = 'https://placehold.co/240x220?text=GEC+ECom';
+            let id = cleanId;
+
+            if (prod) {
+                name = prod.product_name || name;
+                price = prod.current_price || 0;
+                image = prod.product_image || image;
+                id = prod.id || cleanId;
+            } else if (btnElement) {
+                const card = btnElement.closest('.product-col-item') || btnElement.closest('.gec-card');
+                if (card) {
+                    const titleEl = card.querySelector('.gec-product-title');
+                    const priceEl = card.querySelector('.gec-price-current');
+                    const imgEl = card.querySelector('.gec-img-wrap img');
+                    if (titleEl) name = titleEl.innerText.trim();
+                    if (priceEl) price = parseInt(priceEl.innerText.replace(/[^0-9]/g, '')) || 0;
+                    if (imgEl && imgEl.src) image = imgEl.src;
+                }
+            }
+
+            addToCart(name, price, image, id);
+
+            if (btnElement) {
+                if (!btnElement.dataset.origHtml) {
+                    btnElement.dataset.origHtml = btnElement.innerHTML;
+                }
+                const isModalBtn = btnElement.id === 'pdModalAddToCartBtn';
+                btnElement.classList.remove('btn-gec-buy', 'btn-primary');
+                btnElement.classList.add('btn-success', 'text-white');
+                btnElement.innerHTML = '<i class="fas fa-check me-1"></i>Added!';
+                clearTimeout(btnElement._resetTimer);
+                btnElement._resetTimer = setTimeout(() => {
+                    btnElement.classList.remove('btn-success', 'text-white');
+                    btnElement.classList.add(isModalBtn ? 'btn-primary' : 'btn-gec-buy');
+                    btnElement.innerHTML = btnElement.dataset.origHtml;
+                }, 1200);
+            }
+        }
+
+        function addToCart(name, price, image = null, id = null) {
+            const cart = getCart();
+            const cleanPrice = parseInt(String(price || 0).replace(/[^0-9]/g, '')) || 0;
+            const existingIndex = cart.findIndex(item => (id && String(item.id) === String(id)) || item.name === name);
+
+            if (existingIndex > -1) {
+                cart[existingIndex].quantity = (parseInt(cart[existingIndex].quantity) || 1) + 1;
+                if (cleanPrice > 0) cart[existingIndex].price = cleanPrice;
+                if (image) cart[existingIndex].image = image;
+            } else {
+                cart.push({
+                    id: id || ('item_' + Date.now()),
+                    name: String(name || 'Product'),
+                    price: cleanPrice,
+                    image: image || 'https://placehold.co/240x220?text=GEC+ECom',
+                    quantity: 1
+                });
+            }
+
+            // Ensure checkout view is cleared if adding new items
+            const checkoutSuccess = document.getElementById('cartCheckoutSuccessView');
+            if (checkoutSuccess) checkoutSuccess.classList.add('d-none');
+
+            saveCart(cart);
+            animateCartBadge();
+            showCartAddedToast(name);
+        }
+
+        function showCartAddedToast(name) {
             const toast = document.getElementById('simFeedbackToast');
             if (toast) {
                 document.getElementById('simToastTitle').innerText = "Added to Cart!";
                 document.getElementById('simToastBody').innerText = `"${name}" added to your shopping cart.`;
+
+                const actionBtn = document.getElementById('simToastCompareBtn');
+                if (actionBtn) {
+                    actionBtn.href = "javascript:void(0)";
+                    actionBtn.onclick = function(e) {
+                        e.preventDefault();
+                        openCartDrawer();
+                    };
+                    actionBtn.className = 'btn btn-sm btn-primary rounded-pill fw-bold px-3 py-1 shadow-xs text-white';
+                    actionBtn.innerHTML = '<i class="fas fa-cart-shopping me-1"></i>View Cart &amp; Checkout';
+                }
+
                 toast.classList.remove('d-none');
                 toast.classList.add('show');
-                setTimeout(() => closeToast(), 4000);
+                if (cartToastTimer) clearTimeout(cartToastTimer);
+                cartToastTimer = setTimeout(() => closeToast(), 4500);
             }
+        }
+
+        function openCartDrawer() {
+            const offcanvasEl = document.getElementById('gecCartOffcanvas');
+            if (!offcanvasEl) return;
+
+            const checkoutSuccess = document.getElementById('cartCheckoutSuccessView');
+            if (checkoutSuccess) checkoutSuccess.classList.add('d-none');
+
+            renderCartUI();
+            const bsOffcanvas = bootstrap.Offcanvas.getOrCreateInstance(offcanvasEl);
+            bsOffcanvas.show();
+        }
+
+        function renderCartUI() {
+            updateCartBadge();
+            const cart = getCart();
+            const emptyState = document.getElementById('cartEmptyState');
+            const itemsList = document.getElementById('cartItemsList');
+            const footer = document.getElementById('cartDrawerFooter');
+            const checkoutSuccess = document.getElementById('cartCheckoutSuccessView');
+
+            if (checkoutSuccess && !checkoutSuccess.classList.contains('d-none')) {
+                if (emptyState) emptyState.classList.add('d-none');
+                if (itemsList) itemsList.classList.add('d-none');
+                if (footer) footer.classList.add('d-none');
+                return;
+            }
+
+            if (!cart || cart.length === 0) {
+                if (emptyState) emptyState.classList.remove('d-none');
+                if (itemsList) itemsList.classList.add('d-none');
+                if (footer) footer.classList.add('d-none');
+                return;
+            }
+
+            if (emptyState) emptyState.classList.add('d-none');
+            if (itemsList) itemsList.classList.remove('d-none');
+            if (footer) footer.classList.remove('d-none');
+
+            let total = 0;
+            let html = '';
+
+            cart.forEach((item, index) => {
+                const itemPrice = parseInt(item.price) || 0;
+                const itemQty = parseInt(item.quantity) || 1;
+                total += itemPrice * itemQty;
+
+                const imgSrc = item.image || 'https://placehold.co/240x220?text=GEC+ECom';
+                const safeName = String(item.name || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+                html += `
+                <div class="card border rounded-3 p-2.5 mb-2.5 bg-white shadow-xs">
+                    <div class="d-flex gap-2.5 align-items-center">
+                        <img src="${imgSrc}" alt="${safeName}" onerror="this.src='https://placehold.co/240x220?text=GEC+ECom'" style="width: 60px; height: 60px; object-fit: contain; border-radius: 8px; background: #f8fafc; padding: 4px; border: 1px solid #e2e8f0;">
+                        <div class="flex-grow-1 overflow-hidden">
+                            <h6 class="fw-bold text-dark text-truncate mb-1" style="font-size: 0.88rem;" title="${safeName}">${safeName}</h6>
+                            <div class="d-flex align-items-center justify-content-between gap-2">
+                                <div class="fw-extrabold text-primary" style="font-size: 0.95rem;">₹${itemPrice.toLocaleString('en-IN')}</div>
+                                <div class="d-flex align-items-center border rounded-pill bg-light px-1.5 py-0.5">
+                                    <button type="button" class="btn btn-sm btn-link text-dark p-0 px-1.5 text-decoration-none fw-bold" onclick="updateItemQuantity(${index}, -1)" title="Decrease quantity">−</button>
+                                    <span class="px-2 small fw-bold text-dark">${itemQty}</span>
+                                    <button type="button" class="btn btn-sm btn-link text-dark p-0 px-1.5 text-decoration-none fw-bold" onclick="updateItemQuantity(${index}, 1)" title="Increase quantity">+</button>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm text-danger p-1 ms-1" onclick="removeItemFromCart(${index})" title="Remove item">
+                            <i class="fas fa-trash-alt" style="font-size: 0.85rem;"></i>
+                        </button>
+                    </div>
+                </div>
+                `;
+            });
+
+            if (itemsList) itemsList.innerHTML = html;
+            const formattedTotal = '₹' + total.toLocaleString('en-IN');
+            const subEl = document.getElementById('cartDrawerSubtotal');
+            const totEl = document.getElementById('cartDrawerTotal');
+            if (subEl) subEl.innerText = formattedTotal;
+            if (totEl) totEl.innerText = formattedTotal;
+        }
+
+        function updateItemQuantity(index, delta) {
+            const cart = getCart();
+            if (cart[index]) {
+                cart[index].quantity = (parseInt(cart[index].quantity) || 1) + delta;
+                if (cart[index].quantity <= 0) {
+                    cart.splice(index, 1);
+                }
+                saveCart(cart);
+            }
+        }
+
+        function removeItemFromCart(index) {
+            const cart = getCart();
+            if (cart[index]) {
+                cart.splice(index, 1);
+                saveCart(cart);
+            }
+        }
+
+        function clearCart() {
+            if (!confirm('Are you sure you want to clear your shopping cart?')) return;
+            fallbackCart = [];
+            try {
+                localStorage.removeItem('gececom_cart');
+            } catch (e) { }
+            renderCartUI();
+        }
+
+        function proceedToCheckout() {
+            const cart = getCart();
+            if (!cart || cart.length === 0) return;
+
+            const total = cart.reduce((acc, item) => acc + ((parseInt(item.price) || 0) * (parseInt(item.quantity) || 1)), 0);
+            const orderId = '#GEC-' + Math.floor(100000 + Math.random() * 900000);
+
+            document.getElementById('checkoutOrderId').innerText = orderId;
+            document.getElementById('checkoutTotalPaid').innerText = '₹' + total.toLocaleString('en-IN');
+
+            const d = new Date();
+            d.setDate(d.getDate() + 3);
+            document.getElementById('checkoutDeliveryDate').innerText = d.toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' });
+
+            document.getElementById('cartItemsList').classList.add('d-none');
+            document.getElementById('cartDrawerFooter').classList.add('d-none');
+            document.getElementById('cartEmptyState').classList.add('d-none');
+            document.getElementById('cartCheckoutSuccessView').classList.remove('d-none');
+
+            fallbackCart = [];
+            try {
+                localStorage.removeItem('gececom_cart');
+            } catch (e) { }
+            updateCartBadge();
+        }
+
+        function resetCartAfterCheckout() {
+            const offcanvasEl = document.getElementById('gecCartOffcanvas');
+            if (offcanvasEl) {
+                const bsOffcanvas = bootstrap.Offcanvas.getInstance(offcanvasEl);
+                if (bsOffcanvas) bsOffcanvas.hide();
+            }
+            const checkoutSuccess = document.getElementById('cartCheckoutSuccessView');
+            if (checkoutSuccess) checkoutSuccess.classList.add('d-none');
+            renderCartUI();
         }
 
         function copyStoreUrl() {

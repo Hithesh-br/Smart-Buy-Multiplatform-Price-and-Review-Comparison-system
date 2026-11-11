@@ -313,13 +313,13 @@ def run_tests():
     # Clean existing
     db.price_alerts.delete_many({
         "product_id": prod_id,
-        "email": {"$in": ["buysmart260@gmail.com", "hitheshharsha6@gmail.com"]},
+        "email": {"$in": ["alice_workflow@smartbuy.com", "hitheshharsha6@gmail.com"]},
         "_id": {"$ne": ObjectId(primary_alert_id)}
     })
 
     # User Alice: Target 21000
     _, _, alert_alice = create_price_alert({
-        "email": "buysmart260@gmail.com",
+        "email": "alice_workflow@smartbuy.com",
         "product_name": p_name,
         "product_id": prod_id,
         "product_url": f"/gececom#product-{prod_id}",
@@ -345,7 +345,7 @@ def run_tests():
     })
     bob_id = str(alert_bob["_id"])
 
-    print(f"User 1 (Alice): Target Rs. 21,000 | Email: buysmart260@gmail.com")
+    print(f"User 1 (Alice): Target Rs. 21,000 | Email: alice_workflow@smartbuy.com")
     print(f"User 2 (Bob):   Target Rs. 20,000 | Email: hitheshharsha6@gmail.com")
 
     # Step 1: Drop price to Rs. 20,800

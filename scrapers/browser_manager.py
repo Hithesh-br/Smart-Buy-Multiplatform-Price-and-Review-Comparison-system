@@ -65,6 +65,75 @@ def _filter_route(route):
             pass
 
 
+def _resolve_browser_executable(kind: str = "chromium") -> dict:
+    """
+    Auto-detect installed Playwright browser binaries across any revision folder,
+    or fallback to system-installed browsers (Edge, Chrome, Firefox).
+    Returns kwargs for playwright.browser_type.launch(**kwargs).
+    """
+    import glob
+    base = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if not base or not os.path.exists(base):
+        base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ms-playwright")
+
+    if kind == "chromium":
+        if os.path.exists(base):
+            # Prefer full chrome.exe if present, else headless shell
+            patterns = [
+                os.path.join(base, "chromium-*", "**", "chrome.exe"),
+                os.path.join(base, "chromium_headless_shell-*", "**", "chrome-headless-shell.exe"),
+            ]
+            for pat in patterns:
+                matches = glob.glob(pat, recursive=True)
+                if matches:
+                    matches.sort()
+                    for m in reversed(matches):
+                        if os.path.exists(m):
+                            return {"executable_path": m}
+
+        # System Edge fallback
+        edge_paths = [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+        ]
+        for ep in edge_paths:
+            if os.path.exists(ep):
+                return {"executable_path": ep}
+
+        # System Chrome fallback
+        chrome_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+        for cp in chrome_paths:
+            if os.path.exists(cp):
+                return {"executable_path": cp}
+
+        return {}
+
+    elif kind == "firefox":
+        if os.path.exists(base):
+            pat = os.path.join(base, "firefox-*", "**", "firefox.exe")
+            matches = glob.glob(pat, recursive=True)
+            if matches:
+                matches.sort()
+                for m in reversed(matches):
+                    if os.path.exists(m):
+                        return {"executable_path": m}
+
+        system_ff = [
+            r"C:\Program Files\Mozilla Firefox\firefox.exe",
+            r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+        ]
+        for fp in system_ff:
+            if os.path.exists(fp):
+                return {"executable_path": fp}
+
+        return {}
+
+    return {}
+
+
 class BrowserManager:
     _instance: Optional['BrowserManager'] = None
     _lock = threading.Lock()
@@ -92,29 +161,50 @@ class BrowserManager:
         state = self._get_thread_state()
         if state.chromium_browser is None or not state.chromium_browser.is_connected():
             logger.info(f"[BrowserManager] Launching Thread Chromium (headless={self.headless})...")
-            state.chromium_browser = state.playwright.chromium.launch(
-                headless=self.headless,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-infobars',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--window-position=0,0',
-                    '--ignore-certifcate-errors',
-                    '--ignore-certifcate-errors-spki-list',
-                ]
-            )
+            launch_args = [
+                '--disable-blink-features=AutomationControlled',
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-infobars',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--window-position=0,0',
+                '--ignore-certificate-errors',
+                '--ignore-certificate-errors-spki-list',
+            ]
+            exe_kw = _resolve_browser_executable("chromium")
+            try:
+                state.chromium_browser = state.playwright.chromium.launch(
+                    headless=self.headless,
+                    args=launch_args,
+                    **exe_kw
+                )
+            except Exception as e_launch:
+                logger.warning(f"[BrowserManager] Chromium launch with {exe_kw} failed: {e_launch}. Retrying with msedge channel...")
+                try:
+                    state.chromium_browser = state.playwright.chromium.launch(
+                        headless=self.headless,
+                        channel="msedge",
+                        args=launch_args
+                    )
+                except Exception as e_edge:
+                    logger.error(f"[BrowserManager] All Chromium launch strategies failed: {e_edge}")
+                    raise
         return state.chromium_browser
 
     def get_firefox_browser(self) -> Browser:
         state = self._get_thread_state()
         if state.firefox_browser is None or not state.firefox_browser.is_connected():
             logger.info(f"[BrowserManager] Launching Thread Firefox (headless={self.headless})...")
-            state.firefox_browser = state.playwright.firefox.launch(
-                headless=self.headless,
-            )
+            exe_kw = _resolve_browser_executable("firefox")
+            try:
+                state.firefox_browser = state.playwright.firefox.launch(
+                    headless=self.headless,
+                    **exe_kw
+                )
+            except Exception as e_ff:
+                logger.warning(f"[BrowserManager] Firefox launch with {exe_kw} failed: {e_ff}. Falling back to Chromium engine...")
+                return self.get_chromium_browser()
         return state.firefox_browser
 
     def new_page(self, engine: str = "chromium", filter_routes: bool = True) -> tuple[Page, BrowserContext]:
@@ -122,7 +212,12 @@ class BrowserManager:
         Creates a new isolated browser context and page with optional route aborting.
         Caller is responsible for calling context.close() when finished.
         """
-        browser = self.get_firefox_browser() if engine == "firefox" else self.get_chromium_browser()
+        try:
+            browser = self.get_firefox_browser() if engine == "firefox" else self.get_chromium_browser()
+        except Exception as e_eng:
+            logger.warning(f"[BrowserManager] Engine {engine} unavailable ({e_eng}); falling back to Chromium...")
+            browser = self.get_chromium_browser()
+            engine = "chromium"
         ua = FIREFOX_USER_AGENT if engine == "firefox" else DEFAULT_USER_AGENT
 
         context = browser.new_context(

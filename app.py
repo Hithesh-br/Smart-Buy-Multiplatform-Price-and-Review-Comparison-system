@@ -28,6 +28,7 @@ logger = logging.getLogger("smartbuy")
 # App Setup
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "smartbuy_super_secret_key_2026")
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # Initialize the database locally or when a hosted MongoDB URI is configured.
 # Vercel has no local MongoDB service, so avoid blocking function startup there.

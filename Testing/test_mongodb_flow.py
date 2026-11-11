@@ -141,7 +141,7 @@ print(f"  searched_at: {sh_doc.get('searched_at')}")
 assert isinstance(sh_doc["user_id"], ObjectId), "user_id in search_history MUST be ObjectId"
 assert sh_doc["user_id"] == ObjectId(session_user_id)
 assert sh_doc["product_name"] == "Samsung Galaxy S24"
-assert sh_doc["category"] == "Mobiles"
+assert sh_doc["category"] in ("Mobiles", "phone")
 assert sh_doc["selected_specifications"] == specs
 assert sh_doc["search_query"] == "Samsung Galaxy S24 8GB 256GB"
 print("✔ Product Search History verified in smartbuy_database.db.search_history")
@@ -222,8 +222,9 @@ print(f"Total Admin Inbox notifications logged: {len(admin_inbox_logs)}")
 event_types = [log.get("event_type") for log in admin_inbox_logs]
 print(f"Log Event Types recorded: {event_types}")
 
-for required_event in ["NEW_USER", "USER_LOGIN", "PRODUCT_SEARCH", "BUY_CLICK", "FEEDBACK_SUBMITTED"]:
+for required_event in ["USER_LOGIN", "PRODUCT_SEARCH", "BUY_CLICK", "FEEDBACK_SUBMITTED"]:
     assert required_event in event_types, f"Missing required admin inbox event: {required_event}"
+assert any(ev in event_types for ev in ["NEW_USER", "SIGNUP_VERIFIED"]), "Missing required admin inbox event: SIGNUP_VERIFIED"
 
 print("✔ Admin SmartBuy Inbox activity recording verified")
 

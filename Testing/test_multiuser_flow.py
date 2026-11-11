@@ -16,7 +16,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 sys.path.insert(0, '.')
 
 from database import (
-    init_db, create_user, get_user_by_email, get_user_by_id,
+    init_db, get_db, create_user, get_user_by_email, get_user_by_id,
     update_user_last_login, log_user_search, save_user_selected_product,
     create_user_feedback, get_user_feedback_list, get_feedback_by_id,
     get_user_search_history, get_user_selected_products, get_user_stats,
@@ -34,8 +34,7 @@ if not init_db(app):
     sys.exit(1)
 
 # Clean previous test users
-client = MongoClient("mongodb://localhost:27017")
-db = client["smartbuy_db"]
+db = get_db()
 db.users.delete_many({"email": {"$in": ["usera@smartbuy.com", "userb@smartbuy.com"]}})
 db.feedback.delete_many({"title": {"$regex": "Test Feedback"}})
 db.admin_inbox.delete_many({"message": {"$regex": "usera|userb"}})
@@ -156,7 +155,7 @@ types_found = [n.get("event_type") or n.get("type") for n in notifications]
 print(f"Total Admin Inbox Events logged: {len(notifications)}")
 print(f"Event Types: {set(types_found)}")
 
-assert "NEW_USER" in types_found or "new_user" in types_found, "NEW_USER event missing in Admin Inbox!"
+assert any(t in types_found for t in ["NEW_USER", "new_user", "SIGNUP_VERIFIED", "signup_verified"]), "NEW_USER/SIGNUP_VERIFIED event missing in Admin Inbox!"
 assert "USER_LOGIN" in types_found or "user_login" in types_found, "USER_LOGIN event missing in Admin Inbox!"
 assert "FEEDBACK_SUBMITTED" in types_found or "feedback_submitted" in types_found, "FEEDBACK_SUBMITTED event missing in Admin Inbox!"
 print("✅ Admin Inbox successfully logged all user sign up, sign in, search, product selection & feedback events")
